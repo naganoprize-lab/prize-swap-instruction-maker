@@ -148,11 +148,14 @@ def atomic_json(path: Path, payload: dict):
             temp.unlink()
 
 
-def save_session(path, products, selected_day, source, layout="column", rows_per_page=20):
+def save_session(path, products, selected_day, source, layout="column", rows_per_page=20, floor_layout=None):
     if source and Path(path).resolve() == Path(source).resolve():
         raise AppError("入力Excelと同じ場所には保存できません。")
     records = [{**asdict(p), "day": p.day.isoformat()} for p in products]
-    atomic_json(Path(path), dict(version=1, products=records, selected_day=selected_day.isoformat(), source=str(source or ""), layout=layout, rows_per_page=rows_per_page))
+    data = dict(version=1, products=records, selected_day=selected_day.isoformat(), source=str(source or ""), layout=layout, rows_per_page=rows_per_page)
+    if floor_layout is not None:
+        data["floor_layout"] = floor_layout
+    atomic_json(Path(path), data)
 
 
 def load_session(path):
