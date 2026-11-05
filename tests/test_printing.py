@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPrintSupport import QPrinter
 
+from prize_swap.pdf_validation import require_searchable_pdf
 from prize_swap.core import AppError, Product, ordered
 from prize_swap.exporter import positions
 from prize_swap.printing import (FOOTER_HEIGHT, GAP, PADDING, TITLE_HEIGHT,
@@ -42,6 +43,8 @@ def test_real_pdf_a4_japanese_multipage_and_every_product(tmp_path, layout):
     doc = QPdfDocument()
     assert doc.load(str(path)) == QPdfDocument.Error.None_
     assert doc.pageCount() == len(plan.pages) > 2
+    independent = require_searchable_pdf(path)
+    assert len(independent["pages"]) == doc.pageCount()
     texts = []
     for i in range(doc.pageCount()):
         size = doc.pagePointSize(i)
@@ -66,6 +69,11 @@ def test_real_pdf_a4_japanese_multipage_and_every_product(tmp_path, layout):
     assert "20085右" in text and "20098左" in text
     assert "橋渡し" in text and "リング" in text
     assert "トータル10" in text  # NFKC normalization of the circled number
+    other_text = compact("".join(p["text"] for p in independent["pages"]))
+    for product in products:
+        assert other_text.count(product.name.split()[0]) == (1 if product.included else 0)
+        assert other_text.count(product.name.split()[-1]) == (1 if product.included else 0)
+    assert "商品名" in other_text and "橋渡し" in other_text
     doc.close()
 
 
@@ -141,6 +149,11 @@ def test_page_range_and_reverse_order(tmp_path):
     assert doc.pageCount() == 2
     assert "MARK4" in doc.getAllText(0).text()
     assert "MARK2" in doc.getAllText(1).text()
+    independent = require_searchable_pdf(path)
+    assert "MARK4" in independent["pages"][0]["text"]
+    assert "MARK2" in independent["pages"][1]["text"]
+    assert "MARK2" not in independent["pages"][0]["text"]
+    assert "MARK4" not in independent["pages"][1]["text"]
     doc.close()
 
 
