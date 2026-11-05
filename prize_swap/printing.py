@@ -21,11 +21,11 @@ FOOTER_HEIGHT = 20.0
 WEIGHTS = (.14, .13, .37, .075, .065, .06, .16)
 
 
-def configured_printer(pdf_path=None):
+def configured_printer(pdf_path=None, orientation=QPageLayout.Orientation.Landscape):
     validate_print_fonts()
     printer = QPrinter(QPrinter.PrinterMode.HighResolution)
     printer.setResolution(300)
-    printer.setPageLayout(QPageLayout(QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Landscape, QMarginsF(6, 6, 6, 6), QPageLayout.Unit.Millimeter))
+    printer.setPageLayout(QPageLayout(QPageSize(QPageSize.PageSizeId.A4), orientation, QMarginsF(6, 6, 6, 6), QPageLayout.Unit.Millimeter))
     printer.setDocName("プライズ景品 入替指示書")
     if pdf_path is not None:
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
@@ -69,12 +69,13 @@ class PrintPlan:
         return self.height - TITLE_HEIGHT - self.header_height - FOOTER_HEIGHT
 
 
-def text_block(text, width, font, device):
+def text_block(text, width, font, device, alignment=Qt.AlignmentFlag.AlignLeft):
     # QTextLayout doesn't treat a raw newline as a paragraph break; U+2028 does.
     text = str(text).replace("\r\n", "\n").replace("\r", "\n")
     layout = QTextLayout(text.replace("\n", "\u2028"), font, device)
     option = QTextOption()
     option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+    option.setAlignment(alignment)
     layout.setTextOption(option)
     layout.beginLayout()
     height = 0.0
@@ -183,8 +184,15 @@ def draw_page(painter, plan, page_index, selected_day, printed_day=None):
 def render_document(printer, products, selected_day, rows=20, layout="column"):
     page = printer.pageRect(QPrinter.Unit.Point)
     plan = plan_pages(products, page.width(), page.height(), rows, layout)
+    render_pages(printer, len(plan.pages), lambda painter, index: draw_page(painter, plan, index, selected_day))
+    return plan
+
+
+def render_pages(printer, page_count, draw):
+    """Shared device/DPI transform, ranges, copy count and page order."""
+    page = printer.pageRect(QPrinter.Unit.Point)
     first = max(1, printer.fromPage())
-    last = min(len(plan.pages), printer.toPage() or len(plan.pages))
+    last = min(page_count, printer.toPage() or page_count)
     indexes = list(range(first - 1, last))
     if not indexes:
         raise AppError("選択した印刷ページがありません。")
@@ -205,22 +213,27 @@ def render_document(printer, products, selected_day, rows=20, layout="column"):
             pixels = printer.pageRect(QPrinter.Unit.DevicePixel)
             # The printer's default origin is already at the printable margin.
             painter.scale(pixels.width() / page.width(), pixels.height() / page.height())
-            draw_page(painter, plan, index, selected_day)
+            draw(painter, index)
             painter.restore()
     finally:
         painter.end()
-    return plan
+
 
 
 def save_pdf(path, products, selected_day, rows=20, layout="column", source=None):
+    return save_rendered_pdf(path, lambda temp: render_document(configured_printer(temp), products, selected_day, rows, layout), [source] if source else [])
+
+
+def save_rendered_pdf(path, render, sources=()):
+    """Atomic PDF replacement shared by instructions and booth labels."""
     path = Path(path)
-    if source and path.resolve() == Path(source).resolve():
+    if any(source and path.resolve() == Path(source).resolve() for source in sources):
         raise AppError("入力Excelには上書きできません。")
     temp = None
     try:
         with NamedTemporaryFile(dir=path.parent, suffix=".pdf", delete=False) as handle:
             temp = Path(handle.name)
-        plan = render_document(configured_printer(temp), products, selected_day, rows, layout)
+        plan = render(temp)
         if temp.stat().st_size == 0:
             raise AppError("PDFを生成できませんでした。")
         temp.replace(path)
