@@ -93,7 +93,7 @@ class MachineNode(QGraphicsObject):
             handle.setPos(*point)
             handle.setVisible(self.isSelected())
         plans = self.owner.assignments().get(m.number, [])
-        self.setToolTip(f"{m.number or '番号未設定'} / {m.kind}\n{m.product}\n参照ID：{m.source_key or '追加マシン'}" + ("\n入替予定：" + "、".join(p.name for p in plans) if plans else ""))
+        self.setToolTip(f"{m.number or '番号未設定'} / {m.kind}\n{m.product}\n参照ID：{m.source_key or '追加マシン'}" + ("\n入替予定：" + "、".join(p.name+"（"+(p.machine_methods.get(m.number) or "方法未設定")+"）" for p in plans) if plans else ""))
 
     def paint(self, painter, option, widget=None):
         rect = self.boundingRect()
@@ -111,7 +111,12 @@ class MachineNode(QGraphicsObject):
         font = print_font(12, False)
         painter.setFont(font)
         painter.setPen(QColor("#263E32"))
-        painter.drawText(rect.adjusted(8, 38, -8, -8), Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere, self.machine.product or "商品未設定")
+        product_top=38
+        if self.owner.show_methods.isChecked():
+            methods="／".join(dict.fromkeys(p.machine_methods.get(self.machine.number) or "未設定" for p in plans)) or "未設定"
+            painter.drawText(rect.adjusted(8,30,-8,-rect.height()+54),Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,methods)
+            product_top=58
+        painter.drawText(rect.adjusted(8, product_top, -8, -8), Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere, self.machine.product or "商品未設定")
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
@@ -243,6 +248,9 @@ class FloorWidget(QWidget):
         b = QPushButton("元のExcel配置へ戻す")
         b.clicked.connect(self.reset_original)
         sources.addWidget(b)
+        self.show_methods = QCheckBox("運営方法を表示")
+        self.show_methods.toggled.connect(self.schedule_save)
+        sources.addWidget(self.show_methods)
         self.snap = QCheckBox("グリッドにスナップ")
         self.snap.setChecked(True)
         self.snap.toggled.connect(self.schedule_save)
@@ -289,7 +297,7 @@ class FloorWidget(QWidget):
         return [p for p in self.products() if any(n in numbers for n in p.machines)]
 
     def state(self):
-        return dict(version=1, initialized=self.initialized, source=self.source, machines=[asdict(m) for m in self.machines], original=deepcopy(self.original), snap=self.snap.isChecked())
+        return dict(version=1, initialized=self.initialized, source=self.source, machines=[asdict(m) for m in self.machines], original=deepcopy(self.original), snap=self.snap.isChecked(), show_methods=self.show_methods.isChecked())
 
     def restore(self, state, keep_history=False):
         validate_state(state)
@@ -297,6 +305,9 @@ class FloorWidget(QWidget):
         self.original = deepcopy(state.get("original", []))
         self.source = state.get("source", "")
         self.initialized = state.get("initialized", bool(self.machines or self.original or self.source))
+        self.show_methods.blockSignals(True)
+        self.show_methods.setChecked(state.get("show_methods",False))
+        self.show_methods.blockSignals(False)
         self.snap.blockSignals(True)
         self.snap.setChecked(state.get("snap", True))
         self.snap.blockSignals(False)

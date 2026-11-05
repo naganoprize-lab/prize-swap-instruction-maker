@@ -83,6 +83,22 @@ class Product:
     included: bool = True
     order: int = 0
     source_row: int = 0
+    planned_booths: dict[str, int | None] = field(default_factory=dict)
+    machine_methods: dict[str, str | None] = field(default_factory=dict)
+    retired_machine_methods: dict[str, str | None] = field(default_factory=dict)
+
+    @property
+    def method_counts(self):
+        return self.planned_booths
+
+    @method_counts.setter
+    def method_counts(self, value):
+        self.planned_booths = value
+
+    @property
+    def assigned_machine_count(self):
+        values = self.machines if isinstance(self.machines, str) else "\n".join(self.machines)
+        return len(machine_numbers(values))
 
 
 def read_products(path: str | Path) -> tuple[list[Product], list[str]]:
@@ -151,7 +167,7 @@ def atomic_json(path: Path, payload: dict):
 def save_session(path, products, selected_day, source, layout="column", rows_per_page=20, floor_layout=None, label_state=None):
     if source and Path(path).resolve() == Path(source).resolve():
         raise AppError("入力Excelと同じ場所には保存できません。")
-    records = [{**asdict(p), "day": p.day.isoformat()} for p in products]
+    records = [{**asdict(p), "day": p.day.isoformat(), "assigned_machine_count": p.assigned_machine_count} for p in products]
     data = dict(version=1, products=records, selected_day=selected_day.isoformat(), source=str(source or ""), layout=layout, rows_per_page=rows_per_page)
     if floor_layout is not None:
         data["floor_layout"] = floor_layout
@@ -173,6 +189,9 @@ def load_session(path):
         for record in data["products"]:
             record = dict(record)
             record["day"] = date.fromisoformat(record["day"])
+            record.pop("assigned_machine_count", None)  # Always derive this from the IDs.
+            if "method_counts" in record:
+                record.setdefault("planned_booths", record.pop("method_counts"))
             p = Product(**record)
             if not isinstance(p.name, str) or not p.name.strip() or not isinstance(p.maker, str):
                 raise ValueError("品名・メーカーが不正")
@@ -180,8 +199,13 @@ def load_session(path):
             if not isinstance(p.machines, list) or any(not isinstance(x, str) for x in p.machines):
                 raise ValueError("マシン番号が不正")
             p.machines = machine_numbers("\n".join(p.machines))
-            if not isinstance(p.methods, list) or any(not isinstance(x, str) for x in p.methods):
-                raise ValueError("運営方法が不正")
+            from .methods import legacy_names, validate_counts, validate_assignments, sync_machine_methods
+            p.methods = legacy_names(p.methods)
+            p.planned_booths = validate_counts(p.planned_booths)
+            p.machine_methods = validate_assignments(p.machine_methods)
+            p.retired_machine_methods = validate_assignments(p.retired_machine_methods)
+            if p.machine_methods or p.retired_machine_methods:
+                sync_machine_methods(p)
             if p.limit not in LIMITS or type(p.order) is not int or type(p.priority) is not bool or type(p.included) is not bool:
                 raise ValueError("商品設定が不正")
             products.append(p)

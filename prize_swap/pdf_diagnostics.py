@@ -34,12 +34,18 @@ def run(output):
         report["fonts"] = validate_print_fonts()
         day = date(2026, 11, 5)
         products = [Product(day, f"MARK{i:03d} 商品名ぬいぐるみ " * 4, 24, 2, machines=["20111左"], methods=["橋渡し", "リング"], order=i) for i in range(13)]
+        products[0].methods = ["リング"]
+        products[0].planned_booths = {"リング": 3}
+        products[0].machine_methods = {"20111左": "リング"}
+        products[1].machines = ["20112右", "20113左", "20114右"]
+        products[1].planned_booths = {"橋渡し": 2, "リング": 1}
+        products[1].machine_methods = {"20112右": "橋渡し", "20113左": "リング", "20114右": "橋渡し"}
         save_pdf(output / "instructions.pdf", products, day, rows=3)
         save_labels_pdf(output / "labels.pdf", [LabelEntry(p) for p in products])
         floor = FloorWidget(lambda: products, lambda: day, output / "floor-auto.json")
         floor.add_machine(Machine(number="20111左", product="現在の商品名", x=100, y=100))
         floor.paint_floor(configured_printer(output / "floor.pdf"))
-        for name, required in (("instructions", [f"MARK{i:03d}" for i in range(13)] + ["商品名", "橋渡し"]), ("floor", ["20111", "商品名"]), ("labels", [f"MARK{i:03d}" for i in range(13)] + ["商品名"])):
+        for name, required in (("instructions", [f"MARK{i:03d}" for i in range(13)] + ["商品名", "橋渡し", "リング3ブース", "橋渡し2ブース", "20112右"]), ("floor", ["20111", "商品名"]), ("labels", [f"MARK{i:03d}" for i in range(13)] + ["商品名"])):
             path = output / f"{name}.pdf"
             independent = require_searchable_pdf(path)
             doc = QPdfDocument()
