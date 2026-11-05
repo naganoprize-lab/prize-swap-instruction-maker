@@ -17,6 +17,8 @@ def run(output):
     from .core import Product
     from .fonts import validate_print_fonts
     from .printing import save_pdf, configured_printer
+    from .labels_data import LabelEntry
+    from .labels_printing import save_labels_pdf
     from .floor import FloorWidget
     from .floor_data import Machine
     from .pdf_validation import require_searchable_pdf
@@ -33,10 +35,11 @@ def run(output):
         day = date(2026, 11, 5)
         products = [Product(day, f"MARK{i:03d} 商品名ぬいぐるみ " * 4, 24, 2, machines=["20111左"], methods=["橋渡し", "リング"], order=i) for i in range(13)]
         save_pdf(output / "instructions.pdf", products, day, rows=3)
+        save_labels_pdf(output / "labels.pdf", [LabelEntry(p) for p in products])
         floor = FloorWidget(lambda: products, lambda: day, output / "floor-auto.json")
         floor.add_machine(Machine(number="20111左", product="現在の商品名", x=100, y=100))
         floor.paint_floor(configured_printer(output / "floor.pdf"))
-        for name, required in (("instructions", [f"MARK{i:03d}" for i in range(13)] + ["商品名", "橋渡し"]), ("floor", ["20111", "商品名"])):
+        for name, required in (("instructions", [f"MARK{i:03d}" for i in range(13)] + ["商品名", "橋渡し"]), ("floor", ["20111", "商品名"]), ("labels", [f"MARK{i:03d}" for i in range(13)] + ["商品名"])):
             path = output / f"{name}.pdf"
             independent = require_searchable_pdf(path)
             doc = QPdfDocument()
@@ -66,7 +69,7 @@ def run(output):
             floor.timer.stop()
             floor.close()
         (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({k:v for k,v in report.items() if k not in ("instructions", "floor")}, ensure_ascii=False, indent=2))
+    print(json.dumps({k:v for k,v in report.items() if k not in ("instructions", "floor", "labels")}, ensure_ascii=False, indent=2))
     return 0 if report["ok"] else 1
 
 

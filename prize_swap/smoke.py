@@ -25,6 +25,8 @@ def run(output):
         from .fonts import validate_print_fonts
         from .pdf_validation import require_searchable_pdf
         from .ui import Window
+        from .labels_data import LabelStore
+        from .labels_printing import save_labels_pdf
         from tempfile import TemporaryDirectory
         runtime = TemporaryDirectory(prefix=".runtime-", dir=output)
         app = QApplication.instance() or QApplication([])
@@ -52,7 +54,14 @@ def run(output):
         assert "20085" in "".join(floor_pdf["pages"][0]["text"].split())
         report["floor_pdf_fonts"] = floor_pdf["fonts"]
         report["floor_machines"] = len(w.floor.machines)
-        save_session(output / "作業.json", w.products, day, "", floor_layout=w.floor.state())
+        source_name = w.products[0].name
+        assert w.labels.model.entries[0].automatic_copies == 2
+        assert w.labels.model.setData(w.labels.model.index(0, 1), "LABEL_ONLY 商品名")
+        assert w.labels.model.setData(w.labels.model.index(0, 5), 3)
+        assert w.products[0].name == source_name
+        save_session(output / "作業.json", w.products, day, "", floor_layout=w.floor.state(), label_state=w.labels.state())
+        restored_products, _, metadata = load_session(output / "作業.json")
+        assert LabelStore.restore(metadata["label_printing"], restored_products).for_day(restored_products, day)[0].copies == 3
         assert load_session(output / "作業.json")[0] == w.products
         export_excel(output / "指示書.xlsx", w.products, day)
         plan = save_pdf(output / "印刷確認.pdf", w.products, day)
@@ -84,7 +93,32 @@ def run(output):
         QTimer.singleShot(100, close_preview)
         w.preview()
         assert observed and observed[0] > 0
-        report.update(ok=True, preview_pages=observed[0])
+        report.update(preview_pages=observed[0])
+        label_plan = save_labels_pdf(output / "入荷ブースラベル.pdf", w.labels.model.entries)
+        label_report = require_searchable_pdf(output / "入荷ブースラベル.pdf")
+        label_text = "".join("".join(p["text"] for p in label_report["pages"]).split())
+        assert label_text.count("LABEL_ONLY") == 3 and "ITEM000" not in label_text
+        label_doc = QPdfDocument()
+        assert label_doc.load(str(output / "入荷ブースラベル.pdf")) == QPdfDocument.Error.None_
+        assert label_doc.pageCount() == len(label_plan.pages) == 7
+        assert label_doc.pagePointSize(0).width() < label_doc.pagePointSize(0).height()
+        for i in range(label_doc.pageCount()):
+            assert not label_doc.render(i, label_doc.pagePointSize(i).toSize()).isNull()
+        label_doc.close()
+        w.tabs.setCurrentWidget(w.labels)
+        label_preview = []
+        def close_label_preview():
+            dialog = w.labels.findChild(QPrintPreviewDialog)
+            if dialog and dialog.isVisible():
+                label_preview.append(dialog.findChild(QPrintPreviewWidget).pageCount())
+                dialog.accept()
+            else:
+                QTimer.singleShot(20, close_label_preview)
+        QTimer.singleShot(100, close_label_preview)
+        w.preview()
+        assert label_preview == [len(label_plan.pages)]
+        report.update(ok=True, label_pages=len(label_plan.pages), label_preview_pages=label_preview[0],
+                      label_count=sum(len(p) for p in label_plan.pages), label_fonts=label_report["fonts"])
     except Exception:
         report["error"] = traceback.format_exc()
     finally:

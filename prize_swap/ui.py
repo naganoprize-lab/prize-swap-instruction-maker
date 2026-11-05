@@ -17,6 +17,8 @@ from .printing import configured_printer, plan_pages, render_document, save_pdf
 from .table import COLUMNS, ProductDelegate, ProductModel
 from .floor import FloorWidget
 from .floor_data import validate_state
+from .labels_data import LabelStore
+from .labels_ui import LabelsWidget
 
 STYLE = """
 QMainWindow, QWidget#workspace { background: #F0F3F1; }
@@ -138,6 +140,12 @@ class Window(QMainWindow):
         self.floor = FloorWidget(lambda: self.products, self.selected_day, layout_storage, self)
         self.floor.message.connect(lambda message: self.statusBar().showMessage(message, 15000))
         self.tabs.addTab(self.floor, "売り場レイアウト")
+        self.labels = LabelsWidget(lambda: self.products, self.selected_day, lambda: [self.source, self.floor.source], self)
+        self.labels.day_requested.connect(self.day.setDate)
+        self.labels.edited.connect(self.mark_dirty)
+        self.labels.message.connect(lambda text: self.statusBar().showMessage(text, 10000))
+        self.labels.reorder_requested.connect(self.reorder_for_labels)
+        self.tabs.addTab(self.labels, "入荷ブース用ラベル印刷")
         self.list_card, center = card(list_layout, 1)
         controls = QHBoxLayout()
         section = QLabel("商品一覧")
@@ -163,6 +171,7 @@ class Window(QMainWindow):
         self.model.edited.connect(self.mark_dirty)
         self.model.edited.connect(self.update_count)
         self.model.edited.connect(self.floor.sync)
+        self.model.edited.connect(self.labels.sync)
         self.model.invalid.connect(lambda message: self.statusBar().showMessage(message, 10000))
         self.proxy = ProductFilter(self)
         self.proxy.setSourceModel(self.model)
@@ -200,18 +209,23 @@ class Window(QMainWindow):
         bottom.addWidget(button("一時保存を開く", self.open_json))
         bottom.addWidget(button("Excel出力", self.export))
         bottom.addStretch()
-        bottom.addWidget(QLabel("ページ配置"))
+        self.instruction_settings = QWidget()
+        instruction_layout = QHBoxLayout(self.instruction_settings)
+        instruction_layout.setContentsMargins(0, 0, 0, 0)
+        instruction_layout.addWidget(QLabel("ページ配置"))
         self.layout_choice = QComboBox()
         self.layout_choice.addItems(["左を上から → 右を上から", "左右交互"])
         self.layout_choice.currentIndexChanged.connect(self.mark_dirty)
-        bottom.addWidget(self.layout_choice)
-        bottom.addWidget(QLabel("1ブロック上限"))
+        instruction_layout.addWidget(self.layout_choice)
+        instruction_layout.addWidget(QLabel("1ブロック上限"))
         self.page_rows = QSpinBox()
         self.page_rows.setRange(1, 50)
         self.page_rows.setValue(20)
         self.page_rows.setSuffix(" 行")
         self.page_rows.valueChanged.connect(self.mark_dirty)
-        bottom.addWidget(self.page_rows)
+        instruction_layout.addWidget(self.page_rows)
+        bottom.addWidget(self.instruction_settings)
+        self.tabs.currentChanged.connect(lambda *_: self.instruction_settings.setVisible(self.tabs.currentWidget() is not self.labels))
         bottom_layout.addLayout(bottom)
         self.statusBar().showMessage("準備完了 — Excelを読み込んでください。")
 
@@ -234,6 +248,7 @@ class Window(QMainWindow):
         self.visible = for_day(self.products, self.selected_day())
         self.model.replace(self.visible)
         self.floor.sync()
+        self.labels.sync()
         self.update_count()
 
     def update_count(self):
@@ -257,7 +272,10 @@ class Window(QMainWindow):
         if self.search.text() or self.filter_choice.currentIndex():
             self.statusBar().showMessage("並び順変更は検索・絞り込みを解除して行ってください。", 5000)
             return
-        selected = {id(p) for p in self.selected_products()}
+        self.reorder_for_labels(self.selected_products(), direction)
+
+    def reorder_for_labels(self, selected_products, direction):
+        selected = {id(p) for p in selected_products}
         if not selected:
             return
         products = sorted(self.visible, key=lambda p: p.order)
@@ -295,6 +313,8 @@ class Window(QMainWindow):
             self.error(exc)
 
     def preview(self):
+        if self.tabs.currentWidget() is self.labels:
+            return self.labels.preview()
         try:
             self.print_products()
             printer = configured_printer()
@@ -307,6 +327,8 @@ class Window(QMainWindow):
             self.error(exc)
 
     def print_direct(self):
+        if self.tabs.currentWidget() is self.labels:
+            return self.labels.print_direct()
         try:
             self.print_products()
             printer = configured_printer()
@@ -322,6 +344,8 @@ class Window(QMainWindow):
             self.error(exc)
 
     def export_pdf(self):
+        if self.tabs.currentWidget() is self.labels:
+            return self.labels.export_pdf()
         try:
             products = self.print_products()
             path = self.save_path("PDF保存", "PDF (*.pdf)", ".pdf")
@@ -406,7 +430,7 @@ class Window(QMainWindow):
         path = self.save_path("作業を一時保存", "JSON (*.json)", ".json")
         if path:
             try:
-                save_session(path, self.products, self.selected_day(), self.source, self.layout_name(), self.page_rows.value(), floor_layout=self.floor.state())
+                save_session(path, self.products, self.selected_day(), self.source, self.layout_name(), self.page_rows.value(), floor_layout=self.floor.state(), label_state=self.labels.state())
                 self.dirty = False
                 self.statusBar().showMessage("一時保存しました。", 5000)
             except Exception as exc:
@@ -421,7 +445,10 @@ class Window(QMainWindow):
                 products, day, data = load_session(path)
                 if "floor_layout" in data:
                     validate_state(data["floor_layout"])
+                label_store = LabelStore.restore(data.get("label_printing"), products)
                 self.products, self.source = products, data.get("source", "")
+                self.labels.store = label_store
+                self.labels.apply_options()
                 self.file_label.setText(Path(self.source).name or "JSONから復元")
                 self.update_dates()
                 self.day.setDate(QDate(day.year, day.month, day.day))

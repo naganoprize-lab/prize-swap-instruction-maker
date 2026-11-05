@@ -25,7 +25,7 @@ def split_values(value: str) -> list[str]:
 
 
 def machine_numbers(value: str) -> list[str]:
-    result = split_values(value)
+    result = split_values(value.replace(";", "\n").replace("；", "\n"))
     if any(not re.fullmatch(r"[0-9]+[左右]?", s) for s in result):
         raise AppError("マシン番号は半角数字と左右で入力してください（例：20085右）。")
     return result
@@ -148,13 +148,15 @@ def atomic_json(path: Path, payload: dict):
             temp.unlink()
 
 
-def save_session(path, products, selected_day, source, layout="column", rows_per_page=20, floor_layout=None):
+def save_session(path, products, selected_day, source, layout="column", rows_per_page=20, floor_layout=None, label_state=None):
     if source and Path(path).resolve() == Path(source).resolve():
         raise AppError("入力Excelと同じ場所には保存できません。")
     records = [{**asdict(p), "day": p.day.isoformat()} for p in products]
     data = dict(version=1, products=records, selected_day=selected_day.isoformat(), source=str(source or ""), layout=layout, rows_per_page=rows_per_page)
     if floor_layout is not None:
         data["floor_layout"] = floor_layout
+    if label_state is not None:
+        data["label_printing"] = label_state
     atomic_json(Path(path), data)
 
 
