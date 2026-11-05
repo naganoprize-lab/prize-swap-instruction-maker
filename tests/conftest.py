@@ -8,4 +8,6 @@ from PySide6.QtWidgets import QApplication
 @pytest.fixture(scope="session", autouse=True)
 def qt_app():
     app = QApplication.instance() or QApplication([])
+    from prize_swap.fonts import initialize_fonts
+    initialize_fonts()
     yield app

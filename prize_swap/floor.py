@@ -16,6 +16,7 @@ from PySide6.QtPrintSupport import QPrintDialog, QPrinter
 from .core import AppError, machine_numbers
 from .floor_data import Machine, import_layout, save_layout, validate_machines, validate_state
 from .printing import configured_printer
+from .fonts import print_font
 
 GRID = 20
 
@@ -102,15 +103,12 @@ class MachineNode(QGraphicsObject):
         painter.setBrush(QColor(fill))
         painter.setPen(QPen(QColor("#3D795C" if self.isSelected() else "#8EA89A"), 2 if self.isSelected() else 1))
         painter.drawRoundedRect(rect, 6, 6)
-        font = painter.font()
-        font.setPixelSize(16)
-        font.setBold(True)
+        font = print_font(16)
         painter.setFont(font)
         painter.setPen(QColor("#244C3D"))
         label = self.machine.number or f"未設定 ({self.machine.source_key or '新規'})"
         painter.drawText(rect.adjusted(8, 6, -8, -rect.height() + 32), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
-        font.setPixelSize(12)
-        font.setBold(False)
+        font = print_font(12, False)
         painter.setFont(font)
         painter.setPen(QColor("#263E32"))
         painter.drawText(rect.adjusted(8, 38, -8, -8), Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere, self.machine.product or "商品未設定")

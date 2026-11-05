@@ -7,10 +7,11 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from PySide6.QtCore import QMarginsF, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPageLayout, QPageSize, QPainter, QPen, QTextLayout, QTextOption
+from PySide6.QtGui import QColor, QFont, QImage, QPageLayout, QPageSize, QPainter, QPen, QTextLayout, QTextOption
 from PySide6.QtPrintSupport import QPrinter
 
 from .core import AppError, ordered
+from .fonts import print_font, validate_print_fonts
 from .exporter import LABELS, product_values
 
 PADDING = 4.0
@@ -20,17 +21,8 @@ FOOTER_HEIGHT = 20.0
 WEIGHTS = (.14, .13, .37, .075, .065, .06, .16)
 
 
-def print_font(size=11, bold=True):
-    families = QFontDatabase.families()
-    # Latin-first fallback avoids ambiguous digit glyphs in CJK PDF cmaps.
-    family = next((f for f in ("Arial", "Liberation Sans", "DejaVu Sans", "Yu Gothic", "Noto Sans CJK JP", "Meiryo") if f in families), "sans-serif")
-    font = QFont(family)
-    font.setPixelSize(size)  # Logical drawing units are points, independent of printer DPI.
-    font.setWeight(QFont.Weight.DemiBold if bold else QFont.Weight.Normal)
-    return font
-
-
 def configured_printer(pdf_path=None):
+    validate_print_fonts()
     printer = QPrinter(QPrinter.PrinterMode.HighResolution)
     printer.setResolution(300)
     printer.setPageLayout(QPageLayout(QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Landscape, QMarginsF(6, 6, 6, 6), QPageLayout.Unit.Millimeter))

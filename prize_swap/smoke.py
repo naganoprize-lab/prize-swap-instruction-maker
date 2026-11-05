@@ -8,24 +8,29 @@ import traceback
 
 def run(output):
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtCore import QDate, QTimer
-    from PySide6.QtWidgets import QApplication
-    from PySide6.QtPdf import QPdfDocument
-    from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrintPreviewWidget
-    from .core import Product, load_session, save_session
-    from .exporter import export_excel
-    from .printing import configured_printer, save_pdf
-    from .floor_data import Machine
-    from .ui import Window
-
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     report = {"ok": False, "physical_printer_tested": False}
-    app = QApplication.instance() or QApplication([])
     w = None
+    runtime = None
     try:
+        from PySide6.QtCore import QDate, QTimer
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtPdf import QPdfDocument
+        from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrintPreviewWidget
+        from .core import Product, load_session, save_session
+        from .exporter import export_excel
+        from .printing import configured_printer, save_pdf
+        from .floor_data import Machine
+        from .fonts import validate_print_fonts
+        from .pdf_validation import require_searchable_pdf
+        from .ui import Window
+        from tempfile import TemporaryDirectory
+        runtime = TemporaryDirectory(prefix=".runtime-", dir=output)
+        app = QApplication.instance() or QApplication([])
+        report["fonts"] = validate_print_fonts()
         day = date(2026, 11, 5)
-        w = Window(layout_storage=output / "floor-auto.json")
+        w = Window(layout_storage=Path(runtime.name) / "floor-auto.json")
         w.products = [Product(day, f"ITEM{i:03d} 景品ぬいぐるみ " * (1 + i % 3), 24, 2, order=i) for i in range(45)]
         w.day.setDate(QDate(2026, 11, 5))
         w.refresh()
@@ -43,11 +48,16 @@ def run(output):
         assert len(w.floor.machines) == 2
         w.floor.autosave()
         w.floor.paint_floor(configured_printer(output / "売り場.pdf"))
+        floor_pdf = require_searchable_pdf(output / "売り場.pdf")
+        assert "20085" in "".join(floor_pdf["pages"][0]["text"].split())
+        report["floor_pdf_fonts"] = floor_pdf["fonts"]
         report["floor_machines"] = len(w.floor.machines)
         save_session(output / "作業.json", w.products, day, "", floor_layout=w.floor.state())
         assert load_session(output / "作業.json")[0] == w.products
         export_excel(output / "指示書.xlsx", w.products, day)
         plan = save_pdf(output / "印刷確認.pdf", w.products, day)
+        independent = require_searchable_pdf(output / "印刷確認.pdf")
+        report["pdf_fonts"] = independent["fonts"]
         doc = QPdfDocument()
         assert doc.load(str(output / "印刷確認.pdf")) == QPdfDocument.Error.None_
         assert doc.pageCount() == len(plan.pages) > 1
@@ -55,8 +65,11 @@ def run(output):
         assert abs(size.width() - 842) < 1 and abs(size.height() - 595) < 1
         assert not doc.render(0, size.toSize()).isNull()
         text = "".join(doc.getAllText(i).text() for i in range(doc.pageCount()))
+        independent_text = "".join("".join(p["text"] for p in independent["pages"]).split())
         for i in range(45):
             assert text.count(f"ITEM{i:03d}") == 1 + i % 3
+            assert independent_text.count(f"ITEM{i:03d}") == 1 + i % 3
+        assert "商品名" in independent_text
         report.update(pdf_pages=doc.pageCount(), page_points=[size.width(), size.height()], products=45)
         doc.close()
         observed = []
@@ -78,5 +91,7 @@ def run(output):
         if w:
             w.dirty = False
             w.close()
+        if runtime:
+            runtime.cleanup()
         (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return 0 if report["ok"] else 1

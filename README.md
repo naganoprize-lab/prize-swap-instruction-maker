@@ -154,3 +154,21 @@ xlsmテストはマクロ形式の合成OOXMLを使用し、マクロの実行�
 ```
 
 Linuxでの同等チェックは `.venv/bin/python main.py --smoke-test /tmp/prize-smoke` です。Windows用EXEの起動成功はWindows Actionsの実行結果で確認してください。Linux上のテストだけではWindowsビルド成功や実機印刷成功を意味しません。
+
+## Windows CIでPDFの文字抽出が空になる場合
+
+Qt 6.8.3のWindows用 `offscreen` プラグインは、通常のWindows用プラグインと違いFreeTypeのフォントデータベースを使います。既定の検索先はQt配下の `fonts` ディレクトリで、Windowsのフォントレジストリは参照せず、自動ディレクトリ検索では `.ttc` も対象になりません。フォントがない状態では文字が四角い代替図形になり、PDFにフォント・文字情報がなくなるため、Qtとpypdfのどちらでも抽出できません。
+
+`prize_swap/fonts.py` はWindowsのArial・メイリオ・游ゴシック等を**ファイルパスから明示登録**し、英数字と日本語のフォントを指定します。売り場レイアウトも同じ設定を使います。フォント自体が不足する環境では、空のPDFを正常扱いせず、出力前にエラーを表示します。
+
+CIでは `scripts/prepare_ci_fonts.py` が公式Google FontsのNoto Sans JPを取得し、コミット固定URLとSHA-256を照合します。OFLライセンスも取得・検証します。システムへのインストールは不要で、`PRIZE_FONT_DIR` に指定されたディレクトリから追加登録します。CI用フォントはEXEへ同梱せず、通常のWindows実行ではシステムの日本語フォントを利用します。
+
+Actionsの **PDF-diagnostics** Artifactには、実行OS・Qtバージョン、フォント登録前後の状態、埋込フォント／Unicodeマップ、Qtとpypdfの抽出結果、診断PDFと全ページのPNGを保存します。手元では次のコマンドで同じ診断を実行できます。
+
+```powershell
+.\.venv\Scripts\python.exe -m prize_swap.pdf_diagnostics build-diagnostics
+```
+
+テストは文字抽出の検証を維持しています。画像が描画できるだけでは合格せず、埋込フォント・Unicodeマップ・文字検索可能性・商品欠落・ページ順を確認します。テスト失敗でビルドが未実行の場合、`build-smoke/` がないのは結果であり、原因ではありません。検証ファイルが存在するときだけArtifactをアップロードします。
+
+Qtの該当実装： [offscreenのフォントDB](https://github.com/qt/qtbase/blob/v6.8.3/src/plugins/platforms/offscreen/qoffscreenintegration.cpp)、[フォント検索先](https://github.com/qt/qtbase/blob/v6.8.3/src/gui/text/qplatformfontdatabase.cpp)、[FreeTypeの検索対象](https://github.com/qt/qtbase/blob/v6.8.3/src/gui/text/freetype/qfreetypefontdatabase.cpp)。

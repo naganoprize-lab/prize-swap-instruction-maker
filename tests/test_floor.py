@@ -12,6 +12,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QMessageBox, QApplication
 from PySide6.QtPdf import QPdfDocument
 
+from prize_swap.pdf_validation import require_searchable_pdf
 from prize_swap.core import AppError, Product, load_session, save_session
 from prize_swap.floor import FloorWidget, MachineNode
 from prize_swap.floor_data import Machine, import_layout, save_layout, validate_state
@@ -200,6 +201,10 @@ def test_floor_colors_and_pdf(floor, tmp_path):
     assert doc.load(str(path)) == QPdfDocument.Error.None_
     assert doc.pageCount() == 1
     assert "20111" in doc.getAllText(0).text()
+    independent = require_searchable_pdf(path)
+    independent_text = "".join(independent["pages"][0]["text"].split())
+    assert "20111" in independent_text
+    assert "商品" in independent_text
     doc.close()
 
 

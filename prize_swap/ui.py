@@ -453,6 +453,8 @@ class Window(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    from .fonts import initialize_fonts
+    initialize_fonts()
     app.setApplicationName("PrizeSwapInstructionMaker")
     app.setStyle("Fusion")
     window = Window()
