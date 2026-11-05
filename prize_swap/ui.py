@@ -1,49 +1,114 @@
 from __future__ import annotations
 
-import html
 import sys
-from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QEvent, QItemSelectionModel, QSortFilterProxyModel, Qt
 from PySide6.QtGui import QColor, QTextCharFormat
-from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDateEdit, QDialog, QFileDialog,
-    QFormLayout, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QListWidget, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter,
-    QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
-)
+from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrintPreviewDialog, QPrinter
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEdit,
+    QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSpinBox, QTableView, QTabWidget,
+    QVBoxLayout, QWidget)
 
-from .core import (AppError, LIMITS, METHODS, for_day, load_session, machine_numbers,
-                   quantity, read_products, save_session, split_values)
-from .exporter import LABELS, export_excel, positions, product_values
+from .core import AppError, for_day, load_session, read_products, save_session
+from .exporter import export_excel
+from .printing import configured_printer, plan_pages, render_document, save_pdf
+from .table import COLUMNS, ProductDelegate, ProductModel
+from .floor import FloorWidget
+from .floor_data import validate_state
 
-COLUMNS = ["出力", "順序", "メーカー", "商品名", "入数", "CS数", "マシン番号", "運営方法", "優先", "獲得個数制限"]
+STYLE = """
+QMainWindow, QWidget#workspace { background: #F0F3F1; }
+QWidget { color: #253C33; font-family: 'Yu Gothic UI', 'Noto Sans CJK JP', 'Meiryo'; font-size: 10pt; }
+QFrame#card { background: white; border: 1px solid #DDE5DF; border-radius: 10px; }
+QLabel { background: transparent; border: none; }
+QLabel#title { font-size: 18pt; font-weight: 700; color: #244C3D; }
+QLabel#section { font-size: 12pt; font-weight: 700; }
+QLabel#muted { color: #677D72; }
+QLabel#count { color: #2F6D53; font-weight: 700; }
+QPushButton { background: white; border: 1px solid #CCD9D0; border-radius: 6px; padding: 6px 12px; min-height: 20px; }
+QPushButton:hover { background: #EAF3ED; border-color: #78A38B; }
+QPushButton:pressed { background: #D8E9DF; }
+QPushButton#primary { background: #3D795C; color: white; border-color: #3D795C; font-weight: 600; }
+QPushButton#primary:hover { background: #32664D; }
+QLineEdit, QComboBox, QDateEdit, QSpinBox, QPlainTextEdit { background: white; border: 1px solid #CCD9D0; border-radius: 5px; padding: 4px 6px; min-height: 20px; selection-background-color: #D4E9DD; }
+QTableView { background: white; alternate-background-color: #F6F9F7; border: 1px solid #E1E8E3; gridline-color: #E4EBE6; selection-background-color: #CEE6D8; selection-color: #183E2C; }
+QHeaderView::section { background: #EDF3EF; border: none; border-right: 1px solid #DBE5DE; border-bottom: 1px solid #DBE5DE; padding: 6px; font-weight: 600; }
+QTableView QLineEdit, QTableView QComboBox, QTableView QPlainTextEdit { border: 1px solid #488363; border-radius: 2px; padding: 0px 3px; }
+QComboBox QAbstractItemView { background: white; selection-background-color: #CEE6D8; color: #253C33; }
+QStatusBar { background: #F0F3F1; color: #536C5F; }
+"""
 
 
-def button(text, callback):
+def button(text, callback, primary=False):
     b = QPushButton(text)
+    if primary:
+        b.setObjectName("primary")
     b.clicked.connect(callback)
     return b
 
 
+def card(parent_layout, stretch=0):
+    frame = QFrame()
+    frame.setObjectName("card")
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(12, 8, 12, 8)
+    layout.setSpacing(4)
+    parent_layout.addWidget(frame, stretch)
+    return frame, layout
+
+
+class ProductFilter(QSortFilterProxyModel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.query = ""
+        self.mode = 0
+
+    def filterAcceptsRow(self, row, parent):
+        p = self.sourceModel().products[row]
+        text = " ".join([p.name, p.maker, *p.machines, *p.methods]).casefold()
+        return (not self.query or self.query in text) and (self.mode != 1 or p.included) and (self.mode != 2 or p.priority)
+
+    def lessThan(self, left, right):
+        return int(left.data()) < int(right.data())
+
+
 class Window(QMainWindow):
-    def __init__(self):
+    def __init__(self, layout_storage=None):
         super().__init__()
         self.setWindowTitle("プライズ景品 入替指示書メーカー")
         self.setMinimumSize(1100, 700)
         self.resize(1500, 900)
+        self.setStyleSheet(STYLE)
         self.products, self.visible = [], []
         self.source = ""
         self.dirty = False
         root = QWidget()
+        root.setObjectName("workspace")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
+        outer.setContentsMargins(16, 12, 16, 8)
+        outer.setSpacing(10)
+        header, head = card(outer)
+        header.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        title_row = QHBoxLayout()
+        title = QLabel("入替指示書メーカー")
+        title.setObjectName("title")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        title_row.addWidget(button("印刷プレビュー", self.preview))
+        title_row.addWidget(button("直接印刷", self.print_direct, True))
+        title_row.addWidget(button("PDF保存", self.export_pdf))
+        head.addLayout(title_row)
         top = QHBoxLayout()
-        top.addWidget(button("Excelを開く", self.open_excel))
+        top.addWidget(button("Excelを開く", self.open_excel, True))
         self.file_label = QLabel("ファイル未選択")
-        self.file_label.setMaximumWidth(420)
-        top.addWidget(self.file_label)
+        self.file_label.setObjectName("muted")
+        self.file_label.setMinimumWidth(110)
+        self.file_label.setMaximumWidth(260)
+        top.addWidget(self.file_label, 1)
+        top.addStretch()
         top.addWidget(QLabel("稼働予定日"))
         self.day = QDateEdit(QDate.currentDate())
         self.day.setCalendarPopup(True)
@@ -51,106 +116,220 @@ class Window(QMainWindow):
         self.day.dateChanged.connect(self.refresh)
         top.addWidget(self.day)
         self.dates = QComboBox()
-        self.dates.setMinimumWidth(145)
+        self.dates.setPlaceholderText("登録日一覧")
+        self.dates.setMinimumWidth(140)
         self.dates.activated.connect(self.pick_date)
         top.addWidget(self.dates)
         self.count = QLabel("0件")
+        self.count.setObjectName("count")
         top.addWidget(self.count)
-        top.addStretch()
-        outer.addLayout(top)
-        self.notice = QLabel("Excelの「縦」シートから商品を読み込みます。日付を変えても編集内容は保持します。")
+        head.addLayout(top)
+        self.notice = QLabel("Excelを開いて開始してください。セルをクリックして編集できます。")
+        self.notice.setObjectName("muted")
         self.notice.setWordWrap(True)
-        outer.addWidget(self.notice)
-        splitter = QSplitter()
-        self.table = QTableWidget(0, len(COLUMNS))
-        self.table.setHorizontalHeaderLabels(COLUMNS)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+        head.addWidget(self.notice)
+
+        self.tabs = QTabWidget()
+        outer.addWidget(self.tabs, 1)
+        list_page = QWidget()
+        list_layout = QVBoxLayout(list_page)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        self.tabs.addTab(list_page, "入替指示書")
+        self.floor = FloorWidget(lambda: self.products, self.selected_day, layout_storage, self)
+        self.floor.message.connect(lambda message: self.statusBar().showMessage(message, 15000))
+        self.tabs.addTab(self.floor, "売り場レイアウト")
+        self.list_card, center = card(list_layout, 1)
+        controls = QHBoxLayout()
+        section = QLabel("商品一覧")
+        section.setObjectName("section")
+        controls.addWidget(section)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("商品名・メーカー・マシン番号を検索")
+        self.search.setClearButtonEnabled(True)
+        controls.addWidget(self.search, 1)
+        self.filter_choice = QComboBox()
+        self.filter_choice.addItems(["すべて表示", "出力対象のみ", "優先入替のみ"])
+        controls.addWidget(self.filter_choice)
+        select = button("全選択", lambda: self.set_all(True))
+        select.setToolTip("検索・絞り込みで表示中の商品の出力チェックを全てON")
+        controls.addWidget(select)
+        clear = button("全解除", lambda: self.set_all(False))
+        clear.setToolTip("検索・絞り込みで表示中の商品の出力チェックを全てOFF")
+        controls.addWidget(clear)
+        controls.addWidget(button("↑ 上へ", lambda: self.move_products(-1)))
+        controls.addWidget(button("↓ 下へ", lambda: self.move_products(1)))
+        center.addLayout(controls)
+        self.model = ProductModel(self)
+        self.model.edited.connect(self.mark_dirty)
+        self.model.edited.connect(self.update_count)
+        self.model.edited.connect(self.floor.sync)
+        self.model.invalid.connect(lambda message: self.statusBar().showMessage(message, 10000))
+        self.proxy = ProductFilter(self)
+        self.proxy.setSourceModel(self.model)
+        self.proxy.sort(1, Qt.SortOrder.AscendingOrder)
+        self.search.textChanged.connect(self.filter_changed)
+        self.filter_choice.currentIndexChanged.connect(self.filter_changed)
+        self.table = QTableView()
+        self.table.setModel(self.proxy)
+        self.delegate = ProductDelegate(self.table)
+        self.delegate.machine_options = lambda: sorted(m.number for m in self.floor.machines if m.number)
+        self.table.setItemDelegate(self.delegate)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.CurrentChanged | QAbstractItemView.EditTrigger.SelectedClicked | QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(False)
+        self.table.verticalHeader().setDefaultSectionSize(34)
+        self.table.verticalHeader().setMinimumSectionSize(30)
+        self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for i, width in enumerate([48, 62, 110, 310, 65, 65, 150, 130, 48, 130]):
+        self.table.horizontalHeader().setStretchLastSection(False)
+        for i, width in enumerate([48, 60, 115, 340, 68, 68, 165, 160, 52, 160]):
             self.table.setColumnWidth(i, width)
-        self.table.itemChanged.connect(self.cell_changed)
-        self.table.itemSelectionChanged.connect(self.selection_changed)
-        splitter.addWidget(self.table)
-        details = QWidget()
-        details.setMinimumWidth(285)
-        details.setMinimumHeight(850)
-        details.setMaximumWidth(400)
-        form = QVBoxLayout(details)
-        self.selection_label = QLabel("商品を選択してください")
-        form.addWidget(self.selection_label)
-        form.addWidget(QLabel("マシン番号（カンマ区切り・改行貼付可）"))
-        self.machine_entry = QPlainTextEdit()
-        self.machine_entry.setMaximumHeight(64)
-        self.machine_entry.setPlaceholderText("20085右,20098左")
-        form.addWidget(self.machine_entry)
-        form.addWidget(button("マシン番号を追加", self.add_machine))
-        self.machine_list = QListWidget()
-        self.machine_list.setMaximumHeight(100)
-        self.machine_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        form.addWidget(self.machine_list)
-        form.addWidget(button("選択した番号を削除", self.remove_machine))
-        form.addWidget(QLabel("運営方法（複数選択）"))
-        grid = QGridLayout()
-        self.method_checks = []
-        for i, method in enumerate(METHODS):
-            check = QCheckBox(method)
-            self.method_checks.append(check)
-            grid.addWidget(check, i // 2, i % 2)
-        form.addLayout(grid)
-        self.custom = QLineEdit()
-        self.custom.setPlaceholderText("任意の運営方法（カンマ区切り）")
-        form.addWidget(self.custom)
-        self.priority = QCheckBox("優先入替")
-        self.included = QCheckBox("出力対象")
-        form.addWidget(self.priority)
-        form.addWidget(self.included)
-        self.limit = QComboBox()
-        self.limit.addItems(LIMITS)
-        form.addWidget(self.limit)
-        self.apply_machines = QCheckBox("マシン番号を適用")
-        self.apply_methods = QCheckBox("運営方法を適用")
-        self.apply_priority = QCheckBox("優先入替を適用")
-        self.apply_limit = QCheckBox("個数制限を適用")
-        self.apply_included = QCheckBox("出力対象を適用")
-        self.apply_flags = [self.apply_machines, self.apply_methods, self.apply_priority, self.apply_limit, self.apply_included]
-        form.addWidget(QLabel("一括編集：変更する項目だけチェック"))
-        for flag in self.apply_flags:
-            form.addWidget(flag)
-        form.addWidget(button("選択商品に適用", self.apply_details))
-        hint = QLabel("Ctrl/Shiftで複数選択できます。\n商品名・数量・出力順序は表で直接編集。\n一括編集値は先頭の選択商品を表示します。")
+        self.table.viewport().installEventFilter(self)
+        center.addWidget(self.table, 1)
+        hint = QLabel("セルで直接編集 / マシン番号は複数可 / 印刷は検索に関係なく選択日の出力対象すべて")
+        hint.setObjectName("muted")
         hint.setWordWrap(True)
-        form.addWidget(hint)
-        form.addStretch()
-        detail_scroll = QScrollArea()
-        detail_scroll.setWidgetResizable(True)
-        detail_scroll.setMinimumWidth(310)
-        detail_scroll.setMaximumWidth(420)
-        detail_scroll.setWidget(details)
-        splitter.addWidget(detail_scroll)
-        splitter.setStretchFactor(0, 1)
-        outer.addWidget(splitter)
+        center.addWidget(hint)
+
+        footer, bottom_layout = card(outer)
+        footer.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         bottom = QHBoxLayout()
-        bottom.addWidget(button("一時保存（JSON）", self.save_json))
+        bottom.addWidget(button("一時保存", self.save_json))
         bottom.addWidget(button("一時保存を開く", self.open_json))
+        bottom.addWidget(button("Excel出力", self.export))
         bottom.addStretch()
-        bottom.addWidget(QLabel("配置"))
+        bottom.addWidget(QLabel("ページ配置"))
         self.layout_choice = QComboBox()
-        self.layout_choice.addItems(["左を上から→右を上から", "左右交互"])
+        self.layout_choice.addItems(["左を上から → 右を上から", "左右交互"])
         self.layout_choice.currentIndexChanged.connect(self.mark_dirty)
         bottom.addWidget(self.layout_choice)
-        bottom.addWidget(QLabel("1ブロックの行数"))
+        bottom.addWidget(QLabel("1ブロック上限"))
         self.page_rows = QSpinBox()
         self.page_rows.setRange(1, 50)
         self.page_rows.setValue(20)
+        self.page_rows.setSuffix(" 行")
         self.page_rows.valueChanged.connect(self.mark_dirty)
         bottom.addWidget(self.page_rows)
-        bottom.addWidget(button("プレビュー", self.preview))
-        bottom.addWidget(button("Excel出力", self.export))
-        outer.addLayout(bottom)
+        bottom_layout.addLayout(bottom)
+        self.statusBar().showMessage("準備完了 — Excelを読み込んでください。")
 
+    def eventFilter(self, obj, event):
+        if obj is self.table.viewport() and event.type() == QEvent.Type.MouseButtonRelease:
+            index = self.table.indexAt(event.position().toPoint())
+            if index.isValid() and index.column() in (7, 9):
+                self.table.setCurrentIndex(index)
+                if self.table.state() != QAbstractItemView.State.EditingState:
+                    self.table.edit(index)
+        return super().eventFilter(obj, event)
+
+    def filter_changed(self, *_):
+        self.proxy.query = self.search.text().strip().casefold()
+        self.proxy.mode = self.filter_choice.currentIndex()
+        self.proxy.invalidateFilter()
+        self.update_count()
+
+    def refresh(self, *_):
+        self.visible = for_day(self.products, self.selected_day())
+        self.model.replace(self.visible)
+        self.floor.sync()
+        self.update_count()
+
+    def update_count(self):
+        self.count.setText(f"{len(self.visible)}件 ／ 出力 {sum(p.included for p in self.visible)}件")
+        if hasattr(self, "proxy"):
+            self.statusBar().showMessage(f"表示 {self.proxy.rowCount()}件 / 選択日 {len(self.visible)}件　印刷は出力チェックのある商品が対象です。")
+
+    def selected_products(self):
+        return [self.model.products[self.proxy.mapToSource(index).row()] for index in self.table.selectionModel().selectedRows()]
+
+    def set_all(self, included):
+        # Snapshot indexes first: changing inclusion may immediately filter rows.
+        products = [self.model.products[self.proxy.mapToSource(self.proxy.index(r, 0)).row()] for r in range(self.proxy.rowCount())]
+        for p in products:
+            p.included = included
+        if products:
+            self.mark_dirty()
+            self.refresh()
+
+    def move_products(self, direction):
+        if self.search.text() or self.filter_choice.currentIndex():
+            self.statusBar().showMessage("並び順変更は検索・絞り込みを解除して行ってください。", 5000)
+            return
+        selected = {id(p) for p in self.selected_products()}
+        if not selected:
+            return
+        products = sorted(self.visible, key=lambda p: p.order)
+        indexes = range(1, len(products)) if direction < 0 else range(len(products) - 2, -1, -1)
+        for i in indexes:
+            neighbor = i + direction
+            if id(products[i]) in selected and id(products[neighbor]) not in selected:
+                products[i], products[neighbor] = products[neighbor], products[i]
+        for order, p in enumerate(products, 1):
+            p.order = order
+        self.mark_dirty()
+        self.refresh()
+        for row, p in enumerate(self.model.products):
+            if id(p) in selected:
+                index = self.proxy.mapFromSource(self.model.index(row, 0))
+                self.table.selectionModel().select(index, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+
+    def print_products(self):
+        self.table.setFocus()
+        if not any(p.included for p in self.visible):
+            raise AppError("選択日に出力対象の商品がありません。")
+        if self.floor.initialized:
+            registered = {m.number for m in self.floor.machines if m.number}
+            missing = sorted({n for p in self.visible if p.included for n in p.machines if n not in registered})
+            if missing:
+                answer = QMessageBox.question(self, "入替予定のマシン番号を確認", "配置にないマシン番号が入替予定に残っています：\n" + "、".join(missing) + "\n印刷・保存を続けますか？")
+                if answer != QMessageBox.StandardButton.Yes:
+                    raise AppError("マシン番号を確認してから再実行してください。")
+        return list(self.visible)
+
+    def paint_printer(self, printer):
+        try:
+            return render_document(printer, list(self.visible), self.selected_day(), self.page_rows.value(), self.layout_name())
+        except Exception as exc:
+            self.error(exc)
+
+    def preview(self):
+        try:
+            self.print_products()
+            printer = configured_printer()
+            dialog = QPrintPreviewDialog(printer, self)
+            dialog.setWindowTitle("印刷プレビュー — A4横向き")
+            dialog.resize(1300, 850)
+            dialog.paintRequested.connect(self.paint_printer)
+            dialog.exec()
+        except Exception as exc:
+            self.error(exc)
+
+    def print_direct(self):
+        try:
+            self.print_products()
+            printer = configured_printer()
+            area = printer.pageRect(QPrinter.Unit.Point)
+            plan = plan_pages(self.visible, area.width(), area.height(), self.page_rows.value(), self.layout_name())
+            dialog = QPrintDialog(printer, self)
+            dialog.setMinMax(1, len(plan.pages))
+            dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, True)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                if self.paint_printer(printer):
+                    self.statusBar().showMessage("印刷ジョブを送信しました。実際の出力はプリンターで確認してください。", 10000)
+        except Exception as exc:
+            self.error(exc)
+
+    def export_pdf(self):
+        try:
+            products = self.print_products()
+            path = self.save_path("PDF保存", "PDF (*.pdf)", ".pdf")
+            if path:
+                plan = save_pdf(path, products, self.selected_day(), self.page_rows.value(), self.layout_name(), self.source)
+                self.statusBar().showMessage(f"PDFを保存しました（{len(plan.pages)}ページ）：{path}", 10000)
+        except Exception as exc:
+            self.error(exc)
     def mark_dirty(self, *_):
         self.dirty = True
 
@@ -161,7 +340,13 @@ class Window(QMainWindow):
         return not self.dirty or QMessageBox.question(self, "編集中の内容", "未保存の編集内容があります。破棄して続けますか？") == QMessageBox.StandardButton.Yes
 
     def closeEvent(self, event):
-        event.accept() if self.confirm_discard() else event.ignore()
+        if self.confirm_discard():
+            if self.floor.timer.isActive():
+                self.floor.timer.stop()
+                self.floor.autosave()
+            event.accept()
+        else:
+            event.ignore()
 
     def selected_day(self):
         return self.day.date().toPython()
@@ -208,121 +393,6 @@ class Window(QMainWindow):
         except Exception as exc:
             self.error(exc)
 
-    def refresh(self, *_):
-        self.table.blockSignals(True)
-        self.visible = for_day(self.products, self.selected_day())
-        self.table.setRowCount(len(self.visible))
-        for row, p in enumerate(self.visible):
-            vals = [p.included, p.order, p.maker, p.name, p.units, p.cases, ", ".join(p.machines), ", ".join(p.methods), p.priority, p.limit]
-            for col, value in enumerate(vals):
-                item = QTableWidgetItem(str(value))
-                if col in (0, 8):
-                    item.setText("")
-                    item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
-                    item.setCheckState(Qt.CheckState.Checked if value else Qt.CheckState.Unchecked)
-                elif col in (2, 9):
-                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                if p.priority:
-                    item.setBackground(QColor("#FCE4EC"))
-                self.table.setItem(row, col, item)
-        self.table.blockSignals(False)
-        self.count.setText(f"{len(self.visible)}件（出力 {sum(p.included for p in self.visible)}件）")
-        self.selection_changed()
-
-    def cell_changed(self, item):
-        p = self.visible[item.row()]
-        col, value = item.column(), item.text().strip()
-        try:
-            if col == 0:
-                p.included = item.checkState() == Qt.CheckState.Checked
-            elif col == 1:
-                p.order = int(value)
-            elif col == 3:
-                if not value:
-                    raise AppError("商品名は必須です。")
-                p.name = value
-            elif col in (4, 5):
-                setattr(p, "units" if col == 4 else "cases", quantity(value))
-            elif col == 6:
-                p.machines = machine_numbers(value)
-            elif col == 7:
-                p.methods = split_values(value)
-            elif col == 8:
-                p.priority = item.checkState() == Qt.CheckState.Checked
-            self.dirty = True
-        except (ValueError, AppError) as exc:
-            self.error(exc if col != 1 else AppError("出力順序は整数で入力してください。"))
-        # Preserve selection while updating computed display and highlighting.
-        self.table.blockSignals(True)
-        for c in range(self.table.columnCount()):
-            self.table.item(item.row(), c).setBackground(QColor("#FCE4EC") if p.priority else QColor("white"))
-        restored = {1: p.order, 3: p.name, 4: p.units, 5: p.cases, 6: ", ".join(p.machines), 7: ", ".join(p.methods)}
-        if col in restored:
-            item.setText(str(restored[col]))
-        self.table.blockSignals(False)
-        self.count.setText(f"{len(self.visible)}件（出力 {sum(p.included for p in self.visible)}件）")
-        self.selection_changed()
-
-    def selected_products(self):
-        return [self.visible[i.row()] for i in self.table.selectionModel().selectedRows()]
-
-    def selection_changed(self):
-        products = self.selected_products()
-        self.selection_label.setText(f"{len(products)}件を選択中")
-        for flag in self.apply_flags:
-            flag.setChecked(len(products) == 1)
-        self.machine_list.clear()
-        self.machine_entry.clear()
-        if not products:
-            return
-        p = products[0]
-        self.machine_list.addItems(p.machines)
-        for check in self.method_checks:
-            check.setChecked(check.text() in p.methods)
-        self.custom.setText(", ".join(m for m in p.methods if m not in METHODS))
-        self.priority.setChecked(p.priority)
-        self.included.setChecked(p.included)
-        self.limit.setCurrentText(p.limit)
-
-    def add_machine(self):
-        try:
-            numbers = machine_numbers(self.machine_entry.toPlainText())
-            existing = [self.machine_list.item(i).text() for i in range(self.machine_list.count())]
-            for number in numbers:
-                if number not in existing:
-                    self.machine_list.addItem(number)
-                    existing.append(number)
-            self.machine_entry.clear()
-            self.apply_machines.setChecked(True)
-        except AppError as exc:
-            self.error(exc)
-
-    def remove_machine(self):
-        for item in self.machine_list.selectedItems():
-            self.machine_list.takeItem(self.machine_list.row(item))
-        self.apply_machines.setChecked(True)
-
-    def apply_details(self):
-        products = self.selected_products()
-        if not products:
-            self.error(AppError("商品を選択してください。"))
-            return
-        try:
-            numbers = [self.machine_list.item(i).text() for i in range(self.machine_list.count())]
-            if self.apply_machines.isChecked():
-                numbers = machine_numbers("\n".join(numbers + machine_numbers(self.machine_entry.toPlainText())))
-            methods = [c.text() for c in self.method_checks if c.isChecked()] + split_values(self.custom.text())
-            for p in products:
-                if self.apply_machines.isChecked(): p.machines = list(numbers)
-                if self.apply_methods.isChecked(): p.methods = list(dict.fromkeys(methods))
-                if self.apply_priority.isChecked(): p.priority = self.priority.isChecked()
-                if self.apply_limit.isChecked(): p.limit = self.limit.currentText()
-                if self.apply_included.isChecked(): p.included = self.included.isChecked()
-            self.dirty = True
-            self.refresh()
-        except AppError as exc:
-            self.error(exc)
-
     def save_path(self, title, filter_, suffix):
         # QFileDialog performs the overwrite confirmation for the selected path.
         path, _ = QFileDialog.getSaveFileName(self, title, f"入替指示書_{self.selected_day().isoformat()}{suffix}", filter_)
@@ -336,7 +406,7 @@ class Window(QMainWindow):
         path = self.save_path("作業を一時保存", "JSON (*.json)", ".json")
         if path:
             try:
-                save_session(path, self.products, self.selected_day(), self.source, self.layout_name(), self.page_rows.value())
+                save_session(path, self.products, self.selected_day(), self.source, self.layout_name(), self.page_rows.value(), floor_layout=self.floor.state())
                 self.dirty = False
                 self.statusBar().showMessage("一時保存しました。", 5000)
             except Exception as exc:
@@ -349,45 +419,22 @@ class Window(QMainWindow):
         if path:
             try:
                 products, day, data = load_session(path)
+                if "floor_layout" in data:
+                    validate_state(data["floor_layout"])
                 self.products, self.source = products, data.get("source", "")
                 self.file_label.setText(Path(self.source).name or "JSONから復元")
                 self.update_dates()
                 self.day.setDate(QDate(day.year, day.month, day.day))
                 self.layout_choice.setCurrentIndex(1 if data.get("layout") == "row" else 0)
                 self.page_rows.setValue(data.get("rows_per_page", 20))
+                if "floor_layout" in data:
+                    self.floor.restore(data["floor_layout"])
+                    self.floor.schedule_save()
                 self.refresh()
                 self.dirty = False
-                self.notice.setText("一時保存から復元しました。元Excelがなくても標準レイアウトで出力できます。")
+                self.notice.setText("一時保存から復元しました。商品一覧と配置を復元できます。")
             except Exception as exc:
                 self.error(exc)
-
-    def preview(self):
-        placements = list(positions(self.visible, self.page_rows.value(), self.layout_name()))
-        pages = max((p[0] + 1 for p in placements), default=1)
-        lookup = {(page, row, side): p for page, row, side, p in placements}
-        doc = ["<p>配置確認用プレビュー：文字の実際の折返し・改ページはExcelの印刷プレビューで最終確認してください。</p>"]
-        escape = lambda v: html.escape(str(v)).replace("\n", "<br>")
-        for page in range(pages):
-            doc.append(f"<h3>入れ替え指示書　{self.selected_day()}　{page + 1}/{pages}</h3><table border='1' cellspacing='0' cellpadding='5' width='100%'><tr>")
-            doc.extend(f"<th>{label}</th>" for label in LABELS * 2)
-            doc.append("</tr>")
-            for row in range(self.page_rows.value()):
-                doc.append("<tr>")
-                for side in range(2):
-                    p = lookup.get((page, row, side))
-                    color = "#FCE4EC" if p and p.priority else "#FFFFFF"
-                    doc.extend(f"<td bgcolor='{color}'>{escape(v)}</td>" for v in (product_values(p) if p else [""] * 7))
-                doc.append("</tr>")
-            doc.append("</table><br>")
-        dialog = QDialog(self)
-        dialog.setWindowTitle("出力レイアウト確認")
-        dialog.resize(1300, 750)
-        layout = QVBoxLayout(dialog)
-        view = QTextBrowser()
-        view.setHtml("".join(doc))
-        layout.addWidget(view)
-        layout.addWidget(button("閉じる", dialog.accept))
-        dialog.exec()
 
     def export(self):
         if not any(p.included for p in self.visible):
@@ -396,6 +443,8 @@ class Window(QMainWindow):
         path = self.save_path("Excel出力", "Excel (*.xlsx)", ".xlsx")
         if path:
             try:
+                if self.floor.source and Path(path).resolve() == Path(self.floor.source).resolve():
+                    raise AppError("元のレイアウトExcelには上書きできません。")
                 pages = export_excel(path, self.visible, self.selected_day(), self.source, self.page_rows.value(), self.layout_name())
                 QMessageBox.information(self, "出力完了", f"{pages}ページ分を出力しました。\n{path}")
             except Exception as exc:
@@ -404,8 +453,8 @@ class Window(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setApplicationName("PrizeSwapInstructionMaker")
     app.setStyle("Fusion")
-    app.setStyleSheet("QWidget { font-family: 'Yu Gothic UI', 'Noto Sans CJK JP', sans-serif; font-size: 12px; color: #172033; } QWidget { background: #F8FAFC; } QTableWidget, QLineEdit, QListWidget, QComboBox, QDateEdit, QSpinBox, QTextBrowser { background: white; } QTableWidget::item:selected { background: #BFDBFE; color: #102A43; } QPushButton { padding: 6px 12px; border: 1px solid #CBD5E1; border-radius: 4px; background: white; } QPushButton:hover { background: #DBEAFE; } QHeaderView::section { background: #E2E8F0; padding: 5px; }")
     window = Window()
     window.show()
     sys.exit(app.exec())
