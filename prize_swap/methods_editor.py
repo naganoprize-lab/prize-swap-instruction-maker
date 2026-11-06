@@ -23,10 +23,13 @@ from types import SimpleNamespace
 from .methods import (
     MAX_COUNT,
     parse_allocations,
-    format_allocations,
+    format_cell_status,
     allocation_status,
     booth_totals,
+    total_booths,
+    booth_value,
 )
+from .booth_style import METRIC_COLORS, METRIC_LABELS
 
 
 class MethodsCombo(QComboBox):
@@ -42,8 +45,8 @@ class MethodsCombo(QComboBox):
         self.opening_popup = False
         self.popup = QFrame(self, Qt.WindowType.Popup)
         self.popup.setObjectName("card")
-        self.popup.setMinimumWidth(500)
-        self.popup.setMaximumWidth(650)
+        self.popup.setMinimumWidth(590)
+        self.popup.setMaximumWidth(740)
         outer = QVBoxLayout(self.popup)
         outer.setContentsMargins(10, 10, 10, 10)
         self.status = QLabel()
@@ -61,6 +64,8 @@ class MethodsCombo(QComboBox):
         scroll.setMinimumHeight(200)
         scroll.setMaximumHeight(340)
         self.row_widget = QWidget()
+        self.row_widget.setObjectName("boothGrid")
+        self.row_widget.setStyleSheet("QWidget#boothGrid { background-color: white; }")
         self.grid = QGridLayout(self.row_widget)
         self.grid.setContentsMargins(0, 0, 0, 0)
         scroll.setWidget(self.row_widget)
@@ -72,8 +77,9 @@ class MethodsCombo(QComboBox):
         machine_scroll.setWidget(self.machine_widget)
         self.tabs.addTab(machine_scroll, "マシン別の運営方法")
         custom = QHBoxLayout()
+        custom.addWidget(QLabel("自由記載"))
         self.custom_name = QLineEdit()
-        self.custom_name.setPlaceholderText("任意の運営方法名")
+        self.custom_name.setPlaceholderText("運営方法名を入力（旧方式も自由記載として保持）")
         custom.addWidget(self.custom_name)
         add = QPushButton("追加")
         add.clicked.connect(self.add_custom)
@@ -89,6 +95,7 @@ class MethodsCombo(QComboBox):
         done.clicked.connect(self.hidePopup)
         outer.addWidget(done)
         self.rows = {}
+        self.metric_labels = {}
         self._building = False
 
     def product_state(self):
@@ -112,7 +119,7 @@ class MethodsCombo(QComboBox):
         self._counts = parse_allocations(state["plans"])
         self._assignments = dict(state["assignments"])
         self.registered = len(machines)
-        self.setEditText(format_allocations(self.product_state()))
+        self.setEditText(format_cell_status(self.product_state()))
         self.build_rows()
         self.build_machine_rows()
         self.update_status()
@@ -124,16 +131,17 @@ class MethodsCombo(QComboBox):
             if item.widget():
                 item.widget().deleteLater()
         self.rows = {}
+        self.metric_labels = {}
         self.touched = set()
-        for col, title in enumerate(("運営方法", "予定ブース数", "商品別の割当・差分")):
+        for col, title in enumerate(("運営方法", "予定数", "割当済み", "未割当", "超過")):
             self.grid.addWidget(QLabel(title), 0, col)
         names = list(
             dict.fromkeys([*METHODS, *self._counts, *[m for m in self._assignments.values() if m]])
         )
         for row, name in enumerate(names, 1):
             count = self._counts.get(name, 0)
-            check = QCheckBox(name)
-            check.setToolTip(name)
+            check = QCheckBox(name if name in METHODS else name + "（自由記載）")
+            check.setToolTip(name + (" / 自由記載の運営方法" if name not in METHODS else ""))
             check.setChecked(count is None or count > 0)
             spin = QSpinBox()
             spin.setRange(0, MAX_COUNT)
@@ -150,13 +158,36 @@ class MethodsCombo(QComboBox):
             self.grid.addWidget(check, row, 0)
             self.grid.addWidget(spin, row, 1)
             self.rows[name] = check, spin
-            diff = QLabel()
-            self.grid.addWidget(diff, row, 2)
-            spin.setProperty("difference_label", diff)
+            self.metric_labels[name] = self.add_metric_labels(row)
+        total_row = len(names) + 1
+        self.grid.addWidget(QLabel("合計"), total_row, 0)
+        self.total_plan = QLabel()
+        self.total_plan.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.total_plan.setStyleSheet("font-weight: bold;")
+        self.grid.addWidget(self.total_plan, total_row, 1)
+        self.total_metrics = self.add_metric_labels(total_row, bold=True)
         self._building = False
 
+    def add_metric_labels(self, row, bold=False):
+        result = {}
+        for column, field in enumerate(("assigned", "unassigned", "excess"), 2):
+            label = QLabel()
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setMinimumWidth(66)
+            label.setWordWrap(True)
+            background, foreground = METRIC_COLORS[field]
+            label.setStyleSheet(
+                "QLabel {"
+                + f"background-color: {background}; color: {foreground}; padding: 4px; border-radius: 3px;"
+                + ("font-weight: bold;" if bold else "")
+                + "}"
+            )
+            self.grid.addWidget(label, row, column)
+            result[field] = label
+        return result
+
     def emit_change(self):
-        self.setEditText(format_allocations(self.product_state()))
+        self.setEditText(format_cell_status(self.product_state()))
         self.update_status()
         self.in_change = True
         try:
@@ -231,7 +262,7 @@ class MethodsCombo(QComboBox):
             combo = QComboBox()
             combo.addItem("未設定", None)
             for name in available:
-                combo.addItem(name, name)
+                combo.addItem(name if name in METHODS else name + "（自由記載）", name)
             combo.setCurrentIndex(combo.findData(method))
             combo.currentIndexChanged.connect(
                 lambda index, n=number, c=combo: self.change_assignment(n, c.currentData())
@@ -261,18 +292,18 @@ class MethodsCombo(QComboBox):
         )
         totals = {r.method: r for r in booth_totals(product)}
         for name, (check, spin) in self.rows.items():
-            label = spin.property("difference_label")
             row = totals.get(name)
-            text = (
-                "割当0 / 未割当0"
-                if row is None
-                else (
-                    f"割当{row.assigned} / 予定未設定"
-                    if row.unknown
-                    else f"割当{row.assigned} / 未割当{row.unassigned} / 超過{row.excess}"
+            for field, label in self.metric_labels[name].items():
+                label.setText(booth_value(row, field) if row else "0")
+                label.setToolTip(
+                    "予定未設定の方法は差分を確定しません。"
+                    if row and row.unknown
+                    else f"{name}：{METRIC_LABELS[field]} {label.text()}"
                 )
-            )
-            label.setText(text)
+        total = total_booths(list(totals.values()))
+        self.total_plan.setText(booth_value(total, "planned"))
+        for field, label in self.total_metrics.items():
+            label.setText(booth_value(total, field))
 
     def showPopup(self):
         if self.popup.isVisible():
@@ -282,7 +313,7 @@ class MethodsCombo(QComboBox):
         self.build_machine_rows()
         self.update_status()
         self.popup.adjustSize()
-        self.popup.resize(max(500, min(650, self.width())), self.popup.height())
+        self.popup.resize(max(590, min(740, self.width())), self.popup.height())
         point = self.mapToGlobal(QPoint(0, self.height()))
         screen = self.screen().availableGeometry()
         point.setX(max(screen.left(), min(point.x(), screen.right() - self.popup.width())))

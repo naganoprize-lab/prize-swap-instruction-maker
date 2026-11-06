@@ -52,7 +52,13 @@ def validate_assignments(value):
 
 
 def active_assignments(product):
-    return {number: product.machine_methods.get(number) for number in registered_machines(product)}
+    # A registered number alone is not an assignment. Empty/whitespace-only
+    # legacy values remain unassigned; duplicate numbers are canonicalized.
+    result = {}
+    for number in registered_machines(product):
+        method = product.machine_methods.get(number)
+        result[number] = (method.strip() or None) if isinstance(method, str) else None
+    return result
 
 
 def sync_machine_methods(product):
@@ -151,6 +157,20 @@ def format_allocations(product, separator="、"):
     return separator.join(f"{name}×{count}" for name, count in actual.items())
 
 
+def format_cell_status(product):
+    status = allocation_status(product)
+    pending = (
+        (f"{status.unassigned}＋未設定" if status.unassigned else "未設定")
+        if status.unknown
+        else str(status.unassigned)
+    )
+    text = f"割当{status.assigned}／未割当{pending}"
+    if status.excess:
+        text += f"／超過{status.excess}"
+    methods = format_allocations(product)
+    return f"{methods} ［{text}］" if methods else text
+
+
 def format_plans(product, separator="\n"):
     values = plans(product)
     for name in allocations(product):
@@ -170,6 +190,71 @@ class BoothTotal:
     unassigned: int
     excess: int
     unknown: int = 0
+
+
+def total_booths(rows):
+    rows = list(rows)
+    return BoothTotal(
+        "合計",
+        *(
+            sum(getattr(row, field) for row in rows)
+            for field in ("planned", "assigned", "unassigned", "excess", "unknown")
+        ),
+    )
+
+
+def booth_value(row, field):
+    value = getattr(row, field)
+    if row.unknown and field != "assigned":
+        return f"{value}＋未設定" if value else "未設定"
+    return str(value)
+
+
+def booth_report(product, compact=False):
+    """Measured print text and semantic colour spans, shared by all printers.
+
+    Names and plans are printed once per product. Compact metric labels are
+    expanded by the page legend, so the report also works in monochrome.
+    """
+    rows = booth_totals(product)
+    if not rows:
+        return "", []
+    parts, spans, offset = [], [], 0
+
+    def append(text, field=None):
+        nonlocal offset
+        if field:
+            spans.append((offset, len(text.encode("utf-16-le")) // 2, field))
+        parts.append(text)
+        offset += len(text.encode("utf-16-le")) // 2
+
+    for row in [*rows, total_booths(rows)]:
+        if parts:
+            append("\n")
+        if compact:
+            plan = (
+                f"{row.planned}+?"
+                if row.unknown and row.planned
+                else "?" if row.unknown else str(row.planned)
+            )
+            append(f"{row.method} {plan} ")
+        else:
+            plan = (
+                (f"{row.planned}ブース＋予定未設定" if row.planned else "予定未設定")
+                if row.unknown
+                else f"{row.planned}ブース"
+            )
+            append(f"{row.method} {plan}\n")
+        for i, (field, label) in enumerate(
+            (("assigned", "済"), ("unassigned", "未"), ("excess", "超"))
+        ):
+            if i:
+                append(" ")
+            count = str(getattr(row, field))
+            if row.unknown and field != "assigned":
+                count = f"{count}+?" if getattr(row, field) else "?"
+            append(label + count, field)
+    return "".join(parts), spans
 
 
 def booth_totals(product):
@@ -220,7 +305,9 @@ class AllocationStatus:
 
     @property
     def message(self):
-        text = f"予定{self.planned}ブース / 登録{self.registered}台 / 方法割当{self.assigned}台 / 未割当{self.unassigned} / 超過{self.excess}"
+        pending = f"{self.unassigned}＋未確定" if self.unknown else str(self.unassigned)
+        excess = f"{self.excess}＋未確定" if self.unknown else str(self.excess)
+        text = f"予定{self.planned}ブース / 登録{self.registered}台 / 方法割当{self.assigned}台 / 未割当{pending} / 超過{excess}"
         if self.unknown:
             text += f" / 予定未設定{self.unknown}方法"
         if self.unmapped:

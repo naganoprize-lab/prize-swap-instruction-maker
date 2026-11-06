@@ -53,6 +53,11 @@ def test_windows_log_failure_replays_without_discarding_missing_or_repeated_name
     assert normalized_pdf_text("鬼滅の刃フィギュア!") != normalized_pdf_text(NAME)
 
 
+def test_long_character_font_alias_preserves_the_character():
+    assert normalized_pdf_text("\u2ed1い商品") == normalized_pdf_text("長い商品")
+    assert normalized_pdf_text("い商品") != normalized_pdf_text("長い商品")
+
+
 def pdf_image(path):
     document = QPdfDocument()
     assert document.load(str(path)) == QPdfDocument.Error.None_
@@ -107,9 +112,9 @@ def test_real_pdf_windows_alias_keeps_pixels_searchable_text_and_exact_counts(
     if kind == "labels":
         save_labels_pdf(source, [LabelEntry(product)])
     elif kind == "direct":
-        render_document(configured_printer(source), [product], DAY)
+        render_document(configured_printer(source), [product], DAY, mode="standard")
     else:
-        save_pdf(source, [product], DAY)
+        save_pdf(source, [product], DAY, mode="standard")
     windows_cmap_alias(source, alias)
     original = require_searchable_pdf(source)
     changed = require_searchable_pdf(alias)

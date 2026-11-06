@@ -4,7 +4,8 @@ from PySide6.QtGui import QColor, QDoubleValidator, QIntValidator
 from PySide6.QtWidgets import QComboBox, QLineEdit, QPlainTextEdit, QStyledItemDelegate, QStyle, QStyleOptionComboBox, QToolButton, QMenu
 
 from .core import AppError, LIMITS, machine_numbers, quantity, split_values
-from .methods import allocation_status, format_allocations, set_allocations, editor_state, sync_machine_methods
+from .methods import allocation_status, format_allocations, format_cell_status, set_allocations, editor_state, sync_machine_methods
+from .booth_style import METRIC_COLORS
 from .methods_editor import MethodsCombo
 
 COLUMNS = ["出力", "順序", "メーカー", "商品名", "入数", "CS数", "マシン番号", "運営方法", "優先", "獲得個数制限"]
@@ -45,18 +46,22 @@ class ProductModel(QAbstractTableModel):
                 return None
             if col == 7:
                 # QVariantMap sorts keys in the proxy. Pairs retain method order.
-                return editor_state(p) if role == Qt.ItemDataRole.EditRole else format_allocations(p)
+                return editor_state(p) if role == Qt.ItemDataRole.EditRole else format_cell_status(p)
             return ", ".join(value) if col == 6 else value
         if role == Qt.ItemDataRole.CheckStateRole and col in (0, 8):
             return Qt.CheckState.Checked if value else Qt.CheckState.Unchecked
         if role == Qt.ItemDataRole.BackgroundRole:
             if col == 7:
                 status = allocation_status(p)
-                if status.excess: return QColor("#FEE4E2")
-                if status.unknown or status.unassigned or status.unmapped: return QColor("#FFF4BF")
+                if status.excess: return QColor(METRIC_COLORS["excess"][0])
+                if status.unknown or status.unassigned or status.unmapped: return QColor(METRIC_COLORS["unassigned"][0])
+                if status.assigned: return QColor(METRIC_COLORS["assigned"][0])
             if p.priority: return QColor("#FCE4EC")
-        if role == Qt.ItemDataRole.ForegroundRole and col == 7 and allocation_status(p).excess:
-            return QColor("#B42318")
+        if role == Qt.ItemDataRole.ForegroundRole and col == 7:
+            status = allocation_status(p)
+            field = "excess" if status.excess else "unassigned" if status.unknown or status.unassigned or status.unmapped else "assigned"
+            if status.assigned or status.unknown or status.unassigned or status.unmapped or status.excess:
+                return QColor(METRIC_COLORS[field][1])
         if role == Qt.ItemDataRole.ToolTipRole:
             if col == 7:
                 return format_allocations(p, "\n") + "\n" + allocation_status(p).message

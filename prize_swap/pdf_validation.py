@@ -14,10 +14,11 @@ def normalized_pdf_text(text):
     Unicode characters share a glyph, a radical can be returned instead of
     the ideograph: Noto uses U+2FC1 for 鬼 (handled by NFKC), while Windows
     Japanese fonts can use U+2EE4 (which has no NFKC decomposition).
+    Noto can similarly return U+2ED1 for 長 instead of U+9577.
     Keep this explicit equivalence narrow; never discard letters, marks or
     repeated text. Remove extraction whitespace before composing split marks.
     """
-    text = re.sub(r"\s+", "", text).replace("\u2ee4", "鬼")
+    text = re.sub(r"\s+", "", text).translate(str.maketrans({"\u2ee4":"鬼", "\u2ed1":"長"}))
     return unicodedata.normalize("NFKC", text)
 
 

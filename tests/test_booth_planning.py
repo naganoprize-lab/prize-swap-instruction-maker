@@ -217,7 +217,8 @@ def test_real_inline_popup_keyboard_counts_and_machine_assignment(window):
     editor.hidePopup()
     window.summary_toggle.setChecked(True)
     QApplication.processEvents()
-    assert window.summary_table.rowCount() == 2
+    assert window.summary_table.rowCount() == 4  # Three standard methods + total.
+    assert window.summary_table.item(3, 0).text() == "合計"
     assert window.table.height() > window.height() * 0.3
 
 
@@ -286,7 +287,7 @@ def test_pdf_plans_are_once_per_product_and_merged_geometry_is_visible(tmp_path)
     p = product()
     p.planned_booths["リング"] = 3
     path = tmp_path / "予定ブース.pdf"
-    plan = save_pdf(path, [p], DAY)
+    plan = save_pdf(path, [p], DAY, mode="standard")
     text = compact(require_searchable_pdf(path)["pages"][0]["text"])
     assert text.count(compact(p.name)) == 1
     assert text.count("橋渡し2ブース") == text.count("リング3ブース") == 1
@@ -296,20 +297,22 @@ def test_pdf_plans_are_once_per_product_and_merged_geometry_is_visible(tmp_path)
     group = row.groups[0]
     assert group.machines == p.machines
     assert len(group.machine_cells) == 3
-    assert group.cells[2].text == "橋渡し 2ブース\nリング 3ブース"
+    assert group.cells[2].text == "橋渡し 2ブース\n済2 未0 超0\nリング 3ブース\n済1 未2 超0\n合計 5ブース\n済3 未2 超0"
     # Actual painting: the machine-row separator stops before merged plan/name.
     image = QImage(round(plan.width), round(plan.height), QImage.Format.Format_ARGB32)
     image.fill(QColor("white"))
     painter = QPainter(image)
     draw_page(painter, plan, 0, DAY)
     painter.end()
-    y = round(TITLE_HEIGHT + plan.header_height + row.heights[0])
-    assert image.pixelColor(3, y).lightness() < 150
+    y = round(plan.title_height + plan.header_height + group.heights[0])
+    # Measured fractional row heights can put an antialiased 1pt rule between
+    # two pixels; inspect its immediate band instead of one rounded pixel.
+    assert min(image.pixelColor(3, yy).lightness() for yy in range(y-1, y+2)) < 150
     plan_left = sum(plan.widths[:2])
     assert image.pixelColor(round(plan_left + 2), y).lightness() > 200
     # Every measured text line fits its respective merged or individual cell.
     for block in group.cells[2:]:
-        assert block.height + 2 * PADDING <= row.height + 0.01
+        assert block.height + 2 * plan.padding <= group.height + 0.01
         for i in range(block.layout.lineCount()):
             line = block.layout.lineAt(i)
             assert line.naturalTextWidth() <= block.width + 0.01
@@ -332,7 +335,7 @@ def test_many_products_stay_atomic_without_loss_and_oversized_groups_split(tmp_p
         )
     path = tmp_path / "複数ページ.pdf"
     plan = save_pdf(path, products, DAY, rows=8, layout=layout)
-    assert len(plan.pages) > 2 and not plan.warnings
+    assert len(plan.pages) == 2 and not plan.warnings
     groups = [g for page in plan.pages for pair in page for g in pair.groups if g]
     assert len(groups) == len(products)
     assert sorted(id(g.product) for g in groups) == sorted(id(p) for p in products)
@@ -374,6 +377,7 @@ def test_labels_warn_on_plan_difference_but_print_only_names(window, tmp_path, m
 
 
 def test_direct_print_dialog_uses_same_machine_and_plan_renderer(window, tmp_path, monkeypatch):
+    window.print_mode.setCurrentIndex(window.print_mode.findData("standard"))
     path = tmp_path / "直接印刷経路.pdf"
     import prize_swap.ui as ui
 
@@ -384,7 +388,7 @@ def test_direct_print_dialog_uses_same_machine_and_plan_renderer(window, tmp_pat
     assert "橋渡し2ブース" in text and "リング1ブース" in text
     assert text.count(compact(window.products[0].name)) == 1
     saved = tmp_path / "PDF保存経路.pdf"
-    save_pdf(saved, window.products, DAY)
+    save_pdf(saved, window.products, DAY, mode="standard")
     saved_text = compact(require_searchable_pdf(saved)["pages"][0]["text"])
     assert saved_text == text
     # Compare actual page rendering as well as text; metadata timestamps differ.

@@ -51,9 +51,7 @@ def pair_groups(left, right):
     return GroupPair([left, right], heights)
 
 
-def pack_products(products, rows, layout, body_height, measure):
-    if not 1 <= rows <= 50 or layout not in ("column", "row"):
-        raise AppError("ページ配置の設定が不正です。")
+def measured_groups(products, body_height, measure):
     segments, warnings = [], []
     for product in ordered(products):
         ids = registered_machines(product) or [""]
@@ -84,6 +82,13 @@ def pack_products(products, rows, layout, body_height, measure):
         warnings.append(
             f"「{product.name[:40]}」は1ブロックの高さを超えるため、継続ブロックに分割しました。"
         )
+    return segments, warnings
+
+
+def pack_products(products, rows, layout, body_height, measure):
+    if not 1 <= rows <= 50 or layout not in ("column", "row"):
+        raise AppError("ページ配置の設定が不正です。")
+    segments, warnings = measured_groups(products, body_height, measure)
     pages = []
     while segments:
         result = None

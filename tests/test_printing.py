@@ -84,15 +84,13 @@ def test_row_bounds_wrapping_and_aligned_grid(qt_app, layout):
     emitted = []
     for page in plan.pages:
         assert len(page) <= 50
-        y = TITLE_HEIGHT + plan.header_height
-        for row in page:
-            assert y + row.height <= plan.height - FOOTER_HEIGHT + .001
-            for side, p in enumerate((row.left, row.right)):
-                if p is None:
-                    continue
-                emitted.append(id(p))
-                for block in row.cells[side]:
-                    assert block.height + 2 * PADDING <= row.height + .001
+        for column in plan.columns(plan.pages.index(page)):
+            y = plan.title_height + plan.header_height
+            for group in column:
+                emitted.append(id(group.product))
+                assert y+group.height <= plan.height-plan.footer_height+.001
+                for block in group.cells:
+                    assert block.height + 2 * plan.padding <= group.height + .001
                     n = block.layout.lineCount()
                     if n:
                         last = block.layout.lineAt(n - 1)
@@ -101,8 +99,8 @@ def test_row_bounds_wrapping_and_aligned_grid(qt_app, layout):
                         line = block.layout.lineAt(line_no)
                         assert line.naturalTextWidth() <= block.width + .01
                         assert line.y() + line.height() <= block.height + .01
-            y += row.height  # Both sides use exactly this same height and y.
-        assert y <= plan.height - FOOTER_HEIGHT + .001
+                y += group.height
+            assert y <= plan.height - plan.footer_height + .001
     assert sorted(emitted) == sorted(id(p) for p in products)
 
 
@@ -113,7 +111,7 @@ def test_painter_pink_and_black_borders(tmp_path):
     painter = QPainter(image)
     draw_page(painter, plan, 0, DAY)
     painter.end()
-    y = int(TITLE_HEIGHT + plan.header_height)
+    y = int(plan.title_height + plan.header_height)
     assert image.pixelColor(3, y + 3).name() == "#fce4ec"
     assert image.pixelColor(int(plan.widths[0]), y + 10).lightness() < 150
     assert image.pixelColor(int((plan.width + GAP) / 2) + 3, y + 3).name() == "#ffffff"

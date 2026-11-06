@@ -42,10 +42,14 @@ def run(output):
         assert w.table.height() > w.height() / 2
         assert w.model.setData(w.model.index(0, 6), "20085右\n20098左")
         assert w.model.setData(w.model.index(0, 7), {
-            "plans": [["橋渡し", 1], ["リング", 1]],
-            "assignments": [["20085右", "橋渡し"], ["20098左", "リング"]],
+            "plans": [["橋渡し", 1], ["フック", 1]],
+            "assignments": [["20085右", "橋渡し"], ["20098左", "フック"]],
         })
         assert w.model.setData(w.model.index(0, 9), "各②")
+        assert w.summary_table.rowCount() == 4
+        assert w.summary_table.item(2,0).text() == "フック"
+        assert w.summary_table.item(2,2).text() == "1"
+        assert w.summary_table.item(2,3).text() == "0"
         w.floor.add_machine(Machine(number="20085右", product="現在の商品A", x=100, y=100))
         w.floor.add_machine(Machine(number="20098左", product="現在の商品B", x=350, y=100))
         w.floor.duplicate_selected()
@@ -67,13 +71,13 @@ def run(output):
         restored_products, _, metadata = load_session(output / "作業.json")
         assert LabelStore.restore(metadata["label_printing"], restored_products).for_day(restored_products, day)[0].copies == 3
         assert load_session(output / "作業.json")[0] == w.products
-        assert restored_products[0].planned_booths == {"橋渡し": 1, "リング": 1}
-        assert restored_products[0].machine_methods == {"20085右": "橋渡し", "20098左": "リング"}
+        assert restored_products[0].planned_booths == {"橋渡し": 1, "フック": 1}
+        assert restored_products[0].machine_methods == {"20085右": "橋渡し", "20098左": "フック"}
         export_excel(output / "指示書.xlsx", w.products, day)
         from openpyxl import load_workbook
         workbook = load_workbook(output / "指示書.xlsx")
         assert "D3:D4" in workbook.active.merged_cells
-        assert workbook.active["C3"].value == "橋渡し 1ブース\nリング 1ブース"
+        assert workbook.active["C3"].value == "橋渡し 1ブース\nフック 1ブース"
         workbook.close()
         plan = save_pdf(output / "印刷確認.pdf", w.products, day)
         independent = require_searchable_pdf(output / "印刷確認.pdf")
@@ -92,7 +96,8 @@ def run(output):
         assert "商品名" in independent_text
         assert normalized_pdf_text(independent_text).count(normalized_pdf_text("鬼滅の刃 フィギュア")) == 1
         assert normalized_pdf_text(text).count(normalized_pdf_text("鬼滅の刃 フィギュア")) == 1
-        assert "橋渡し1ブース" in independent_text and "リング1ブース" in independent_text
+        assert "橋渡し1済1未0超0" in independent_text and "フック1済1未0超0" in independent_text
+        assert plan.mode == "auto" and plan.body_size>=9 and plan.name_size>=10
         report.update(pdf_pages=doc.pageCount(), page_points=[size.width(), size.height()], products=45)
         doc.close()
         observed = []
