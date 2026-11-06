@@ -2,21 +2,66 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import asdict
+from datetime import date, datetime
 import json
 from pathlib import Path
 import re
 
-from PySide6.QtCore import QPointF, QRectF, QStandardPaths, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut, QUndoCommand, QUndoStack
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-    QFormLayout, QGraphicsItem, QGraphicsObject, QGraphicsRectItem, QGraphicsScene,
-    QGraphicsView, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget)
-from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+from PySide6.QtCore import QDate, QPointF, QRectF, QStandardPaths, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QColor,
+    QKeySequence,
+    QPainter,
+    QPageLayout,
+    QPageSize,
+    QPen,
+    QShortcut,
+    QUndoCommand,
+    QUndoStack,
+)
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QSizePolicy,
+    QDateEdit,
+    QDoubleSpinBox,
+    QGraphicsItem,
+    QGraphicsObject,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QScrollArea,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+from PySide6.QtPrintSupport import QPrintDialog
 
 from .core import AppError, machine_numbers
 from .floor_data import Machine, import_layout, save_layout, validate_machines, validate_state
-from .printing import configured_printer
 from .fonts import print_font
+from .floor_status import machine_status, days_text, money, ratio_text, overlapping
+from .floor_status import numeric
+from .core import parse_date
+from .floor_render import CardRenderer, DISPLAY_FIELDS, draw_card
+from .floor_print import (
+    FloorPrintOptions,
+    floor_printer,
+    plan_floor,
+    render_floor,
+    save_floor_pdf,
+    paper_supported,
+)
+from .floor_print_ui import FloorPrintControls, FloorPreviewDialog
 
 GRID = 20
 
@@ -46,7 +91,9 @@ class ResizeHandle(QGraphicsRectItem):
         self.setBrush(QColor("#3D795C"))
         self.setPen(QPen(Qt.PenStyle.NoPen))
         self.setZValue(5)
-        self.setCursor(Qt.CursorShape.SizeFDiagCursor if corner in (0, 3) else Qt.CursorShape.SizeBDiagCursor)
+        self.setCursor(
+            Qt.CursorShape.SizeFDiagCursor if corner in (0, 3) else Qt.CursorShape.SizeBDiagCursor
+        )
 
     def mousePressEvent(self, event):
         self.before = self.node.owner.state()
@@ -79,8 +126,13 @@ class MachineNode(QGraphicsObject):
     def __init__(self, owner, machine):
         super().__init__()
         self.owner, self.machine = owner, machine
+        self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
         self.setPos(machine.x, machine.y)
-        self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
+        self.setFlags(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+            | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+            | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
+        )
         self.handles = [ResizeHandle(self, i) for i in range(4)]
         self.update_handles()
 
@@ -89,34 +141,47 @@ class MachineNode(QGraphicsObject):
 
     def update_handles(self):
         m = self.machine
-        for handle, point in zip(self.handles, [(0, 0), (m.width, 0), (0, m.height), (m.width, m.height)]):
+        for handle, point in zip(
+            self.handles, [(0, 0), (m.width, 0), (0, m.height), (m.width, m.height)]
+        ):
             handle.setPos(*point)
             handle.setVisible(self.isSelected())
         plans = self.owner.assignments().get(m.number, [])
-        self.setToolTip(f"{m.number or '番号未設定'} / {m.kind}\n{m.product}\n参照ID：{m.source_key or '追加マシン'}" + ("\n入替予定：" + "、".join(p.name+"（"+(p.machine_methods.get(m.number) or "方法未設定")+"）" for p in plans) if plans else ""))
+        installed = m.installed_on or "—"
+        self.setToolTip(
+            f"{m.number or '番号未設定'} / {m.kind}\n{m.product}\n売上 {money(m.sales)} / アベレージ {money(m.average)} / アベ比 {ratio_text(m)}\n設置日 {installed} / 投入日数 {days_text(m,self.owner.reference_day())}\n参照ID：{m.source_key or '追加マシン'}"
+            + (
+                "\n入替予定："
+                + "、".join(
+                    p.name + "（" + (p.machine_methods.get(m.number) or "方法未設定") + "）"
+                    for p in plans
+                )
+                if plans
+                else ""
+            )
+        )
 
     def paint(self, painter, option, widget=None):
-        rect = self.boundingRect()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        plans = self.owner.assignments().get(self.machine.number, [])
-        fill = "#FCE4EC" if any(p.priority for p in plans) else "#FFF4BF" if plans else "#FFFFFF"
-        painter.setBrush(QColor(fill))
-        painter.setPen(QPen(QColor("#3D795C" if self.isSelected() else "#8EA89A"), 2 if self.isSelected() else 1))
-        painter.drawRoundedRect(rect, 6, 6)
-        font = print_font(16)
-        painter.setFont(font)
-        painter.setPen(QColor("#244C3D"))
-        label = self.machine.number or f"未設定 ({self.machine.source_key or '新規'})"
-        painter.drawText(rect.adjusted(8, 6, -8, -rect.height() + 32), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
-        font = print_font(12, False)
-        painter.setFont(font)
-        painter.setPen(QColor("#263E32"))
-        product_top=38
-        if self.owner.show_methods.isChecked():
-            methods="／".join(dict.fromkeys(p.machine_methods.get(self.machine.number) or "未設定" for p in plans)) or "未設定"
-            painter.drawText(rect.adjusted(8,30,-8,-rect.height()+54),Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,methods)
-            product_top=58
-        painter.drawText(rect.adjusted(8, product_top, -8, -8), Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere, self.machine.product or "商品未設定")
+        background, status, priority, fields, font, methods = self.owner.card_context(self.machine)
+        layout = self.owner.renderer.plan(
+            self.machine,
+            self.machine.width,
+            self.machine.height,
+            font,
+            fields,
+            self.owner.reference_day(),
+            status,
+            methods,
+        )
+        draw_card(
+            painter,
+            self.boundingRect(),
+            layout,
+            background,
+            priority,
+            self.isSelected(),
+            self.machine.uid in self.owner.overlaps,
+        )
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
@@ -173,16 +238,74 @@ class FloorView(QGraphicsView):
     def wheelEvent(self, event):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
-            scale = self.transform().m11() * factor
-            if .05 <= scale <= 4:
-                self.scale(factor, factor)
+            self.owner.set_zoom(max(50, min(300, self.transform().m11() * 100 * factor)))
             event.accept()
         else:
             super().wheelEvent(event)
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton or (
+            event.button() == Qt.MouseButton.LeftButton and getattr(self, "_space", False)
+        ):
+            self._pan = event.position().toPoint()
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if getattr(self, "_pan", None) is not None:
+            point = event.position().toPoint()
+            delta = point - self._pan
+            self._pan = point
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if getattr(self, "_pan", None) is not None:
+            self._pan = None
+            self.viewport().unsetCursor()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space:
+            self._space = True
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key.Key_Space:
+            self._space = False
+            event.accept()
+        else:
+            super().keyReleaseEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if getattr(self.owner, "_zoom", 100) is None and hasattr(self.owner, "nodes"):
+            self.owner.fit(save=False)
+
+    def drawForeground(self, painter, rect):
+        super().drawForeground(painter, rect)
+        if not self.owner.print_options.boundaries:
+            return
+        pen = QPen(QColor("#5B7183"), 0, Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.setFont(print_font(12))
+        for i, frame in enumerate(self.owner.page_frames):
+            if frame.intersects(rect):
+                painter.drawRect(frame)
+                painter.drawText(frame.topLeft() + QPointF(4, 16), f"印刷ページ {i+1}")
+
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
-        if self.transform().m11() < .3:
+        if self.transform().m11() < 0.3:
             return
         painter.setPen(QPen(QColor("#CED9D1"), 0))
         step = GRID
@@ -204,83 +327,181 @@ class FloorWidget(QWidget):
         self.source = ""
         self.initialized = False
         self._assignments = {}
-        self.storage = Path(storage_path) if storage_path else Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)) / "floor-autosave.json"
+        self.storage = (
+            Path(storage_path)
+            if storage_path
+            else Path(
+                QStandardPaths.writableLocation(
+                    QStandardPaths.StandardLocation.AppLocalDataLocation
+                )
+            )
+            / "floor-autosave.json"
+        )
         self.history = QUndoStack(self)
         self.history.setUndoLimit(100)
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.autosave)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        tools = QHBoxLayout()
-        def tool(text, callback):
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+        self.renderer = CardRenderer()
+        self.print_renderer = CardRenderer()
+        self.print_options = FloorPrintOptions()
+        self.overlaps = set()
+        self.page_frames = []
+        self.loaded_at = ""
+        self._zoom = 100
+        self._fitting = False
+        self._setting_day = False
+        self.follow_today = True
+        self._last_today = QDate.currentDate()
+        self._active_preview = None
+
+        def group(title, parent):
+            box = QGroupBox(title)
+            box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+            row = QHBoxLayout(box)
+            row.setContentsMargins(8, 5, 8, 6)
+            parent.addWidget(box)
+            return row
+
+        def button(row, text, callback):
             b = QPushButton(text)
             b.clicked.connect(callback)
-            tools.addWidget(b)
+            row.addWidget(b)
             return b
-        tool("マシン追加", self.add_dialog)
-        tool("削除", self.delete_selected)
-        tool("複製", self.duplicate_selected)
-        undo = QPushButton("元に戻す")
-        undo.clicked.connect(self.history.undo)
+
+        top = QHBoxLayout()
+        layout.addLayout(top)
+        files = group("ファイル", top)
+        button(files, "レイアウトExcel読込", self.import_dialog)
+        button(files, "配置JSON読込", self.open_dialog)
+        button(files, "保存", self.save_dialog)
+        tools = group("マシン編集", top)
+        button(tools, "マシン追加", self.add_dialog)
+        button(tools, "削除", self.delete_selected)
+        button(tools, "複製", self.duplicate_selected)
+        undo = button(tools, "元に戻す", self.history.undo)
         undo.setEnabled(False)
         self.history.canUndoChanged.connect(undo.setEnabled)
-        tools.addWidget(undo)
-        redo = QPushButton("やり直し")
-        redo.clicked.connect(self.history.redo)
+        redo = button(tools, "やり直し", self.history.redo)
         redo.setEnabled(False)
         self.history.canRedoChanged.connect(redo.setEnabled)
-        tools.addWidget(redo)
         self.align = QComboBox()
         self.align.addItems(["整列を選択", "左揃え", "上揃え", "横に等間隔", "縦に等間隔"])
         self.align.activated.connect(self.align_selected)
         tools.addWidget(self.align)
-        tool("保存", self.save_dialog)
-        tool("印刷", self.print_floor)
-        layout.addLayout(tools)
-        sources = QHBoxLayout()
-        b = QPushButton("レイアウトExcel読込")
-        b.clicked.connect(self.import_dialog)
-        sources.addWidget(b)
-        b = QPushButton("配置JSON読込")
-        b.clicked.connect(self.open_dialog)
-        sources.addWidget(b)
-        b = QPushButton("元のExcel配置へ戻す")
-        b.clicked.connect(self.reset_original)
-        sources.addWidget(b)
+        button(tools, "元のExcel配置へ戻す", self.reset_original)
+        display_box = QGroupBox("表示")
+        display_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        display = QVBoxLayout(display_box)
+        layout.addWidget(display_box)
+        row = QHBoxLayout()
+        display.addLayout(row)
+        self.display_mode = QComboBox()
+        for label, key in (
+            ("商品名のみ", "product"),
+            ("売上分析", "analysis"),
+            ("すべて表示", "all"),
+        ):
+            self.display_mode.addItem(label, key)
+        self.display_mode.setCurrentIndex(2)
+        self.display_mode.currentIndexChanged.connect(self.display_changed)
+        row.addWidget(QLabel("表示モード"))
+        row.addWidget(self.display_mode)
+        self.reference_date = QDateEdit(self._last_today)
+        self.reference_date.setCalendarPopup(True)
+        self.reference_date.setDisplayFormat("yyyy/MM/dd")
+        self.reference_date.setDateRange(QDate(1900, 1, 1), QDate(9999, 12, 31))
+        self.reference_date.dateChanged.connect(self.reference_changed)
+        row.addWidget(QLabel("基準日"))
+        row.addWidget(self.reference_date)
+        button(row, "今日に戻す", self.today)
         self.show_methods = QCheckBox("運営方法を表示")
-        self.show_methods.toggled.connect(self.schedule_save)
-        sources.addWidget(self.show_methods)
+        self.show_methods.toggled.connect(self.display_changed)
+        row.addWidget(self.show_methods)
         self.snap = QCheckBox("グリッドにスナップ")
         self.snap.setChecked(True)
         self.snap.toggled.connect(self.schedule_save)
         self.snap.toggled.connect(self.changed.emit)
-        sources.addWidget(self.snap)
-        sources.addStretch()
-        b = QPushButton("全体表示")
-        b.clicked.connect(self.fit)
-        sources.addWidget(b)
-        b = QPushButton("100%")
-        b.clicked.connect(lambda: self.view.resetTransform())
-        sources.addWidget(b)
-        layout.addLayout(sources)
-        self.info = QLabel("レイアウトExcelを読み込んで開始。Ctrl+ホイールで拡大縮小 / ダブルクリックで番号・商品を編集。")
+        row.addWidget(self.snap)
+        button(row, "カード・文字サイズ", self.card_settings)
+        row.addStretch()
+        zoom = QHBoxLayout()
+        display.addLayout(zoom)
+        self.zoom_combo = QComboBox()
+        self.zoom_combo.setEditable(True)
+        self.zoom_combo.setMinimumContentsLength(9)
+        self.zoom_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.zoom_combo.addItems(["50%", "75%", "100%", "150%", "200%", "300%"])
+        self.zoom_combo.setCurrentText("100%")
+        self.zoom_combo.activated.connect(self.zoom_entered)
+        self.zoom_combo.lineEdit().editingFinished.connect(self.zoom_entered)
+        zoom.addWidget(QLabel("倍率"))
+        zoom.addWidget(self.zoom_combo)
+        button(zoom, "−", lambda: self.set_zoom(max(50, self.view.transform().m11() * 100 / 1.15)))
+        button(
+            zoom, "＋", lambda: self.set_zoom(min(300, self.view.transform().m11() * 100 * 1.15))
+        )
+        button(zoom, "100%", lambda: self.set_zoom(100))
+        button(zoom, "全体表示", self.fit)
+        button(zoom, "選択へズーム", self.zoom_selected)
+        self.data_note = QLabel("売上等は現在の読込値です。基準日は投入日数だけに適用します。")
+        self.data_note.setWordWrap(True)
+        zoom.addWidget(self.data_note, 1)
+        print_row = QHBoxLayout()
+        layout.addLayout(print_row)
+        printing = group("印刷", print_row)
+        button(printing, "用紙・印刷設定", self.print_settings)
+        button(printing, "印刷プレビュー", self.preview)
+        button(printing, "PDF保存", self.export_floor_pdf)
+        button(printing, "印刷（直接）", self.print_floor)
+        self.print_note = QLabel()
+        self.print_note.setWordWrap(True)
+        printing.addWidget(self.print_note, 1)
+        self.info = QLabel(
+            "レイアウトExcelを読み込んで開始。Ctrl+ホイールで拡大縮小 / ダブルクリックで番号・商品を編集。"
+        )
         self.info.setWordWrap(True)
+        self.info.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         layout.addWidget(self.info)
         self.scene = QGraphicsScene(self)
         self.view = FloorView(self.scene, self)
         layout.addWidget(self.view, 1)
         self.nodes = {}
-        for key, callback in [("Delete", self.delete_selected), ("Ctrl+D", self.duplicate_selected), ("Ctrl+Z", self.history.undo), ("Ctrl+Y", self.history.redo)]:
+        for key, callback in [
+            ("Delete", self.delete_selected),
+            ("Ctrl+D", self.duplicate_selected),
+            ("Ctrl+Z", self.history.undo),
+            ("Ctrl+Y", self.history.redo),
+        ]:
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(callback)
+        self.day_timer = QTimer(self)
+        self.day_timer.setInterval(30000)
+        self.day_timer.timeout.connect(self.check_day)
+        self.day_timer.start()
+        self.scene.selectionChanged.connect(self.selection_changed)
+        self.update_print_note()
         if self.storage.exists():
             try:
                 self.restore(json.loads(self.storage.read_text(encoding="utf-8")))
                 self.info.setText(f"自動保存から{len(self.machines)}枠を復元しました。")
             except Exception as exc:
                 self.info.setText(f"自動保存を復元できません：{exc}")
+
+    def closeEvent(self, event):
+        self.day_timer.stop()
+        super().closeEvent(event)
+
+    def showEvent(self, event):
+        self.check_day()
+        self.day_timer.start()
+        super().showEvent(event)
 
     def assignments(self):
         return self._assignments
@@ -297,16 +518,51 @@ class FloorWidget(QWidget):
         return [p for p in self.products() if any(n in numbers for n in p.machines)]
 
     def state(self):
-        return dict(version=1, initialized=self.initialized, source=self.source, machines=[asdict(m) for m in self.machines], original=deepcopy(self.original), snap=self.snap.isChecked(), show_methods=self.show_methods.isChecked())
+        return dict(
+            version=1,
+            initialized=self.initialized,
+            source=self.source,
+            machines=[asdict(m) for m in self.machines],
+            original=deepcopy(self.original),
+            snap=self.snap.isChecked(),
+            show_methods=self.show_methods.isChecked(),
+            display_mode=self.display_mode.currentData(),
+            reference_date=self.reference_day().isoformat(),
+            follow_today=self.follow_today,
+            zoom=self._zoom,
+            loaded_at=self.loaded_at,
+            print_options=asdict(self.print_options),
+        )
 
     def restore(self, state, keep_history=False):
         validate_state(state)
         self.machines = validate_machines(state["machines"])
         self.original = deepcopy(state.get("original", []))
         self.source = state.get("source", "")
-        self.initialized = state.get("initialized", bool(self.machines or self.original or self.source))
+        self.initialized = state.get(
+            "initialized", bool(self.machines or self.original or self.source)
+        )
+        self.loaded_at = state.get("loaded_at", "")
+        self.print_options = FloorPrintOptions.restore(state.get("print_options"))
+        self.follow_today = state.get("follow_today", True)
+        reference = (
+            QDate.currentDate()
+            if self.follow_today
+            else QDate.fromString(
+                state.get("reference_date", date.today().isoformat()), "yyyy-MM-dd"
+            )
+        )
+        self._setting_day = True
+        self.reference_date.setDate(reference)
+        self._setting_day = False
+        self.display_mode.blockSignals(True)
+        self.display_mode.setCurrentIndex(
+            self.display_mode.findData(state.get("display_mode", "all"))
+        )
+        self.display_mode.blockSignals(False)
+        self._zoom = state.get("zoom", 100)
         self.show_methods.blockSignals(True)
-        self.show_methods.setChecked(state.get("show_methods",False))
+        self.show_methods.setChecked(state.get("show_methods", False))
         self.show_methods.blockSignals(False)
         self.snap.blockSignals(True)
         self.snap.setChecked(state.get("snap", True))
@@ -314,6 +570,11 @@ class FloorWidget(QWidget):
         if not keep_history:
             self.history.clear()
         self.rebuild()
+        if self._zoom is None:
+            self.fit(save=False)
+        else:
+            self.set_zoom(self._zoom, save=False)
+        self.update_print_note()
         self.changed.emit()
 
     def rebuild(self):
@@ -328,18 +589,33 @@ class FloorWidget(QWidget):
         self.update_info()
 
     def update_scene_rect(self):
-        rect = self.scene.itemsBoundingRect().adjusted(-60, -60, 300, 300)
+        rect = self.machine_bounds().adjusted(-60, -60, 300, 300)
         self.scene.setSceneRect(rect if self.machines else QRectF(0, 0, 1500, 1000))
 
     def update_info(self):
         unresolved = sum(not m.number for m in self.machines)
-        self.info.setText(f"{len(self.machines)}枠 ／ 番号未設定 {unresolved}枠　黄色：入替予定 ／ ピンク：優先入替　Ctrl+ホイール：拡大縮小 ／ ダブルクリック：編集")
+        self.overlaps = overlapping(self.machines)
+        text = f"{len(self.machines)}枠 ／ 番号未設定 {unresolved}枠　青：投入予定 ／ 黄枠：優先 ／ 橙：200%以上 ／ 緑：100%以上 ／ 白：50〜100%未満・不明 ／ 赤：50%未満"
+        if self.overlaps:
+            text += (
+                f"　重なり {len(self.overlaps)}台：ドラッグまたはカードサイズで調整してください。"
+            )
+        self.info.setText(text)
+        self.data_note.setText(
+            "売上等は現在の読込値です。基準日は投入日数だけに適用。"
+            + (f" 読込 {self.loaded_at[:16]}" if self.loaded_at else "（履歴なし）")
+        )
+        for node in self.nodes.values():
+            node.update()
+        self.refresh_frames()
         self.scene.update()
 
     def sync(self):
         self.refresh_assignments()
         for node in self.nodes.values():
             node.update_handles()
+            node.update()
+        self.refresh_frames()
         self.scene.update()
 
     def record(self, before, text):
@@ -363,12 +639,243 @@ class FloorWidget(QWidget):
         except Exception as exc:
             self.message.emit(f"売り場レイアウトの自動保存に失敗しました：{exc}")
 
-    def fit(self):
-        if self.machines:
-            self.view.fitInView(self.scene.itemsBoundingRect().adjusted(-20, -20, 20, 20), Qt.AspectRatioMode.KeepAspectRatio)
+    def machine_bounds(self, selected=False):
+        machines = self.selected() if selected else self.machines
+        if not machines:
+            return QRectF(0, 0, 1500, 1000)
+        rect = QRectF(machines[0].x, machines[0].y, machines[0].width, machines[0].height)
+        for m in machines[1:]:
+            rect = rect.united(QRectF(m.x, m.y, m.width, m.height))
+        return rect
+
+    def fit(self, *_, save=True):
+        if not self.machines or self._fitting:
+            return
+        self._fitting = True
+        try:
+            self._zoom = None
+            self.view.fitInView(
+                self.machine_bounds().adjusted(-20, -20, 20, 20), Qt.AspectRatioMode.KeepAspectRatio
+            )
+            self.update_zoom_text()
+        finally:
+            self._fitting = False
+        if save:
+            self.schedule_save()
+            self.changed.emit()
+
+    def set_zoom(self, value, save=True):
+        value = max(50, min(300, float(value)))
+        current = self.view.transform().m11()
+        self._zoom = value
+        self.view.scale(value / 100 / current, value / 100 / current)
+        self.update_zoom_text()
+        if save:
+            self.schedule_save()
+            self.changed.emit()
+
+    def update_zoom_text(self):
+        self.zoom_combo.blockSignals(True)
+        self.zoom_combo.setCurrentText(
+            ("全体 " if self._zoom is None else "") + f"{self.view.transform().m11()*100:.0f}%"
+        )
+        self.zoom_combo.blockSignals(False)
+
+    def zoom_entered(self, *_):
+        text = self.zoom_combo.currentText().replace("%", "").strip()
+        if text.startswith("全体"):
+            return
+        try:
+            value = float(text)
+            if not 50 <= value <= 300:
+                raise ValueError()
+            self.set_zoom(value)
+        except ValueError:
+            self.message.emit("表示倍率は50〜300%です。全体表示は売り場全体に合わせます。")
+            self.update_zoom_text()
+
+    def zoom_selected(self):
+        if not self.selected():
+            self.message.emit("ズームするマシンを選択してください。")
+            return
+        rect = self.machine_bounds(True).adjusted(-15, -15, 15, 15)
+        scale = min(
+            self.view.viewport().width() / rect.width(),
+            self.view.viewport().height() / rect.height(),
+        )
+        self.set_zoom(max(50, min(300, scale * 100)))
+        self.view.centerOn(rect.center())
+
+    def reference_day(self):
+        return self.reference_date.date().toPython()
+
+    def reference_changed(self, *_):
+        if self._setting_day:
+            return
+        self.follow_today = False
+        self.display_changed()
+
+    def today(self):
+        self.follow_today = True
+        self._setting_day = True
+        self.reference_date.setDate(QDate.currentDate())
+        self._setting_day = False
+        self.display_changed()
+
+    def check_day(self):
+        today = QDate.currentDate()
+        if today != self._last_today:
+            self._last_today = today
+            if self.follow_today:
+                self.today()
+
+    def display_changed(self, *_):
+        if not hasattr(self, "nodes"):
+            return
+        self.sync()
+        self.schedule_save()
+        self.changed.emit()
+
+    def card_context(self, m):
+        plans = self.assignments().get(m.number, [])
+        priority = any(p.priority for p in plans)
+        background, status = machine_status(m, bool(plans), priority)
+        mode = self.display_mode.currentData()
+        if mode == "product":
+            status = ("投入予定" if plans else "通常") + (" / 優先入替" if priority else "")
+        if days_text(m, self.reference_day()) == "投入予定":
+            status += " / 投入予定（日付）"
+        if m.uid in self.overlaps:
+            status += " / 重なり"
+        methods = (
+            "／".join(dict.fromkeys(p.machine_methods.get(m.number) or "未設定" for p in plans))
+            if self.show_methods.isChecked()
+            else ""
+        )
+        return (
+            background,
+            status,
+            priority,
+            DISPLAY_FIELDS[mode],
+            m.font_size * (1.35 if mode == "product" else 1.1 if mode == "analysis" else 1),
+            methods,
+        )
+
+    def selection_changed(self):
+        if hasattr(self, "nodes"):
+            self.refresh_frames()
+            self.view.viewport().update()
+
+    def refresh_frames(self):
+        self.page_frames = []
+        if (
+            self.machines
+            and self.print_options.boundaries
+            and self.print_options.mode in ("tile", "actual")
+        ):
+            try:
+                self.page_frames = plan_floor(
+                    self.machines,
+                    self.assignments(),
+                    self.print_options,
+                    self.reference_day(),
+                    self.print_renderer,
+                    [m.uid for m in self.selected()],
+                    loaded_at=self.loaded_at,
+                ).frames
+            except AppError:
+                pass
+
+    def update_print_note(self):
+        mode = {"fit": "全体1枚", "tile": "分割", "selection": "選択範囲", "actual": "実寸相当"}[
+            self.print_options.mode
+        ]
+        self.print_note.setText(
+            f"{self.print_options.paper} / {'横' if self.print_options.orientation=='landscape' else '縦'} / {mode}（画面倍率とは独立）"
+        )
+
+    def set_print_options(self, options):
+        self.print_options = options.validate()
+        self.update_print_note()
+        self.schedule_save()
+        self.changed.emit()
+
+    def card_settings(self):
+        selected = self.selected()
+        targets = selected or self.machines
+        if not targets:
+            self.message.emit("マシンを追加・読込してから設定してください。")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("カード・文字サイズ")
+        form = QFormLayout(dialog)
+        scope = QComboBox()
+        scope.addItem(f"選択中の{len(selected)}台", True) if selected else None
+        scope.addItem(f"全{len(self.machines)}台", False)
+        form.addRow("対象", scope)
+        size = QCheckBox("カードサイズを変更")
+        font = QCheckBox("文字サイズを変更")
+        font.setChecked(True)
+        form.addRow(size)
+        w = QDoubleSpinBox()
+        w.setRange(80, 2000)
+        w.setValue(targets[0].width)
+        h = QDoubleSpinBox()
+        h.setRange(60, 2000)
+        h.setValue(targets[0].height)
+        form.addRow("幅", w)
+        form.addRow("高さ", h)
+        form.addRow(font)
+        f = QDoubleSpinBox()
+        f.setRange(6, 72)
+        f.setValue(targets[0].font_size)
+        form.addRow("基準文字サイズ", f)
+        hint = QLabel(
+            "座標は変更しません。文字はカード内に収まるよう調整します。拡大後に重なる場合は警告し、ドラッグで調整できます。"
+        )
+        hint.setWordWrap(True)
+        form.addRow(hint)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        form.addRow(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            ids = (
+                [m.uid for m in selected] if scope.currentData() else [m.uid for m in self.machines]
+            )
+            self.apply_card_settings(
+                ids,
+                w.value() if size.isChecked() else None,
+                h.value() if size.isChecked() else None,
+                f.value() if font.isChecked() else None,
+            )
+
+    def apply_card_settings(self, ids, width=None, height=None, font=None):
+        before = self.state()
+        updated = deepcopy(self.machines)
+        for m in updated:
+            if m.uid in ids:
+                if width is not None:
+                    m.width = width
+                if height is not None:
+                    m.height = height
+                if font is not None:
+                    m.font_size = font
+        validate_machines([asdict(m) for m in updated])
+        self.machines = updated
+        self.rebuild()
+        self.record(before, "カード・文字サイズ変更")
+        if self.overlaps:
+            self.message.emit(
+                f"拡大したカードが重なっています（{len(self.overlaps)}台）。座標は保持しています。ドラッグで調整してください。"
+            )
 
     def selected(self):
-        return [item.machine for item in self.scene.selectedItems() if isinstance(item, MachineNode)]
+        return [
+            item.machine for item in self.scene.selectedItems() if isinstance(item, MachineNode)
+        ]
 
     def add_machine(self, machine):
         validate_machines([asdict(m) for m in self.machines] + [asdict(machine)])
@@ -401,9 +908,24 @@ class FloorWidget(QWidget):
         form.addRow("左右指定", side)
         form.addRow("マシン種別", kind)
         form.addRow("現在の商品名", product)
+        sales = QLineEdit("" if machine.sales is None else str(machine.sales))
+        sales.setPlaceholderText("未入力は —")
+        average = QLineEdit("" if machine.average is None else str(machine.average))
+        average.setPlaceholderText("未入力・0の場合は比率を計算しません")
+        ratio_input = QLineEdit("" if machine.ratio is None else str(machine.ratio))
+        ratio_input.setPlaceholderText("空欄なら売上÷アベレージから計算")
+        installed = QLineEdit(machine.installed_on or "")
+        installed.setPlaceholderText("YYYY/MM/DD、未入力可")
+        form.addRow("売上", sales)
+        form.addRow("アベレージ", average)
+        form.addRow("アベ比（%）", ratio_input)
+        form.addRow("設置日", installed)
         form.addRow(error)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         form.addRow(buttons)
+
         def accept():
             value = number.text().strip() + (side.currentText() if side.currentIndex() else "")
             try:
@@ -411,17 +933,42 @@ class FloorWidget(QWidget):
                     raise AppError("番号を入力してください。")
                 if any(m.uid != machine.uid and m.number == value for m in self.machines):
                     raise AppError("同じマシン番号が登録済みです。左右指定も確認してください。")
-                machine.number, machine.kind, machine.product = value, kind.currentText(), product.text()
+                values = []
+                for label, control in (
+                    ("売上", sales),
+                    ("アベレージ", average),
+                    ("アベ比", ratio_input),
+                ):
+                    parsed = numeric(control.text())
+                    if control.text().strip() and parsed is None:
+                        raise AppError(f"{label}は数値または空欄で指定してください。")
+                    values.append(parsed)
+                if values[1] is not None and values[1] < 0:
+                    raise AppError("アベレージは0以上で指定してください。")
+                installation = parse_date(installed.text())
+                if installed.text().strip() and installation is None:
+                    raise AppError("設置日を日付形式で入力してください。")
+                machine.number, machine.kind, machine.product = (
+                    value,
+                    kind.currentText(),
+                    product.text(),
+                )
+                machine.sales, machine.average, machine.ratio = values
+                machine.ratio_from_excel = bool(ratio_input.text().strip())
+                machine.installed_on = installation.isoformat() if installation else None
                 dlg.accept()
             except AppError as exc:
                 error.setText(str(exc))
+
         buttons.accepted.connect(accept)
         buttons.rejected.connect(dlg.reject)
         return dlg.exec() == QDialog.DialogCode.Accepted
 
     def add_dialog(self):
         center = self.view.mapToScene(self.view.viewport().rect().center())
-        m = Machine(x=max(0, round(center.x()/GRID)*GRID), y=max(0, round(center.y()/GRID)*GRID))
+        m = Machine(
+            x=max(0, round(center.x() / GRID) * GRID), y=max(0, round(center.y() / GRID) * GRID)
+        )
         if self.machine_dialog(m, "マシン追加"):
             self.add_machine(m)
 
@@ -431,7 +978,11 @@ class FloorWidget(QWidget):
         if not self.machine_dialog(updated, "マシン編集"):
             return
         if old.number and old.number != updated.number and self.related({old.number}):
-            QMessageBox.warning(self, "入替予定との整合性", "変更前のマシン番号が入替予定で使われています。予定の番号は自動変更しません。商品一覧で変更先を確認・修正してください。")
+            QMessageBox.warning(
+                self,
+                "入替予定との整合性",
+                "変更前のマシン番号が入替予定で使われています。予定の番号は自動変更しません。商品一覧で変更先を確認・修正してください。",
+            )
         before = self.state()
         self.machines[self.machines.index(old)] = updated
         self.rebuild()
@@ -442,8 +993,19 @@ class FloorWidget(QWidget):
         if not selected:
             return
         used = self.related({m.number for m in selected if m.number})
-        warning = f"\n注意：{len(used)}件の入替予定で使用中です。予定のマシン番号は残ります。商品一覧で修正してください。" if used else ""
-        if QMessageBox.question(self, "マシン削除", f"選択した{len(selected)}枠を削除しますか？元Excelは変更しません。{warning}") != QMessageBox.StandardButton.Yes:
+        warning = (
+            f"\n注意：{len(used)}件の入替予定で使用中です。予定のマシン番号は残ります。商品一覧で修正してください。"
+            if used
+            else ""
+        )
+        if (
+            QMessageBox.question(
+                self,
+                "マシン削除",
+                f"選択した{len(selected)}枠を削除しますか？元Excelは変更しません。{warning}",
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
             return
         before = self.state()
         ids = {m.uid for m in selected}
@@ -451,20 +1013,35 @@ class FloorWidget(QWidget):
         self.rebuild()
         self.record(before, "マシン削除")
         if used:
-            self.message.emit("削除したマシンが入替予定に残っています。商品一覧で確認してください。")
+            self.message.emit(
+                "削除したマシンが入替予定に残っています。商品一覧で確認してください。"
+            )
 
     def duplicate_selected(self):
         selected = self.selected()
         if not selected:
             return
         before = self.state()
-        clones = [Machine(kind=m.kind, product=m.product, x=m.x + GRID, y=m.y + GRID, width=m.width, height=m.height) for m in selected]
+        clones = [
+            Machine(
+                kind=m.kind,
+                product=m.product,
+                x=m.x + GRID,
+                y=m.y + GRID,
+                width=m.width,
+                height=m.height,
+                font_size=m.font_size,
+            )
+            for m in selected
+        ]
         self.machines.extend(clones)
         self.rebuild()
         for m in clones:
             self.nodes[m.uid].setSelected(True)
         self.record(before, "マシン複製")
-        self.message.emit("複製しました。番号は未設定です。ダブルクリックで新しい番号を登録してください。")
+        self.message.emit(
+            "複製しました。番号は未設定です。ダブルクリックで新しい番号を登録してください。"
+        )
 
     def align_selected(self, mode):
         self.align.setCurrentIndex(0)
@@ -475,8 +1052,10 @@ class FloorWidget(QWidget):
         if mode in (1, 2):
             value = min(m.x if mode == 1 else m.y for m in selected)
             for m in selected:
-                if mode == 1: m.x = value
-                else: m.y = value
+                if mode == 1:
+                    m.x = value
+                else:
+                    m.y = value
         elif mode in (3, 4) and len(selected) >= 3:
             axis, size = ("x", "width") if mode == 3 else ("y", "height")
             selected.sort(key=lambda m: getattr(m, axis))
@@ -484,7 +1063,9 @@ class FloorWidget(QWidget):
             end = getattr(selected[-1], axis) + getattr(selected[-1], size)
             gap = (end - start - sum(getattr(m, size) for m in selected)) / (len(selected) - 1)
             if gap < 0:
-                self.message.emit("重なるマシンは等間隔にできません。先に両端の間隔を広げてください。")
+                self.message.emit(
+                    "重なるマシンは等間隔にできません。先に両端の間隔を広げてください。"
+                )
                 return
             pos = start
             for m in selected:
@@ -498,9 +1079,36 @@ class FloorWidget(QWidget):
         before = self.state()
         self.initialized = True
         self.source = str(path)
+        self.loaded_at = datetime.now().astimezone().isoformat(timespec="minutes")
         self.original = [asdict(m) for m in machines]
         if not preserve:
             self.machines = machines
+        else:
+
+            def unique(field):
+                result = {}
+                duplicates = set()
+                for m in machines:
+                    key = getattr(m, field)
+                    if key:
+                        if key in result:
+                            duplicates.add(key)
+                        result[key] = m
+                return {key: value for key, value in result.items() if key not in duplicates}
+
+            by_key, by_number = unique("source_key"), unique("number")
+            for m in self.machines:
+                fresh = by_key.get(m.source_key) or by_number.get(m.number)
+                if fresh:
+                    for field in (
+                        "product",
+                        "sales",
+                        "average",
+                        "ratio",
+                        "ratio_from_excel",
+                        "installed_on",
+                    ):
+                        setattr(m, field, getattr(fresh, field))
         self.rebuild()
         self.record(before, "レイアウトExcel読込")
         self.fit()
@@ -513,7 +1121,14 @@ class FloorWidget(QWidget):
             return
         preserve = False
         if self.machines:
-            result = QMessageBox.question(self, "配置の維持", "現在の編集済み配置を維持しますか？\n「はい」：現在の配置を保持し、元配置だけ更新\n「いいえ」：Excelの配置に置換", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
+            result = QMessageBox.question(
+                self,
+                "配置の維持",
+                "現在の編集済み配置を維持しますか？\n「はい」：位置・サイズ・追加マシンを保持し、対応枠の商品・稼働値を更新\n「いいえ」：Excelの配置に置換",
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Cancel,
+            )
             if result == QMessageBox.StandardButton.Cancel:
                 return
             preserve = result == QMessageBox.StandardButton.Yes
@@ -527,7 +1142,12 @@ class FloorWidget(QWidget):
     def reset_original(self):
         if not self.original:
             return
-        if QMessageBox.question(self, "元の配置に戻す", "追加・削除・移動した配置を元のExcel配置に戻しますか？") != QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self, "元の配置に戻す", "追加・削除・移動した配置を元のExcel配置に戻しますか？"
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
             return
         before = self.state()
         self.machines = validate_machines(self.original)
@@ -536,11 +1156,17 @@ class FloorWidget(QWidget):
         self.fit()
 
     def save_dialog(self):
-        path, _ = QFileDialog.getSaveFileName(self, "配置を保存", "売り場レイアウト.json", "JSON (*.json)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "配置を保存", "売り場レイアウト.json", "JSON (*.json)"
+        )
         if path:
             if not path.lower().endswith(".json"):
                 path += ".json"
-                if Path(path).exists() and QMessageBox.question(self, "上書き確認", "既存の配置JSONを上書きしますか？") != QMessageBox.StandardButton.Yes:
+                if (
+                    Path(path).exists()
+                    and QMessageBox.question(self, "上書き確認", "既存の配置JSONを上書きしますか？")
+                    != QMessageBox.StandardButton.Yes
+                ):
                     return
             try:
                 save_layout(path, self.state())
@@ -562,25 +1188,161 @@ class FloorWidget(QWidget):
                 QMessageBox.warning(self, "復元エラー", str(exc))
 
     def paint_floor(self, printer):
-        painter = QPainter()
-        if not painter.begin(printer):
-            self.message.emit("レイアウトを印刷できません。")
-            return
-        selected = [m.uid for m in self.selected()]
-        self.scene.clearSelection()
-        try:
-            rect = printer.pageRect(QPrinter.Unit.DevicePixel)
-            self.scene.render(painter, QRectF(0, 0, rect.width(), rect.height()), self.scene.itemsBoundingRect().adjusted(-10, -10, 10, 10))
-        finally:
-            painter.end()
-            for uid in selected:
-                self.nodes[uid].setSelected(True)
+        return render_floor(
+            printer,
+            self.machines,
+            self.assignments(),
+            self.print_options,
+            self.reference_day(),
+            self.print_renderer,
+            [m.uid for m in self.selected()],
+            self.loaded_at,
+        )
 
-    def print_floor(self):
+    def print_settings(self, *_):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("売り場の用紙・印刷設定")
+        layout = QVBoxLayout(dialog)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        controls = FloorPrintControls(self.print_options)
+        scroll.setWidget(controls)
+        layout.addWidget(scroll)
+        info = QLabel("画面表示とは独立した設定です。")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+        controls.invalid.connect(info.setText)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        layout.addWidget(buttons)
+
+        def accept():
+            try:
+                self.set_print_options(controls.options())
+                dialog.accept()
+            except AppError as exc:
+                info.setText(str(exc))
+
+        buttons.accepted.connect(accept)
+        buttons.rejected.connect(dialog.reject)
+        dialog.resize(440, 850)
+        dialog.exec()
+
+    def preview(self, *_):
         if not self.machines:
             self.message.emit("印刷するマシン配置がありません。")
             return
-        printer = configured_printer()
-        dialog = QPrintDialog(printer, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        try:
+            dialog = FloorPreviewDialog(self)
+            self._active_preview = dialog
+            dialog.exec()
+        except Exception as exc:
+            QMessageBox.warning(self, "売り場プレビュー", str(exc))
+        finally:
+            self._active_preview = None
+
+    def prepare_print(self):
+        plan = plan_floor(
+            self.machines,
+            self.assignments(),
+            self.print_options,
+            self.reference_day(),
+            self.print_renderer,
+            [m.uid for m in self.selected()],
+            loaded_at=self.loaded_at,
+        )
+        if plan.warnings:
+            parent = self._active_preview or self
+            if (
+                QMessageBox.question(
+                    parent,
+                    "売り場印刷の確認",
+                    "\n".join(plan.warnings) + "\n設定を保持して出力を続けますか？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                != QMessageBox.StandardButton.Yes
+            ):
+                return None
+        return plan
+
+    def export_floor_pdf(self, *_):
+        parent = self._active_preview or self
+        try:
+            if not self.prepare_print():
+                return
+            path, _ = QFileDialog.getSaveFileName(
+                parent, "売り場レイアウトをPDF保存", "売り場レイアウト.pdf", "PDF (*.pdf)"
+            )
+            if not path:
+                return
+            if not path.lower().endswith(".pdf"):
+                path += ".pdf"
+                if (
+                    Path(path).exists()
+                    and QMessageBox.question(parent, "上書き確認", "既存PDFを上書きしますか？")
+                    != QMessageBox.StandardButton.Yes
+                ):
+                    return
+            sources = (self.source, getattr(self.window(), "source", ""))
+            plan = save_floor_pdf(
+                path,
+                self.machines,
+                self.assignments(),
+                self.print_options,
+                self.reference_day(),
+                self.print_renderer,
+                [m.uid for m in self.selected()],
+                self.loaded_at,
+                sources,
+            )
+            self.message.emit(f"売り場PDFを保存しました（{len(plan.pages)}ページ）：{path}")
+        except Exception as exc:
+            QMessageBox.warning(parent, "売り場PDF保存", str(exc))
+
+    def print_floor(self, *_):
+        parent = self._active_preview or self
+        try:
+            plan = self.prepare_print()
+            if plan is None:
+                return
+            printer = floor_printer(self.print_options)
+            dialog = QPrintDialog(printer, parent)
+            dialog.setMinMax(1, len(plan.pages))
+            from PySide6.QtPrintSupport import QAbstractPrintDialog
+
+            dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, True)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            if not paper_supported(printer, self.print_options):
+                QMessageBox.warning(
+                    parent,
+                    "用紙サイズ非対応",
+                    f"選択したプリンターは{self.print_options.paper}に対応していません。対応用紙に変更して再プレビューしてください。",
+                )
+                return
+            expected = self.print_options.paper_size().size(QPageSize.Unit.Millimeter)
+            actual = printer.pageLayout().pageSize().size(QPageSize.Unit.Millimeter)
+            orientation = (
+                QPageLayout.Orientation.Landscape
+                if self.print_options.orientation == "landscape"
+                else QPageLayout.Orientation.Portrait
+            )
+            if (
+                abs(expected.width() - actual.width()) > 1
+                or abs(expected.height() - actual.height()) > 1
+                or printer.pageLayout().orientation() != orientation
+            ):
+                QMessageBox.warning(
+                    parent,
+                    "用紙設定を確認",
+                    "プリンター側の用紙がプレビューと異なります。用紙設定を合わせてから印刷してください。",
+                )
+                return
             self.paint_floor(printer)
+            self.message.emit(
+                "売り場の印刷ジョブを送信しました。用紙出力はプリンターで確認してください。"
+            )
+        except Exception as exc:
+            QMessageBox.warning(parent, "売り場印刷", str(exc))

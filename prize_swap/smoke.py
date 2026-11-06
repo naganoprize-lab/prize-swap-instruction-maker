@@ -15,13 +15,16 @@ def run(output):
     runtime = None
     try:
         from PySide6.QtCore import QDate, QTimer
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QDialog
         from PySide6.QtPdf import QPdfDocument
         from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrintPreviewWidget
         from .core import Product, load_session, save_session
         from .exporter import export_excel
         from .printing import configured_printer, save_pdf
         from .floor_data import Machine
+        from .floor_print import FloorPrintOptions, floor_printer
+        from .floor_print_ui import FloorPreviewDialog
+        from unittest.mock import patch
         from .fonts import validate_print_fonts
         from .pdf_validation import normalized_pdf_text, require_searchable_pdf
         from .ui import Window
@@ -50,8 +53,10 @@ def run(output):
         assert w.summary_table.item(2,0).text() == "フック"
         assert w.summary_table.item(2,2).text() == "1"
         assert w.summary_table.item(2,3).text() == "0"
-        w.floor.add_machine(Machine(number="20085右", product="現在の商品A", x=100, y=100))
-        w.floor.add_machine(Machine(number="20098左", product="現在の商品B", x=350, y=100))
+        w.floor.add_machine(Machine(number="20085右", product="現在の商品A", x=100, y=100,
+            sales=1000,average=2000,ratio=49.9,installed_on="2026-11-01"))
+        w.floor.add_machine(Machine(number="20098左", product="現在の商品B", x=350, y=100,
+            sales=2000,average=1000,ratio=200,installed_on="2026-11-05"))
         w.floor.duplicate_selected()
         assert len(w.floor.machines) == 3
         w.floor.history.undo()
@@ -62,6 +67,28 @@ def run(output):
         assert "20085" in "".join(floor_pdf["pages"][0]["text"].split())
         report["floor_pdf_fonts"] = floor_pdf["fonts"]
         report["floor_machines"] = len(w.floor.machines)
+        w.floor.reference_date.setDate(QDate(2026,11,5))
+        w.floor.display_mode.setCurrentIndex(w.floor.display_mode.findData("analysis"))
+        w.floor.set_print_options(FloorPrintOptions(paper="A3",orientation="portrait"))
+        floor_preview=FloorPreviewDialog(w.floor)
+        floor_preview.show();app.processEvents();floor_preview.preview.updatePreview()
+        assert floor_preview.preview.pageCount()==1
+        floor_preview.close()
+        floor_reference=output/"売り場A3.pdf"
+        w.floor.paint_floor(floor_printer(w.floor.print_options,floor_reference))
+        class AcceptedFloorPrintDialog:
+            def __init__(self,*args): pass
+            def setMinMax(self,*args): pass
+            def setOption(self,*args): pass
+            def exec(self): return QDialog.DialogCode.Accepted
+        floor_direct=output/"売り場直接印刷確認.pdf"
+        with patch("prize_swap.floor.QPrintDialog",AcceptedFloorPrintDialog), patch(
+            "prize_swap.floor.floor_printer",lambda options:floor_printer(options,floor_direct)):
+            w.floor.print_floor()
+        reference_text=normalized_pdf_text("".join(p["text"] for p in require_searchable_pdf(floor_reference)["pages"]))
+        direct_text=normalized_pdf_text("".join(p["text"] for p in require_searchable_pdf(floor_direct)["pages"]))
+        assert reference_text==direct_text and "アベ比49.9%" in direct_text and "投入4日" in direct_text
+        report["floor_print"]={"paper":"A3","preview_pages":1,"direct_pdf_equal":True}
         source_name = w.products[0].name
         assert w.labels.model.entries[0].automatic_copies == 2
         assert w.labels.model.setData(w.labels.model.index(0, 1), "LABEL_ONLY 商品名")

@@ -262,7 +262,7 @@ class Window(QMainWindow):
         self.page_rows.valueChanged.connect(self.mark_dirty)
         instruction_layout.addWidget(self.page_rows)
         bottom.addWidget(self.instruction_settings)
-        self.tabs.currentChanged.connect(lambda *_: self.instruction_settings.setVisible(self.tabs.currentWidget() is not self.labels))
+        self.tabs.currentChanged.connect(lambda *_: self.instruction_settings.setVisible(self.tabs.currentIndex() == 0))
         bottom_layout.addLayout(bottom)
         self.statusBar().showMessage("準備完了 — Excelを読み込んでください。")
 
@@ -402,6 +402,8 @@ class Window(QMainWindow):
             self.error(exc)
 
     def preview(self):
+        if self.tabs.currentWidget() is self.floor:
+            return self.floor.preview()
         if self.tabs.currentWidget() is self.labels:
             return self.labels.preview()
         try:
@@ -433,6 +435,8 @@ class Window(QMainWindow):
             self.error(exc)
 
     def print_direct(self):
+        if self.tabs.currentWidget() is self.floor:
+            return self.floor.print_floor()
         if self.tabs.currentWidget() is self.labels:
             return self.labels.print_direct()
         try:
@@ -450,6 +454,8 @@ class Window(QMainWindow):
             self.error(exc)
 
     def export_pdf(self):
+        if self.tabs.currentWidget() is self.floor:
+            return self.floor.export_floor_pdf()
         if self.tabs.currentWidget() is self.labels:
             return self.labels.export_pdf()
         try:

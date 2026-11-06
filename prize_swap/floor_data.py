@@ -1,12 +1,16 @@
 """Floor-plan persistence and read-only import of cell-based Excel layouts."""
+
 from dataclasses import dataclass, field
 from pathlib import Path
 import math
 import re
+import unicodedata
 from uuid import uuid4
+from datetime import date, datetime
 
 from openpyxl import load_workbook
-from .core import AppError, atomic_json, machine_numbers
+from .core import AppError, atomic_json, machine_numbers, parse_date
+from .floor_status import numeric, percent
 
 
 @dataclass
@@ -20,6 +24,16 @@ class Machine:
     height: float = 120
     source_key: str = ""
     uid: str = field(default_factory=lambda: uuid4().hex)
+    sales: float | None = None
+    average: float | None = None
+    ratio: float | None = None
+    ratio_from_excel: bool = False
+    installed_on: str | None = None
+    font_size: float = 12
+
+    def __post_init__(self):
+        if isinstance(self.installed_on, (date, datetime)):
+            self.installed_on = parse_date(self.installed_on).isoformat()
 
 
 def validate_machines(records):
@@ -29,7 +43,10 @@ def validate_machines(records):
     try:
         for record in records:
             m = Machine(**record)
-            if any(not isinstance(getattr(m, key), str) for key in ("number", "kind", "product", "source_key", "uid")):
+            if any(
+                not isinstance(getattr(m, key), str)
+                for key in ("number", "kind", "product", "source_key", "uid")
+            ):
                 raise ValueError("文字列項目が不正")
             if not m.uid or m.uid in ids:
                 raise ValueError("マシンIDが重複")
@@ -40,10 +57,39 @@ def validate_machines(records):
                 numbers.add(m.number)
             for key in ("x", "y", "width", "height"):
                 value = getattr(m, key)
-                if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not 0 <= value <= 100000:
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (float, int))
+                    or not math.isfinite(value)
+                    or not 0 <= value <= 100000
+                ):
                     raise ValueError("位置・サイズが不正")
             if m.width < 80 or m.height < 60:
                 raise ValueError("サイズが小さすぎます")
+            for key in ("sales", "average", "ratio"):
+                value = getattr(m, key)
+                if value is not None and (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                ):
+                    raise ValueError("稼働数値が不正")
+            if m.average is not None and m.average < 0:
+                raise ValueError("アベレージは0以上で指定してください")
+            if type(m.ratio_from_excel) is not bool:
+                raise ValueError("アベ比の取得元が不正")
+            if m.installed_on is not None:
+                installed = parse_date(m.installed_on)
+                if installed is None:
+                    raise ValueError("設置日が不正")
+                m.installed_on = installed.isoformat()
+            if (
+                isinstance(m.font_size, bool)
+                or not isinstance(m.font_size, (int, float))
+                or not math.isfinite(m.font_size)
+                or not 6 <= m.font_size <= 72
+            ):
+                raise ValueError("文字サイズは6〜72で指定してください")
             result.append(m)
     except (TypeError, ValueError) as exc:
         raise AppError(f"マシン配置を読み込めません：{exc}") from exc
@@ -51,17 +97,76 @@ def validate_machines(records):
 
 
 def validate_state(state):
-    if not isinstance(state, dict) or state.get("version") != 1 or not isinstance(state.get("source", ""), str):
+    if (
+        not isinstance(state, dict)
+        or state.get("version") != 1
+        or not isinstance(state.get("source", ""), str)
+    ):
         raise AppError("配置JSONの形式が不正です。")
     validate_machines(state.get("machines"))
     validate_machines(state.get("original", []))
     if type(state.get("initialized", False)) is not bool:
         raise AppError("配置の初期化情報が不正です。")
-    if type(state.get("show_methods",False)) is not bool:
+    if type(state.get("show_methods", False)) is not bool:
         raise AppError("運営方法表示設定が不正です。")
     if type(state.get("snap", True)) is not bool:
         raise AppError("スナップ設定が不正です。")
+    if state.get("display_mode", "all") not in ("product", "analysis", "all"):
+        raise AppError("表示モードが不正です。")
+    if state.get("reference_date") is not None and parse_date(state["reference_date"]) is None:
+        raise AppError("基準日が不正です。")
+    if type(state.get("follow_today", True)) is not bool:
+        raise AppError("基準日の追従設定が不正です。")
+    zoom = state.get("zoom", 100)
+    if zoom is not None and (
+        isinstance(zoom, bool) or not isinstance(zoom, (int, float)) or not 50 <= zoom <= 300
+    ):
+        raise AppError("表示倍率は50〜300%で指定してください。")
+    if not isinstance(state.get("loaded_at", ""), str):
+        raise AppError("読込日時が不正です。")
+    from .floor_print import FloorPrintOptions
+
+    FloorPrintOptions.restore(state.get("print_options"))
     return state
+
+
+def block_metrics(ws, cell, epoch):
+    result = {}
+    for row in range(cell.row + 1, min(ws.max_row, cell.row + 4) + 1):
+        raw = ws.cell(row, cell.column).value
+        if not isinstance(raw, str):
+            continue
+        label = unicodedata.normalize("NFKC", raw).replace(" ", "").strip()
+        first, second = ws.cell(row, cell.column + 1), ws.cell(row, cell.column + 2)
+        if label in ("売上/アベレージ", "売上／アベレージ"):
+            result.update(sales=numeric(first.value), average=numeric(second.value))
+        elif label in ("PO率/アベ比", "PO率／アベ比"):
+            result.update(
+                ratio=percent(second.value, second.number_format),
+                ratio_from_excel=second.value is not None and str(second.value).strip() != "",
+            )
+        elif label in ("設置日/設定2", "設置日／設定2", "設置日", "投入日"):
+            value = parse_date(first.value, epoch)
+            result["installed_on"] = value.isoformat() if value else None
+        elif label in ("売上", "アベレージ", "アベ比", "アベ比(%)"):
+            key = {
+                "売上": "sales",
+                "アベレージ": "average",
+                "アベ比": "ratio",
+                "アベ比(%)": "ratio",
+            }[label]
+            result[key] = (
+                percent(first.value, first.number_format)
+                if key == "ratio"
+                else numeric(first.value)
+            )
+            if key == "ratio":
+                result["ratio_from_excel"] = (
+                    first.value is not None and str(first.value).strip() != ""
+                )
+    if result.get("average") is not None and result["average"] < 0:
+        result["average"] = None
+    return result
 
 
 def import_layout(path):
@@ -72,7 +177,9 @@ def import_layout(path):
         ws = wb["投入中レイアウト"]
         mapping, warnings = {}, []
         if "管理番号参考値" in wb.sheetnames:
-            for key, number in wb["管理番号参考値"].iter_rows(min_col=1, max_col=2, values_only=True):
+            for key, number in wb["管理番号参考値"].iter_rows(
+                min_col=1, max_col=2, values_only=True
+            ):
                 if key is None or number is None:
                     continue
                 try:
@@ -87,7 +194,12 @@ def import_layout(path):
                         mapping[key] = numbers[0]
                 except AppError:
                     warnings.append(f"参照ID {key} の管理番号が不正です。")
-        cells = [c for row in ws for c in row if isinstance(c.value, str) and re.fullmatch(r"[LR]_\d+", c.value.strip())]
+        cells = [
+            c
+            for row in ws
+            for c in row
+            if isinstance(c.value, str) and re.fullmatch(r"[LR]_\d+", c.value.strip())
+        ]
         if not cells:
             raise AppError("レイアウトに L_番号 / R_番号 のマシン枠が見つかりません。")
         if len(cells) > 5000:
@@ -101,25 +213,44 @@ def import_layout(path):
             xs.append(xs[-1] + widths.get(col, (ws.sheet_format.defaultColWidth or 9) * 7 + 5))
         for row in range(1, ws.max_row + 5):
             dim = ws.row_dimensions[row]
-            ys.append(ys[-1] + (0 if dim.hidden else (dim.height or ws.sheet_format.defaultRowHeight or 15) * 4 / 3))
+            ys.append(
+                ys[-1]
+                + (
+                    0
+                    if dim.hidden
+                    else (dim.height or ws.sheet_format.defaultRowHeight or 15) * 4 / 3
+                )
+            )
         origin_x, origin_y = min(xs[c.column - 1] for c in cells), min(ys[c.row - 1] for c in cells)
         machines, seen = [], set()
         for cell in cells:
             key = cell.value.strip()
             number = mapping.get(key, "")
             if number in seen:
-                warnings.append(f"{cell.coordinate}：管理番号 {number} が重複するため未設定にしました。")
+                warnings.append(
+                    f"{cell.coordinate}：管理番号 {number} が重複するため未設定にしました。"
+                )
                 number = ""
             if number:
                 seen.add(number)
             product = ws.cell(cell.row, cell.column + 1).value
-            machines.append(Machine(number=number, product=str(product) if product is not None else "", source_key=key,
-                x=xs[cell.column - 1] - origin_x, y=ys[cell.row - 1] - origin_y,
-                width=max(80, xs[cell.column + 2] - xs[cell.column - 1] - 8),
-                height=max(60, ys[cell.row + 3] - ys[cell.row - 1] - 8)))
+            machines.append(
+                Machine(
+                    number=number,
+                    product=str(product) if product is not None else "",
+                    source_key=key,
+                    x=xs[cell.column - 1] - origin_x,
+                    y=ys[cell.row - 1] - origin_y,
+                    width=max(80, xs[cell.column + 2] - xs[cell.column - 1] - 8),
+                    height=max(60, ys[cell.row + 3] - ys[cell.row - 1] - 8),
+                    **block_metrics(ws, cell, wb.epoch),
+                )
+            )
         unknown = sum(not m.number for m in machines)
         if unknown:
-            warnings.append(f"{unknown}枠は実マシン番号の対応がないため未設定です。参照IDから実番号を推測していません。")
+            warnings.append(
+                f"{unknown}枠は実マシン番号の対応がないため未設定です。参照IDから実番号を推測していません。"
+            )
         return machines, warnings
     finally:
         wb.close()

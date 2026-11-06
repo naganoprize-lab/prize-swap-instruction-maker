@@ -191,10 +191,10 @@ def test_floor_colors_and_pdf(floor, tmp_path):
         floor.scene.render(painter,QRectF(0,0,180,120),QRectF(0,0,180,120))
         painter.end()
         return image.pixelColor(170,110).name()
-    assert pixel() == "#fff4bf"
+    assert pixel() == "#e1effc"
     floor.products()[0].priority = True
     floor.sync()
-    assert pixel() == "#fce4ec"
+    assert pixel() == "#e1effc"  # Priority uses a yellow border; planned blue stays dominant.
     path = tmp_path / "配置図.pdf"
     floor.paint_floor(configured_printer(path))
     doc = QPdfDocument()
