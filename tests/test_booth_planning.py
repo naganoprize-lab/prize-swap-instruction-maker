@@ -2,8 +2,6 @@
 
 from datetime import date
 import json
-import re
-import unicodedata
 
 import pytest
 from openpyxl import load_workbook
@@ -30,7 +28,7 @@ from prize_swap.methods import (
     set_allocations,
     sync_machine_methods,
 )
-from prize_swap.pdf_validation import require_searchable_pdf
+from prize_swap.pdf_validation import normalized_pdf_text, require_searchable_pdf
 from prize_swap.printing import (
     PADDING,
     TITLE_HEIGHT,
@@ -59,7 +57,7 @@ def product():
 
 
 def compact(value):
-    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value))
+    return normalized_pdf_text(value)
 
 
 def test_planned_three_with_one_machine_and_method_summary():
@@ -385,6 +383,21 @@ def test_direct_print_dialog_uses_same_machine_and_plan_renderer(window, tmp_pat
     text = compact(require_searchable_pdf(path)["pages"][0]["text"])
     assert "橋渡し2ブース" in text and "リング1ブース" in text
     assert text.count(compact(window.products[0].name)) == 1
+    saved = tmp_path / "PDF保存経路.pdf"
+    save_pdf(saved, window.products, DAY)
+    saved_text = compact(require_searchable_pdf(saved)["pages"][0]["text"])
+    assert saved_text == text
+    # Compare actual page rendering as well as text; metadata timestamps differ.
+    from PySide6.QtPdf import QPdfDocument
+    from PySide6.QtCore import QSize
+    images = []
+    for filename in (saved, path):
+        document = QPdfDocument()
+        assert document.load(str(filename)) == QPdfDocument.Error.None_
+        images.append(document.render(0, QSize(1684, 1190)))
+        assert not images[-1].isNull()
+        document.close()
+    assert images[0] == images[1]
 
 
 def test_floor_optional_method_display_and_state(window):
