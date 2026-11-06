@@ -97,23 +97,25 @@ def test_export_style_values_and_source_unchanged(source, tmp_path):
     assert export_excel(out, [p, normal], DAY, source) == 1
     wb = load_workbook(out)
     ws = wb.active
-    assert ws["A3"].value == "20085右\n20098左"
-    assert ws["B3"].value == "橋渡し\n自由入力"
+    assert ws["A3"].value == "20085右"
+    assert ws["A4"].value == "20098左"
+    assert ws["B3"].value == "未設定"
+    assert ws["C3"].value == "橋渡し：予定未設定\n自由入力：予定未設定"
     assert ws["G3"].value == "トータル⑩"
     assert ws["E3"].value == 12 and ws["F3"].value == 3
     assert all(ws.cell(3, c).fill.fgColor.rgb == PINK for c in range(1, 8))
-    assert ws["C4"].fill.fgColor.rgb == "00000000"
-    assert ws["C3"].alignment.wrap_text
-    assert ws.column_dimensions["C"].width == 44
-    assert ws.row_dimensions[3].height == 55
-    assert ws["C3"].border.bottom.style == "double"
+    assert ws["D5"].fill.fgColor.rgb == "00000000"
+    assert ws["D3"].alignment.wrap_text
+    assert ws.column_dimensions["D"].width == 44
+    assert ws.row_dimensions[3].height >= 55
+    assert ws["D3"].border.bottom.style == "double"
     assert ws.page_setup.orientation == "landscape"
     assert ws.page_setup.paperSize == int(ws.PAPERSIZE_A4)
     assert digest(source) == before
     wb.close()
 
 
-@pytest.mark.parametrize("layout, expected", [("column", {"C3": "商品0", "C4": "商品1", "J3": "商品2", "J4": "商品3", "C7": "商品4"}), ("row", {"C3": "商品0", "J3": "商品1", "C4": "商品2", "J4": "商品3", "C7": "商品4"})])
+@pytest.mark.parametrize("layout, expected", [("column", {"D3": "商品0", "D4": "商品1", "K3": "商品2", "K4": "商品3", "D7": "商品4"}), ("row", {"D3": "商品0", "K3": "商品1", "D4": "商品2", "K4": "商品3", "D7": "商品4"})])
 def test_layout_and_pages(tmp_path, layout, expected):
     products = [Product(DAY, f"商品{i}", order=i) for i in range(5)]
     out = tmp_path / "out.xlsx"
@@ -123,7 +125,7 @@ def test_layout_and_pages(tmp_path, layout, expected):
     for cell, value in expected.items():
         assert ws[cell].value == value
     assert [b.id for b in ws.row_breaks.brk] == [4]
-    assert ws.print_area == "'入れ替え指示書'!$A$1:$N$8"
+    assert ws.print_area == "'入れ替え指示書'!$A$1:$N$7"
     wb.close()
 
 
@@ -132,10 +134,10 @@ def test_order_and_exclusion_and_text_injection(tmp_path):
     out = tmp_path / "out.xlsx"
     export_excel(out, products, DAY)
     wb = load_workbook(out)
-    assert wb.active["C3"].value == "=1+1"
-    assert wb.active["C3"].data_type == "s"
-    assert wb.active["C4"].value == "最後"
-    assert wb.active["C5"].value is None
+    assert wb.active["D3"].value == "=1+1"
+    assert wb.active["D3"].data_type == "s"
+    assert wb.active["D4"].value == "最後"
+    assert wb.active["D5"].value is None
     wb.close()
 
 

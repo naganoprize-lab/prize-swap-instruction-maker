@@ -57,6 +57,8 @@ def validate_state(state):
     validate_machines(state.get("original", []))
     if type(state.get("initialized", False)) is not bool:
         raise AppError("配置の初期化情報が不正です。")
+    if type(state.get("show_methods",False)) is not bool:
+        raise AppError("運営方法表示設定が不正です。")
     if type(state.get("snap", True)) is not bool:
         raise AppError("スナップ設定が不正です。")
     return state

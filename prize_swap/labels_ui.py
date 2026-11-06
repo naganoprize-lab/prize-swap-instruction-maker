@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDateEdit, QDialog,
     QPushButton, QSizePolicy, QSpinBox, QSplitter, QStyledItemDelegate, QTableView, QVBoxLayout, QWidget)
 
 from .core import AppError
+from .methods import allocation_status
 from .labels_data import LabelOptions, LabelStore
 from .labels_printing import label_printer, plan_labels, render_labels, save_labels_pdf
 
@@ -292,6 +293,10 @@ class LabelsWidget(QWidget):
         area = printer.pageRect(QPrinter.Unit.Point)
         entries, options = list(self.model.entries), self.store.options
         plan = plan_labels(entries, area.width(), area.height(), options)
+        mismatches=[f"{e.product.name}：{allocation_status(e.product).message}" for e in entries
+                    if e.included and (allocation_status(e.product).unassigned or allocation_status(e.product).excess)]
+        if mismatches:
+            QMessageBox.warning(self,"予定ブース数と割当の差分", "ラベル枚数は予定数ではなく登録マシン数（または手動枚数）を使用します。\n"+"\n".join(mismatches))
         if plan.warnings:
             QMessageBox.warning(self, "長い商品名の確認", "\n".join(plan.warnings))
         return entries, options

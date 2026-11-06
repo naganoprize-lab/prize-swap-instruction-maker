@@ -8,13 +8,14 @@ from PySide6.QtGui import QColor, QTextCharFormat
 from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEdit,
     QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSpinBox, QTableView, QTabWidget,
+    QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSpinBox, QTableView, QTabWidget, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget)
 
 from .core import AppError, for_day, load_session, read_products, save_session
 from .exporter import export_excel
 from .printing import configured_printer, plan_pages, render_document, save_pdf
 from .table import COLUMNS, ProductDelegate, ProductModel
+from .methods import allocation_status, format_allocations, aggregate_booths
 from .floor import FloorWidget
 from .floor_data import validate_state
 from .labels_data import LabelStore
@@ -69,7 +70,7 @@ class ProductFilter(QSortFilterProxyModel):
 
     def filterAcceptsRow(self, row, parent):
         p = self.sourceModel().products[row]
-        text = " ".join([p.name, p.maker, *p.machines, *p.methods]).casefold()
+        text = " ".join([p.name, p.maker, *p.machines, format_allocations(p)]).casefold()
         return (not self.query or self.query in text) and (self.mode != 1 or p.included) and (self.mode != 2 or p.priority)
 
     def lessThan(self, left, right):
@@ -172,6 +173,8 @@ class Window(QMainWindow):
         self.model.edited.connect(self.update_count)
         self.model.edited.connect(self.floor.sync)
         self.model.edited.connect(self.labels.sync)
+        self.model.edited.connect(self.update_allocation_notice)
+        self.model.allocation_warning.connect(lambda text: self.statusBar().showMessage(text, 15000))
         self.model.invalid.connect(lambda message: self.statusBar().showMessage(message, 10000))
         self.proxy = ProductFilter(self)
         self.proxy.setSourceModel(self.model)
@@ -180,6 +183,7 @@ class Window(QMainWindow):
         self.filter_choice.currentIndexChanged.connect(self.filter_changed)
         self.table = QTableView()
         self.table.setModel(self.proxy)
+        self.table.selectionModel().selectionChanged.connect(self.update_allocation_notice)
         self.delegate = ProductDelegate(self.table)
         self.delegate.machine_options = lambda: sorted(m.number for m in self.floor.machines if m.number)
         self.table.setItemDelegate(self.delegate)
@@ -198,9 +202,35 @@ class Window(QMainWindow):
         self.table.viewport().installEventFilter(self)
         center.addWidget(self.table, 1)
         hint = QLabel("セルで直接編集 / マシン番号は複数可 / 印刷は検索に関係なく選択日の出力対象すべて")
+        self.allocation_notice = hint
+        self.default_table_hint = hint.text()
         hint.setObjectName("muted")
         hint.setWordWrap(True)
-        center.addWidget(hint)
+        hint_row=QHBoxLayout()
+        hint_row.addWidget(hint,1)
+        self.summary_toggle=QToolButton()
+        self.summary_toggle.setText("ブース予定集計 ▾")
+        self.summary_toggle.setCheckable(True)
+        self.summary_toggle.setMaximumHeight(22)
+        hint_row.addWidget(self.summary_toggle)
+        center.addLayout(hint_row)
+        self.booth_summary=QWidget()
+        summary_layout=QVBoxLayout(self.booth_summary)
+        summary_layout.setContentsMargins(0,0,0,0)
+        self.summary_scope=QComboBox()
+        self.summary_scope.addItems(["選択日の出力対象全商品", "選択商品"])
+        self.summary_scope.currentIndexChanged.connect(self.update_booth_summary)
+        summary_layout.addWidget(self.summary_scope)
+        self.summary_table=QTableWidget(0,5)
+        self.summary_table.setHorizontalHeaderLabels(["運営方法","予定ブース数","方法割当済み","未割当","超過"])
+        self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.summary_table.setMaximumHeight(170)
+        summary_layout.addWidget(self.summary_table)
+        center.addWidget(self.booth_summary)
+        self.booth_summary.hide()
+        self.summary_toggle.toggled.connect(self.booth_summary.setVisible)
+        self.summary_toggle.toggled.connect(self.update_booth_summary)
 
         footer, bottom_layout = card(outer)
         footer.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
@@ -250,11 +280,47 @@ class Window(QMainWindow):
         self.floor.sync()
         self.labels.sync()
         self.update_count()
+        self.update_allocation_notice()
 
     def update_count(self):
         self.count.setText(f"{len(self.visible)}件 ／ 出力 {sum(p.included for p in self.visible)}件")
         if hasattr(self, "proxy"):
             self.statusBar().showMessage(f"表示 {self.proxy.rowCount()}件 / 選択日 {len(self.visible)}件　印刷は出力チェックのある商品が対象です。")
+
+    def update_allocation_notice(self, *_):
+        if not hasattr(self, "allocation_notice"):
+            return
+        selected = self.selected_products()
+        products = selected or self.visible
+        states = [allocation_status(p) for p in products]
+        excess = sum(bool(s.excess) for s in states)
+        pending = sum(bool(s.unknown or s.unassigned or s.unmapped) for s in states)
+        if len(selected) == 1:
+            text = f"運営方法：{states[0].message}"
+        elif excess or pending:
+            text = f"運営方法（{'選択中' if selected else '表示中'}）：台数超過 {excess}件 / 未設定・未割当 {pending}件。セルのツールチップまたはドロップダウンで確認できます。"
+        else:
+            text = self.default_table_hint
+        self.allocation_notice.setText(text)
+        self.allocation_notice.setStyleSheet("color: #B42318;" if excess else "color: #677D72;")
+        self.update_booth_summary()
+
+    def update_booth_summary(self, *_):
+        if not hasattr(self,"summary_table"):
+            return
+        products=self.selected_products() if self.summary_scope.currentIndex() else self.visible
+        totals=aggregate_booths(products)
+        self.summary_table.setRowCount(len(totals))
+        for row,total in enumerate(totals):
+            planned=f"{total.planned}（未設定{total.unknown}商品）" if total.unknown else str(total.planned)
+            for col,value in enumerate([total.method,planned,total.assigned,total.unassigned,total.excess]):
+                self.summary_table.setItem(row,col,QTableWidgetItem(str(value)))
+
+    def confirm_method_allocations(self):
+        problems = [f"{p.name}：{allocation_status(p).message}" for p in self.visible if p.included and allocation_status(p).excess]
+        if not problems:
+            return True
+        return QMessageBox.question(self, "運営方法の台数を確認", "予定ブース数を超える実際の割当があります。\n" + "\n".join(problems) + "\n設定を保持したまま出力を続けますか？") == QMessageBox.StandardButton.Yes
 
     def selected_products(self):
         return [self.model.products[self.proxy.mapToSource(index).row()] for index in self.table.selectionModel().selectedRows()]
@@ -297,6 +363,8 @@ class Window(QMainWindow):
         self.table.setFocus()
         if not any(p.included for p in self.visible):
             raise AppError("選択日に出力対象の商品がありません。")
+        if not self.confirm_method_allocations():
+            raise AppError("運営方法の台数を確認してから再実行してください。")
         if self.floor.initialized:
             registered = {m.number for m in self.floor.machines if m.number}
             missing = sorted({n for p in self.visible if p.included for n in p.machines if n not in registered})
@@ -308,7 +376,10 @@ class Window(QMainWindow):
 
     def paint_printer(self, printer):
         try:
-            return render_document(printer, list(self.visible), self.selected_day(), self.page_rows.value(), self.layout_name())
+            plan = render_document(printer, list(self.visible), self.selected_day(), self.page_rows.value(), self.layout_name())
+            if plan.warnings:
+                self.statusBar().showMessage(" / ".join(plan.warnings), 15000)
+            return plan
         except Exception as exc:
             self.error(exc)
 
@@ -351,7 +422,8 @@ class Window(QMainWindow):
             path = self.save_path("PDF保存", "PDF (*.pdf)", ".pdf")
             if path:
                 plan = save_pdf(path, products, self.selected_day(), self.page_rows.value(), self.layout_name(), self.source)
-                self.statusBar().showMessage(f"PDFを保存しました（{len(plan.pages)}ページ）：{path}", 10000)
+                notice = " / ".join(plan.warnings or [])
+                self.statusBar().showMessage(f"PDFを保存しました（{len(plan.pages)}ページ）：{path} {notice}", 15000)
         except Exception as exc:
             self.error(exc)
     def mark_dirty(self, *_):
@@ -466,6 +538,8 @@ class Window(QMainWindow):
     def export(self):
         if not any(p.included for p in self.visible):
             self.error(AppError("選択日に出力対象の商品がありません。"))
+            return
+        if not self.confirm_method_allocations():
             return
         path = self.save_path("Excel出力", "Excel (*.xlsx)", ".xlsx")
         if path:

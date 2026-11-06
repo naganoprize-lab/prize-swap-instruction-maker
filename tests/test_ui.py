@@ -3,7 +3,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from datetime import date
 
 import pytest
-from PySide6.QtCore import QDate, Qt, QTimer
+from PySide6.QtCore import QDate, Qt, QTimer, QPoint
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QPlainTextEdit
 from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrintPreviewWidget
@@ -100,18 +100,21 @@ def test_real_delegates_inline_edit_and_dropdown(window):
     window.table.scrollTo(proxy.index(0, 7))
     window.table.setCurrentIndex(proxy.index(0, 7))
     QApplication.processEvents()
-    methods = window.table.viewport().findChild(MethodsCombo)
+    methods = next(e for e in window.table.viewport().findChildren(MethodsCombo) if e.isVisible())
     assert methods is not None and not methods.isWindow()
     methods.showPopup()
     QApplication.processEvents()
-    for row in (0, 1):
-        rect = methods.view().visualRect(methods.model().index(row, 0))
-        QTest.mouseClick(methods.view().viewport(), Qt.MouseButton.LeftButton, pos=rect.center())
+    for name in ("橋渡し", "リング"):
+        check, spin = methods.rows[name]
+        QTest.mouseClick(check, Qt.MouseButton.LeftButton, pos=QPoint(8,check.height()//2))
         QApplication.processEvents()
-        assert methods.view().isVisible()
+        assert methods.popup.isVisible()
+        assert spin.value() == 1
     assert window.products[0].methods == ["橋渡し", "リング"]
+    assert window.products[0].method_counts == {"橋渡し": 1, "リング": 1}
+    methods.custom_name.setText("独自運営")
+    methods.add_custom()
     methods.hidePopup()
-    methods.setEditText(methods.currentText() + ", 独自運営")
     window.search.setFocus()
     QApplication.processEvents()
     assert window.products[0].methods == ["橋渡し", "リング", "独自運営"]
@@ -144,7 +147,7 @@ def test_ui_export_preview_pdf_and_session(window, tmp_path, monkeypatch):
     monkeypatch.setattr(window, "save_path", lambda *a: str(output))
     window.export()
     wb = load_workbook(output)
-    assert wb.active["C3"].value == "商品A"
+    assert wb.active["D3"].value == "商品A"
     wb.close()
     saved = tmp_path / "作業.json"
     window.model.setData(window.model.index(0, 7), "橋渡し,自由運営")

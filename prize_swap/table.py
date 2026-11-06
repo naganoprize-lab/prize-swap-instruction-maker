@@ -1,9 +1,11 @@
 """Product table model and in-cell editors (no modal product editor)."""
 from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QDoubleValidator, QIntValidator, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QColor, QDoubleValidator, QIntValidator
 from PySide6.QtWidgets import QComboBox, QLineEdit, QPlainTextEdit, QStyledItemDelegate, QStyle, QStyleOptionComboBox, QToolButton, QMenu
 
-from .core import AppError, LIMITS, METHODS, machine_numbers, quantity, split_values
+from .core import AppError, LIMITS, machine_numbers, quantity, split_values
+from .methods import allocation_status, format_allocations, set_allocations, editor_state, sync_machine_methods
+from .methods_editor import MethodsCombo
 
 COLUMNS = ["出力", "順序", "メーカー", "商品名", "入数", "CS数", "マシン番号", "運営方法", "優先", "獲得個数制限"]
 ATTRS = ["included", "order", "maker", "name", "units", "cases", "machines", "methods", "priority", "limit"]
@@ -12,6 +14,7 @@ ATTRS = ["included", "order", "maker", "name", "units", "cases", "machines", "me
 class ProductModel(QAbstractTableModel):
     edited = Signal()
     invalid = Signal(str)
+    allocation_warning = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -40,13 +43,24 @@ class ProductModel(QAbstractTableModel):
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             if col in (0, 8):
                 return None
-            return ", ".join(value) if col in (6, 7) else value
+            if col == 7:
+                # QVariantMap sorts keys in the proxy. Pairs retain method order.
+                return editor_state(p) if role == Qt.ItemDataRole.EditRole else format_allocations(p)
+            return ", ".join(value) if col == 6 else value
         if role == Qt.ItemDataRole.CheckStateRole and col in (0, 8):
             return Qt.CheckState.Checked if value else Qt.CheckState.Unchecked
-        if role == Qt.ItemDataRole.BackgroundRole and p.priority:
-            return QColor("#FCE4EC")
+        if role == Qt.ItemDataRole.BackgroundRole:
+            if col == 7:
+                status = allocation_status(p)
+                if status.excess: return QColor("#FEE4E2")
+                if status.unknown or status.unassigned or status.unmapped: return QColor("#FFF4BF")
+            if p.priority: return QColor("#FCE4EC")
+        if role == Qt.ItemDataRole.ForegroundRole and col == 7 and allocation_status(p).excess:
+            return QColor("#B42318")
         if role == Qt.ItemDataRole.ToolTipRole:
-            return "\n".join(value) if col in (6, 7) else str(value)
+            if col == 7:
+                return format_allocations(p, "\n") + "\n" + allocation_status(p).message
+            return "\n".join(value) if col == 6 else str(value)
 
     def flags(self, index):
         flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
@@ -74,59 +88,22 @@ class ProductModel(QAbstractTableModel):
             elif col == 6:
                 value = machine_numbers(str(value))
             elif col == 7:
-                value = split_values(str(value))
+                set_allocations(p, value)
+                value = p.methods
             elif col == 9 and value not in LIMITS:
                 raise AppError("個数制限を選択してください。")
             setattr(p, ATTRS[col], value)
+            if col == 6: sync_machine_methods(p)
             self.dataChanged.emit(self.index(index.row(), 0), self.index(index.row(), len(COLUMNS) - 1))
             self.edited.emit()
+            if col in (6, 7) and (allocation_status(p).excess or allocation_status(p).planned > allocation_status(p).registered):
+                self.allocation_warning.emit(f"{p.name}：{allocation_status(p).message}")
             return True
         except (ValueError, TypeError) as exc:
             self.invalid.emit(str(exc) if isinstance(exc, AppError) else "順序は整数で入力してください。")
             return False
 
 
-class MethodsCombo(QComboBox):
-    """Editable text plus checkable dropdown; clicking a checkbox keeps it open."""
-    changed = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setEditable(True)
-        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.setModel(QStandardItemModel(self))
-        self.view().viewport().installEventFilter(self)
-        self.view().installEventFilter(self)
-        self.lineEdit().setPlaceholderText("複数選択 / 自由入力（カンマ区切り）")
-
-    def set_values(self, values):
-        self.clear()
-        for text in dict.fromkeys(METHODS + values):
-            item = QStandardItem(text)
-            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            item.setData(Qt.CheckState.Checked if text in values else Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
-            self.model().appendRow(item)
-        self.setEditText(", ".join(values))
-
-    def eventFilter(self, obj, event):
-        click = obj is self.view().viewport() and event.type() == QEvent.Type.MouseButtonRelease
-        space = obj is self.view() and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Space
-        if click or space:
-            index = self.view().indexAt(event.position().toPoint()) if click else self.view().currentIndex()
-            if index.isValid():
-                values = split_values(self.currentText())
-                text = self.model().item(index.row()).text()
-                if text in values:
-                    values.remove(text)
-                else:
-                    values.append(text)
-                self.setEditText(", ".join(values))
-                for row in range(self.count()):
-                    item = self.model().item(row)
-                    item.setData(Qt.CheckState.Checked if item.text() in values else Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
-                self.changed.emit()
-            return True
-        return super().eventFilter(obj, event)
 
 
 class MachineEditor(QPlainTextEdit):
@@ -165,6 +142,14 @@ class MachineEditor(QPlainTextEdit):
 
 
 class ProductDelegate(QStyledItemDelegate):
+    def eventFilter(self, editor, event):
+        if isinstance(editor, MethodsCombo) and event.type() == QEvent.Type.FocusOut:
+            if editor.opening_popup or editor.popup.isVisible():
+                # This transient popup belongs to the cell editor. Moving to a
+                # count control must not make QStyledItemDelegate close it.
+                return False
+        return super().eventFilter(editor, event)
+
     def createEditor(self, parent, option, index):
         col = index.column()
         if col == 7:
@@ -190,18 +175,22 @@ class ProductDelegate(QStyledItemDelegate):
         return editor
 
     def setEditorData(self, editor, index):
-        value = str(index.data(Qt.ItemDataRole.EditRole))
+        value = index.data(Qt.ItemDataRole.EditRole)
         if isinstance(editor, MethodsCombo):
-            editor.set_values(split_values(value))
+            if not editor.in_change:
+                machines = str(index.siblingAtColumn(6).data(Qt.ItemDataRole.EditRole))
+                editor.set_allocations(value, machine_numbers(machines))
         elif isinstance(editor, QComboBox):
-            editor.setCurrentText(value)
+            editor.setCurrentText(str(value))
         elif isinstance(editor, QPlainTextEdit):
             editor.setPlainText("\n".join(split_values(value)))
         else:
-            editor.setText(value)
+            editor.setText(str(value))
 
     def setModelData(self, editor, model, index):
-        if isinstance(editor, QComboBox):
+        if isinstance(editor, MethodsCombo):
+            value = editor.state()
+        elif isinstance(editor, QComboBox):
             value = editor.currentText()
         elif isinstance(editor, QPlainTextEdit):
             value = editor.toPlainText()

@@ -1,4 +1,5 @@
 """Point-based shared layout and QPainter rendering for printer, preview and PDF."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,25 +8,43 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from PySide6.QtCore import QMarginsF, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPageLayout, QPageSize, QPainter, QPen, QTextLayout, QTextOption
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QImage,
+    QPageLayout,
+    QPageSize,
+    QPainter,
+    QPen,
+    QTextLayout,
+    QTextOption,
+)
 from PySide6.QtPrintSupport import QPrinter
 
-from .core import AppError, ordered
+from .core import AppError
 from .fonts import print_font, validate_print_fonts
-from .exporter import LABELS, product_values
+from .instruction_fields import LABELS, product_values
+from .instruction_layout import GroupPair, ProductGroup, pack_products
 
 PADDING = 4.0
 GAP = 8.0
 TITLE_HEIGHT = 32.0
 FOOTER_HEIGHT = 20.0
-WEIGHTS = (.14, .13, .37, .075, .065, .06, .16)
+WEIGHTS = (0.13, 0.12, 0.24, 0.285, 0.055, 0.065, 0.105)
 
 
 def configured_printer(pdf_path=None, orientation=QPageLayout.Orientation.Landscape):
     validate_print_fonts()
     printer = QPrinter(QPrinter.PrinterMode.HighResolution)
     printer.setResolution(300)
-    printer.setPageLayout(QPageLayout(QPageSize(QPageSize.PageSizeId.A4), orientation, QMarginsF(6, 6, 6, 6), QPageLayout.Unit.Millimeter))
+    printer.setPageLayout(
+        QPageLayout(
+            QPageSize(QPageSize.PageSizeId.A4),
+            orientation,
+            QMarginsF(6, 6, 6, 6),
+            QPageLayout.Unit.Millimeter,
+        )
+    )
     printer.setDocName("プライズ景品 入替指示書")
     if pdf_path is not None:
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
@@ -45,16 +64,8 @@ class TextBlock:
 
 
 @dataclass
-class PrintRow:
-    left: object | None
-    right: object | None
-    height: float
-    cells: list[list[TextBlock]]
-
-
-@dataclass
 class PrintPlan:
-    pages: list[list[PrintRow]]
+    pages: list[list[GroupPair]]
     width: float
     height: float
     widths: list[float]
@@ -63,6 +74,7 @@ class PrintPlan:
     font: QFont
     # Retain the metrics device for the lifetime of QTextLayouts.
     metrics_device: QImage
+    warnings: list | None = None
 
     @property
     def body_height(self):
@@ -98,49 +110,60 @@ def plan_pages(products, page_width, page_height, rows=20, layout="column"):
     device.setDotsPerMeterX(2835)
     device.setDotsPerMeterY(2835)
     widths = [(page_width - GAP) / 2 * w for w in WEIGHTS]
-    headers = [text_block(label, w - 2 * PADDING, font, device) for label, w in zip(LABELS, widths)]
+    headers = [
+        text_block(
+            "運営方法・予定ブース数" if i == 1 else ("" if i == 2 else label),
+            (widths[1] + widths[2] if i == 1 else w) - 2 * PADDING,
+            font,
+            device,
+        )
+        for i, (label, w) in enumerate(zip(LABELS, widths))
+    ]
     header_height = max(b.height for b in headers) + 2 * PADDING
     plan = PrintPlan([], page_width, page_height, widths, headers, header_height, font, device)
     if plan.body_height < 26 or min(widths) <= 2 * PADDING:
         raise AppError("印刷可能領域が小さすぎます。A4横向き・余白6mmを選択してください。")
-    data = ordered(products)
-    cached = {}
-    for p in data:
-        blocks = [text_block(value, w - 2 * PADDING, font, device) for value, w in zip(product_values(p), widths)]
-        height = max(26, max(b.height for b in blocks) + 2 * PADDING)
-        if height > plan.body_height:
-            raise AppError(f"「{p.name[:30]}」の情報が1ページの高さを超えています。マシン番号・運営方法・商品名を短くしてください。文字を縮小・切断せずに印刷を中止しました。")
-        cached[id(p)] = (blocks, height)
+    name_font = print_font(14)
+    name_font.setWeight(QFont.Weight.Bold)
 
-    def build(chunk, capacity):
-        left = chunk[::2] if layout == "row" else chunk[:capacity]
-        right = chunk[1::2] if layout == "row" else chunk[capacity:]
-        count = len(left)
-        result = []
-        for i in range(count):
-            a, b = left[i], right[i] if i < len(right) else None
-            cells = [cached[id(a)][0], cached[id(b)][0] if b else []]
-            height = max(cached[id(a)][1], cached[id(b)][1] if b else 0)
-            result.append(PrintRow(a, b, height, cells))
-        return result
+    def measure(product, ids, continuation):
+        from .methods import active_assignments
 
-    remaining = list(data)
-    while remaining:
-        # Find the largest contiguous prefix fitting the page. Reducing the
-        # candidate can change left/right pairing, so recompute both heights.
-        for capacity in range(rows, 0, -1):
-            count = min(capacity * 2, len(remaining))
-            page = build(remaining[:count], capacity)
-            if sum(r.height for r in page) <= plan.body_height:
-                break
-        else:
-            count = 0
-        if not count:
-            raise AppError("商品を印刷可能領域に配置できません。")
-        plan.pages.append(page)
-        remaining = remaining[count:]
-    if not plan.pages:
-        plan.pages = [[]]
+        values = product_values(product)
+        assigned = active_assignments(product)
+        machine_cells = [
+            [
+                text_block(number or "未割当", widths[0] - 2 * PADDING, font, device),
+                text_block(assigned.get(number) or "未設定", widths[1] - 2 * PADDING, font, device),
+            ]
+            for number in ids
+        ]
+        merged = [
+            text_block(
+                value,
+                widths[c] - 2 * PADDING,
+                name_font if c == 3 else font,
+                device,
+                Qt.AlignmentFlag.AlignHCenter if c >= 3 else Qt.AlignmentFlag.AlignLeft,
+            )
+            for c, value in enumerate(values)
+            if c >= 2
+        ]
+        heights = [max(24, max(b.height for b in cells) + 2 * PADDING) for cells in machine_cells]
+        needed = max(b.height for b in merged) + 2 * PADDING
+        extra = max(0, needed - sum(heights)) / len(heights)
+        heights = [h + extra for h in heights]
+        combined = [
+            text_block(
+                "\n".join(b[c].text for b in machine_cells), widths[c] - 2 * PADDING, font, device
+            )
+            for c in (0, 1)
+        ]
+        return ProductGroup(
+            product, list(ids), heights, combined + merged, machine_cells, continuation
+        )
+
+    plan.pages, plan.warnings = pack_products(products, rows, layout, plan.body_height, measure)
     return plan
 
 
@@ -149,42 +172,78 @@ def draw_page(painter, plan, page_index, selected_day, printed_day=None):
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(QColor("#111111"))
     painter.setFont(print_font(15))
-    painter.drawText(QRectF(0, 0, plan.width, TITLE_HEIGHT - 5), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"入れ替え指示書　{selected_day:%Y年%m月%d日}")
+    painter.drawText(
+        QRectF(0, 0, plan.width, TITLE_HEIGHT - 5),
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        f"入れ替え指示書　{selected_day:%Y年%m月%d日}"
+        + (
+            "　（継続商品あり）"
+            if any(g and g.continuation for r in plan.pages[page_index] for g in r.groups)
+            else ""
+        ),
+    )
     pen = QPen(QColor("#000000"))
     pen.setWidthF(1.0)
     painter.setPen(pen)
     painter.setFont(plan.font)
     for side in range(2):
         x = side * ((plan.width + GAP) / 2)
-        for w, block in zip(plan.widths, plan.headers):
-            rect = QRectF(x, TITLE_HEIGHT, w, plan.header_height)
-            painter.fillRect(rect, QColor("#E8F0EB"))
-            painter.drawRect(rect)
-            block.draw(painter, QPointF(x + PADDING, TITLE_HEIGHT + PADDING))
+        for col, (w, block) in enumerate(zip(plan.widths, plan.headers)):
+            if col != 2:
+                width = plan.widths[1] + plan.widths[2] if col == 1 else w
+                rect = QRectF(x, TITLE_HEIGHT, width, plan.header_height)
+                painter.fillRect(rect, QColor("#E8F0EB"))
+                painter.drawRect(rect)
+                block.draw(painter, QPointF(x + PADDING, TITLE_HEIGHT + PADDING))
             x += w
     y = TITLE_HEIGHT + plan.header_height
     for row in plan.pages[page_index]:
-        for side, product in enumerate((row.left, row.right)):
-            x = side * ((plan.width + GAP) / 2)
-            for col, w in enumerate(plan.widths):
-                rect = QRectF(x, y, w, row.height)
-                painter.fillRect(rect, QColor("#FCE4EC" if product and product.priority else "#FFFFFF"))
-                painter.drawRect(rect)
-                if product:
-                    row.cells[side][col].draw(painter, QPointF(x + PADDING, y + PADDING))
-                x += w
+        for side, group in enumerate(row.groups):
+            x0 = side * ((plan.width + GAP) / 2)
+            fill = QColor("#FCE4EC" if group and group.product.priority else "white")
+            painter.fillRect(QRectF(x0, y, sum(plan.widths), row.height), fill)
+            # Individual machine / method rows stop at the merged-field border.
+            yy = y
+            for i, height in enumerate(row.heights):
+                x = x0
+                for c in (0, 1):
+                    painter.drawRect(QRectF(x, yy, plan.widths[c], height))
+                    if group and i < len(group.machine_cells):
+                        b = group.machine_cells[i][c]
+                        b.draw(painter, QPointF(x + PADDING, yy + (height - b.height) / 2))
+                    x += plan.widths[c]
+                yy += height
+            x = x0 + sum(plan.widths[:2])
+            for c in range(2, 7):
+                painter.drawRect(QRectF(x, y, plan.widths[c], row.height))
+                if group:
+                    b = group.cells[c]
+                    b.draw(painter, QPointF(x + PADDING, y + (row.height - b.height) / 2))
+                x += plan.widths[c]
         y += row.height
     painter.setFont(print_font(10, False))
     printed_day = printed_day or datetime.now(timezone(timedelta(hours=9))).date()
-    painter.drawText(QRectF(0, plan.height - FOOTER_HEIGHT + 4, plan.width, 16), Qt.AlignmentFlag.AlignLeft, f"印刷日：{printed_day:%Y/%m/%d}")
-    painter.drawText(QRectF(0, plan.height - FOOTER_HEIGHT + 4, plan.width, 16), Qt.AlignmentFlag.AlignRight, f"{page_index + 1} / {len(plan.pages)}")
+    painter.drawText(
+        QRectF(0, plan.height - FOOTER_HEIGHT + 4, plan.width, 16),
+        Qt.AlignmentFlag.AlignLeft,
+        f"印刷日：{printed_day:%Y/%m/%d}",
+    )
+    painter.drawText(
+        QRectF(0, plan.height - FOOTER_HEIGHT + 4, plan.width, 16),
+        Qt.AlignmentFlag.AlignRight,
+        f"{page_index + 1} / {len(plan.pages)}",
+    )
     painter.restore()
 
 
 def render_document(printer, products, selected_day, rows=20, layout="column"):
     page = printer.pageRect(QPrinter.Unit.Point)
     plan = plan_pages(products, page.width(), page.height(), rows, layout)
-    render_pages(printer, len(plan.pages), lambda painter, index: draw_page(painter, plan, index, selected_day))
+    render_pages(
+        printer,
+        len(plan.pages),
+        lambda painter, index: draw_page(painter, plan, index, selected_day),
+    )
     return plan
 
 
@@ -201,7 +260,9 @@ def render_pages(printer, page_count, draw):
     # Native drivers handle their own copies when supported. Otherwise render
     # the requested copies, respecting collated / uncollated order.
     copies = 1 if printer.supportsMultipleCopies() else max(1, printer.copyCount())
-    indexes = indexes * copies if printer.collateCopies() else [i for i in indexes for _ in range(copies)]
+    indexes = (
+        indexes * copies if printer.collateCopies() else [i for i in indexes for _ in range(copies)]
+    )
     painter = QPainter()
     if not painter.begin(printer):
         raise AppError("プリンターまたはPDFを開けません。接続・保存先を確認してください。")
@@ -219,9 +280,14 @@ def render_pages(printer, page_count, draw):
         painter.end()
 
 
-
 def save_pdf(path, products, selected_day, rows=20, layout="column", source=None):
-    return save_rendered_pdf(path, lambda temp: render_document(configured_printer(temp), products, selected_day, rows, layout), [source] if source else [])
+    return save_rendered_pdf(
+        path,
+        lambda temp: render_document(
+            configured_printer(temp), products, selected_day, rows, layout
+        ),
+        [source] if source else [],
+    )
 
 
 def save_rendered_pdf(path, render, sources=()):

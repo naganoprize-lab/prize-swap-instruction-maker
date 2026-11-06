@@ -40,7 +40,10 @@ def run(output):
         app.processEvents()
         assert w.table.height() > w.height() / 2
         assert w.model.setData(w.model.index(0, 6), "20085右\n20098左")
-        assert w.model.setData(w.model.index(0, 7), "橋渡し,リング,自由運営")
+        assert w.model.setData(w.model.index(0, 7), {
+            "plans": [["橋渡し", 1], ["リング", 1]],
+            "assignments": [["20085右", "橋渡し"], ["20098左", "リング"]],
+        })
         assert w.model.setData(w.model.index(0, 9), "各②")
         w.floor.add_machine(Machine(number="20085右", product="現在の商品A", x=100, y=100))
         w.floor.add_machine(Machine(number="20098左", product="現在の商品B", x=350, y=100))
@@ -63,7 +66,14 @@ def run(output):
         restored_products, _, metadata = load_session(output / "作業.json")
         assert LabelStore.restore(metadata["label_printing"], restored_products).for_day(restored_products, day)[0].copies == 3
         assert load_session(output / "作業.json")[0] == w.products
+        assert restored_products[0].planned_booths == {"橋渡し": 1, "リング": 1}
+        assert restored_products[0].machine_methods == {"20085右": "橋渡し", "20098左": "リング"}
         export_excel(output / "指示書.xlsx", w.products, day)
+        from openpyxl import load_workbook
+        workbook = load_workbook(output / "指示書.xlsx")
+        assert "D3:D4" in workbook.active.merged_cells
+        assert workbook.active["C3"].value == "橋渡し 1ブース\nリング 1ブース"
+        workbook.close()
         plan = save_pdf(output / "印刷確認.pdf", w.products, day)
         independent = require_searchable_pdf(output / "印刷確認.pdf")
         report["pdf_fonts"] = independent["fonts"]
@@ -79,6 +89,7 @@ def run(output):
             assert text.count(f"ITEM{i:03d}") == 1 + i % 3
             assert independent_text.count(f"ITEM{i:03d}") == 1 + i % 3
         assert "商品名" in independent_text
+        assert "橋渡し1ブース" in independent_text and "リング1ブース" in independent_text
         report.update(pdf_pages=doc.pageCount(), page_points=[size.width(), size.height()], products=45)
         doc.close()
         observed = []
