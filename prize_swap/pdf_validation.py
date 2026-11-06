@@ -1,7 +1,24 @@
 """Independent PDF text and embedded-font inspection; used by tests and EXE smoke."""
+
 from pathlib import Path
+import re
+import unicodedata
 
 from pypdf import PdfReader
+
+
+def normalized_pdf_text(text):
+    """Compare extracted text without changing the PDF's searchable text.
+
+    Qt builds ToUnicode by reversing the embedded font's cmap. When two
+    Unicode characters share a glyph, a radical can be returned instead of
+    the ideograph: Noto uses U+2FC1 for 鬼 (handled by NFKC), while Windows
+    Japanese fonts can use U+2EE4 (which has no NFKC decomposition).
+    Keep this explicit equivalence narrow; never discard letters, marks or
+    repeated text. Remove extraction whitespace before composing split marks.
+    """
+    text = re.sub(r"\s+", "", text).replace("\u2ee4", "鬼")
+    return unicodedata.normalize("NFKC", text)
 
 
 def inspect_pdf(path):

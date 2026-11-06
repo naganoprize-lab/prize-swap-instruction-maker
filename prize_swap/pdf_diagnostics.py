@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import sys
 import traceback
-import unicodedata
 
 
 def run(output):
@@ -21,7 +20,7 @@ def run(output):
     from .labels_printing import save_labels_pdf
     from .floor import FloorWidget
     from .floor_data import Machine
-    from .pdf_validation import require_searchable_pdf
+    from .pdf_validation import normalized_pdf_text, require_searchable_pdf
 
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -29,12 +28,13 @@ def run(output):
     report = dict(ok=False, platform=sys.platform, qt=qVersion(), pyside=qt_binding_version)
     floor = None
     def compact(text):
-        return "".join(unicodedata.normalize("NFKC", text).split())
+        return normalized_pdf_text(text)
     try:
         report["fonts"] = validate_print_fonts()
         day = date(2026, 11, 5)
         products = [Product(day, f"MARK{i:03d} 商品名ぬいぐるみ " * 4, 24, 2, machines=["20111左"], methods=["橋渡し", "リング"], order=i) for i in range(13)]
         products[0].methods = ["リング"]
+        products[0].name += " 鬼滅の刃 フィギュア"
         products[0].planned_booths = {"リング": 3}
         products[0].machine_methods = {"20111左": "リング"}
         products[1].machines = ["20112右", "20113左", "20114右"]
@@ -63,9 +63,15 @@ def run(output):
             for text in required:
                 if text not in qt_text or text not in other_text:
                     raise ValueError(f"Missing searchable text: {name}: {text}")
+            if name in ("instructions", "labels"):
+                expected = normalized_pdf_text("鬼滅の刃 フィギュア")
+                if qt_text.count(expected) != 1 or other_text.count(expected) != 1:
+                    raise ValueError(f"Missing or repeated Japanese product name: {name}")
             report[name] = dict(pages=doc.pageCount(), fonts=independent["fonts"],
                                 sizes=[[p["width"], p["height"]] for p in independent["pages"]],
-                                qt_text=qt_texts, pypdf_text=[p["text"] for p in independent["pages"]])
+                                qt_text=qt_texts, pypdf_text=[p["text"] for p in independent["pages"]],
+                                normalized_qt_text=qt_text, normalized_pypdf_text=other_text,
+                                ghost_codepoints=sorted({f"U+{ord(c):04X}" for c in "".join(qt_texts)+"".join(p["text"] for p in independent["pages"]) if c in "鬼⻤⿁"}))
             doc.close()
         report["ok"] = True
     except Exception:

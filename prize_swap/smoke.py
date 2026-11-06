@@ -23,7 +23,7 @@ def run(output):
         from .printing import configured_printer, save_pdf
         from .floor_data import Machine
         from .fonts import validate_print_fonts
-        from .pdf_validation import require_searchable_pdf
+        from .pdf_validation import normalized_pdf_text, require_searchable_pdf
         from .ui import Window
         from .labels_data import LabelStore
         from .labels_printing import save_labels_pdf
@@ -34,6 +34,7 @@ def run(output):
         day = date(2026, 11, 5)
         w = Window(layout_storage=Path(runtime.name) / "floor-auto.json")
         w.products = [Product(day, f"ITEM{i:03d} 景品ぬいぐるみ " * (1 + i % 3), 24, 2, order=i) for i in range(45)]
+        w.products[0].name = "ITEM000 鬼滅の刃 フィギュア"
         w.day.setDate(QDate(2026, 11, 5))
         w.refresh()
         w.show()
@@ -89,6 +90,8 @@ def run(output):
             assert text.count(f"ITEM{i:03d}") == 1 + i % 3
             assert independent_text.count(f"ITEM{i:03d}") == 1 + i % 3
         assert "商品名" in independent_text
+        assert normalized_pdf_text(independent_text).count(normalized_pdf_text("鬼滅の刃 フィギュア")) == 1
+        assert normalized_pdf_text(text).count(normalized_pdf_text("鬼滅の刃 フィギュア")) == 1
         assert "橋渡し1ブース" in independent_text and "リング1ブース" in independent_text
         report.update(pdf_pages=doc.pageCount(), page_points=[size.width(), size.height()], products=45)
         doc.close()

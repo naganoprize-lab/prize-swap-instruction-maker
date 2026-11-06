@@ -38,15 +38,25 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: >-
-          python -m pytest -q
+          python -m pytest -q --junitxml=build-tests/pdf-regression.xml
           tests/test_floor.py::test_floor_colors_and_pdf
           'tests/test_printing.py::test_real_pdf_a4_japanese_multipage_and_every_product[column]'
           'tests/test_printing.py::test_real_pdf_a4_japanese_multipage_and_every_product[row]'
           tests/test_printing.py::test_page_range_and_reverse_order
+          tests/test_booth_planning.py::test_pdf_plans_are_once_per_product_and_merged_geometry_is_visible
+          tests/test_booth_planning.py::test_labels_warn_on_plan_difference_but_print_only_names
+          tests/test_booth_planning.py::test_direct_print_dialog_uses_same_machine_and_plan_renderer
+          tests/test_pdf_text.py
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q
+        run: python -m pytest -q --junitxml=build-tests/pytest.xml
+      - uses: actions/upload-artifact@v6
+        if: ${{ always() && hashFiles('build-tests/**') != '' }}
+        with:
+          name: Pytest-results
+          path: build-tests/
+          if-no-files-found: error
       - name: Build portable EXE
         run: python -m PyInstaller --clean --noconfirm --onefile --windowed --noupx --name PrizeSwapInstructionMaker main.py
       - name: Smoke test packaged Windows EXE
