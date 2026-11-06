@@ -40,12 +40,14 @@ def run(output):
         products[1].machines = ["20112右", "20113左", "20114右"]
         products[1].planned_booths = {"橋渡し": 2, "リング": 1}
         products[1].machine_methods = {"20112右": "橋渡し", "20113左": "リング", "20114右": "橋渡し"}
+        products[2].methods = ["フック"]
+        products[2].planned_booths = {"フック":3}
         save_pdf(output / "instructions.pdf", products, day, rows=3)
         save_labels_pdf(output / "labels.pdf", [LabelEntry(p) for p in products])
         floor = FloorWidget(lambda: products, lambda: day, output / "floor-auto.json")
         floor.add_machine(Machine(number="20111左", product="現在の商品名", x=100, y=100))
         floor.paint_floor(configured_printer(output / "floor.pdf"))
-        for name, required in (("instructions", [f"MARK{i:03d}" for i in range(13)] + ["商品名", "橋渡し", "リング3ブース", "橋渡し2ブース", "20112右"]), ("floor", ["20111", "商品名"]), ("labels", [f"MARK{i:03d}" for i in range(13)] + ["商品名"])):
+        for name, required in (("instructions", [f"MARK{i:03d}" for i in range(13)] + ["商品名", "橋渡し", "リング3済1未2超0", "橋渡し2済2未0超0", "フック3済0未3超0", "20112右"]), ("floor", ["20111", "商品名"]), ("labels", [f"MARK{i:03d}" for i in range(13)] + ["商品名"])):
             path = output / f"{name}.pdf"
             independent = require_searchable_pdf(path)
             doc = QPdfDocument()
@@ -73,6 +75,31 @@ def run(output):
                                 normalized_qt_text=qt_text, normalized_pypdf_text=other_text,
                                 ghost_codepoints=sorted({f"U+{ord(c):04X}" for c in "".join(qt_texts)+"".join(p["text"] for p in independent["pages"]) if c in "鬼⻤⿁"}))
             doc.close()
+        report["optimization"] = {}
+        for count in (10,20,30,40):
+            sample=[]
+            for i in range(count):
+                ids=[f"{30000+i*3}右",f"{30001+i*3}左"]
+                sample.append(Product(day,f"OPT{count:02}-{i:03} クロミ ブランケット 新入荷景品フィギュア",40,1,
+                    order=i,machines=ids,planned_booths={"橋渡し":1,"フック":1},
+                    machine_methods={ids[0]:"橋渡し",ids[1]:"フック"}))
+            path=output/f"optimized-{count}.pdf"
+            plan=save_pdf(path,sample,day)
+            pdf=require_searchable_pdf(path)
+            text=compact("".join(p["text"] for p in pdf["pages"]))
+            if len(plan.pages)>(1 if count<=20 else 2) or any(text.count(f"OPT{count:02}-{i:03}")!=1 for i in range(count)):
+                raise ValueError(f"Optimized layout target or product coverage failed: {count}")
+            doc=QPdfDocument()
+            if doc.load(str(path))!=QPdfDocument.Error.None_:
+                raise ValueError("Optimized PDF load failed")
+            for page in range(doc.pageCount()):
+                image=doc.render(page,QSize(1263,893))
+                if image.isNull() or not image.save(str(output/f"optimized-{count}-{page+1}.png")):
+                    raise ValueError("Optimized PDF rasterization failed")
+            doc.close()
+            report["optimization"][str(count)]=dict(pages=len(plan.pages),reason=plan.reason,
+                name_points=plan.name_size,body_points=plan.body_size,
+                column_heights_points=[[sum(g.height for g in col) for col in plan.columns(k)] for k in range(len(plan.pages))])
         report["ok"] = True
     except Exception:
         report["error"] = traceback.format_exc()

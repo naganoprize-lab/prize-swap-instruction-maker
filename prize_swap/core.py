@@ -11,7 +11,7 @@ from tempfile import NamedTemporaryFile
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 
-METHODS = ["橋渡し", "リング", "直置き", "吊り下げ", "たこ焼き", "その他"]
+METHODS = ["橋渡し", "リング", "フック"]
 LIMITS = ["制限なし"] + [f"{prefix}{n}" for prefix in ("各", "トータル") for n in "①②③④⑤⑥⑦⑧⑨⑩"]
 HEADERS = ["稼働予定日", "品名", "入数", "CS数", "メーカー"]
 
@@ -164,11 +164,12 @@ def atomic_json(path: Path, payload: dict):
             temp.unlink()
 
 
-def save_session(path, products, selected_day, source, layout="column", rows_per_page=20, floor_layout=None, label_state=None):
+def save_session(path, products, selected_day, source, layout="column", rows_per_page=20, floor_layout=None, label_state=None, print_mode="auto"):
     if source and Path(path).resolve() == Path(source).resolve():
         raise AppError("入力Excelと同じ場所には保存できません。")
     records = [{**asdict(p), "day": p.day.isoformat(), "assigned_machine_count": p.assigned_machine_count} for p in products]
     data = dict(version=1, products=records, selected_day=selected_day.isoformat(), source=str(source or ""), layout=layout, rows_per_page=rows_per_page)
+    data["print_mode"] = print_mode
     if floor_layout is not None:
         data["floor_layout"] = floor_layout
     if label_state is not None:
@@ -181,6 +182,8 @@ def load_session(path):
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if data["version"] != 1 or data.get("layout", "column") not in ("column", "row"):
             raise ValueError("未対応の形式")
+        if data.get("print_mode","auto") not in ("auto","standard","compact"):
+            raise ValueError("印刷モードが不正")
         selected = date.fromisoformat(data["selected_day"])
         page_rows = data.get("rows_per_page", 20)
         if type(page_rows) is not int or not 1 <= page_rows <= 50:

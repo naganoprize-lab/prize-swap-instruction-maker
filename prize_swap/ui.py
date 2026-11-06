@@ -5,17 +5,18 @@ from pathlib import Path
 
 from PySide6.QtCore import QDate, QEvent, QItemSelectionModel, QSortFilterProxyModel, Qt
 from PySide6.QtGui import QColor, QTextCharFormat
-from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrintPreviewDialog, QPrinter
+from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrintPreviewDialog, QPrintPreviewWidget, QPrinter
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEdit,
     QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSpinBox, QTableView, QTabWidget, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget)
 
-from .core import AppError, for_day, load_session, read_products, save_session
+from .core import AppError, METHODS, for_day, load_session, read_products, save_session
 from .exporter import export_excel
 from .printing import configured_printer, plan_pages, render_document, save_pdf
 from .table import COLUMNS, ProductDelegate, ProductModel
-from .methods import allocation_status, format_allocations, aggregate_booths
+from .methods import allocation_status, format_allocations, aggregate_booths, total_booths, booth_value, BoothTotal
+from .booth_style import METRIC_COLORS
 from .floor import FloorWidget
 from .floor_data import validate_state
 from .labels_data import LabelStore
@@ -197,7 +198,7 @@ class Window(QMainWindow):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setStretchLastSection(False)
-        for i, width in enumerate([48, 60, 115, 340, 68, 68, 165, 160, 52, 160]):
+        for i, width in enumerate([48, 60, 115, 340, 68, 68, 165, 240, 52, 160]):
             self.table.setColumnWidth(i, width)
         self.table.viewport().installEventFilter(self)
         center.addWidget(self.table, 1)
@@ -222,7 +223,7 @@ class Window(QMainWindow):
         self.summary_scope.currentIndexChanged.connect(self.update_booth_summary)
         summary_layout.addWidget(self.summary_scope)
         self.summary_table=QTableWidget(0,5)
-        self.summary_table.setHorizontalHeaderLabels(["運営方法","予定ブース数","方法割当済み","未割当","超過"])
+        self.summary_table.setHorizontalHeaderLabels(["運営方法","予定数","割当済み","未割当","超過"])
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.summary_table.setMaximumHeight(170)
@@ -247,11 +248,17 @@ class Window(QMainWindow):
         self.layout_choice.addItems(["左を上から → 右を上から", "左右交互"])
         self.layout_choice.currentIndexChanged.connect(self.mark_dirty)
         instruction_layout.addWidget(self.layout_choice)
-        instruction_layout.addWidget(QLabel("1ブロック上限"))
+        self.print_mode = QComboBox()
+        for label,key in (("自動最適化","auto"),("標準","standard"),("コンパクト","compact")):
+            self.print_mode.addItem(label,key)
+        self.print_mode.currentIndexChanged.connect(self.mark_dirty)
+        instruction_layout.addWidget(self.print_mode)
+        instruction_layout.addWidget(QLabel("片側上限"))
         self.page_rows = QSpinBox()
         self.page_rows.setRange(1, 50)
         self.page_rows.setValue(20)
-        self.page_rows.setSuffix(" 行")
+        self.page_rows.setSuffix(" 商品")
+        self.page_rows.setToolTip("PDF・直接印刷：片側の最大商品数。Excel出力：従来のマシン行数の目安。")
         self.page_rows.valueChanged.connect(self.mark_dirty)
         instruction_layout.addWidget(self.page_rows)
         bottom.addWidget(self.instruction_settings)
@@ -309,12 +316,24 @@ class Window(QMainWindow):
         if not hasattr(self,"summary_table"):
             return
         products=self.selected_products() if self.summary_scope.currentIndex() else self.visible
-        totals=aggregate_booths(products)
+        active=aggregate_booths(products)
+        mapping={r.method:r for r in active}
+        totals=[mapping.get(name,BoothTotal(name,0,0,0,0)) for name in dict.fromkeys([*METHODS,*mapping])]
+        totals.append(total_booths(active))
         self.summary_table.setRowCount(len(totals))
         for row,total in enumerate(totals):
-            planned=f"{total.planned}（未設定{total.unknown}商品）" if total.unknown else str(total.planned)
-            for col,value in enumerate([total.method,planned,total.assigned,total.unassigned,total.excess]):
-                self.summary_table.setItem(row,col,QTableWidgetItem(str(value)))
+            for col,field in enumerate(["method","planned","assigned","unassigned","excess"]):
+                value=total.method if col==0 else booth_value(total,field)
+                item=QTableWidgetItem(value)
+                if field in METRIC_COLORS:
+                    background,foreground=METRIC_COLORS[field]
+                    item.setBackground(QColor(background))
+                    item.setForeground(QColor(foreground))
+                if total.method=="合計":
+                    font=item.font();font.setBold(True);item.setFont(font)
+                if total.unknown:
+                    item.setToolTip(f"予定未設定の方法が{total.unknown}件あります。既知の予定数の差分だけを集計します。")
+                self.summary_table.setItem(row,col,item)
 
     def confirm_method_allocations(self):
         problems = [f"{p.name}：{allocation_status(p).message}" for p in self.visible if p.included and allocation_status(p).excess]
@@ -376,9 +395,8 @@ class Window(QMainWindow):
 
     def paint_printer(self, printer):
         try:
-            plan = render_document(printer, list(self.visible), self.selected_day(), self.page_rows.value(), self.layout_name())
-            if plan.warnings:
-                self.statusBar().showMessage(" / ".join(plan.warnings), 15000)
+            plan = render_document(printer, list(self.visible), self.selected_day(), self.page_rows.value(), self.layout_name(), self.print_mode.currentData())
+            self.statusBar().showMessage(plan.reason, 15000)
             return plan
         except Exception as exc:
             self.error(exc)
@@ -392,7 +410,24 @@ class Window(QMainWindow):
             dialog = QPrintPreviewDialog(printer, self)
             dialog.setWindowTitle("印刷プレビュー — A4横向き")
             dialog.resize(1300, 850)
-            dialog.paintRequested.connect(self.paint_printer)
+            controls=QWidget(dialog)
+            controls_layout=QHBoxLayout(controls)
+            controls_layout.addWidget(QLabel("印刷レイアウト"))
+            mode=QComboBox(controls)
+            for label,key in (("自動最適化","auto"),("標準（読みやすさ優先）","standard"),("コンパクト（用紙節約）","compact")):
+                mode.addItem(label,key)
+            mode.setCurrentIndex(self.print_mode.currentIndex())
+            controls_layout.addWidget(mode)
+            info=QLabel();info.setWordWrap(True);controls_layout.addWidget(info,1)
+            dialog.layout().insertWidget(0,controls)
+            def paint(target):
+                plan=self.paint_printer(target)
+                if plan:info.setText(plan.reason)
+            def change(index):
+                self.print_mode.setCurrentIndex(index)
+                dialog.findChild(QPrintPreviewWidget).updatePreview()
+            mode.currentIndexChanged.connect(change)
+            dialog.paintRequested.connect(paint)
             dialog.exec()
         except Exception as exc:
             self.error(exc)
@@ -404,7 +439,7 @@ class Window(QMainWindow):
             self.print_products()
             printer = configured_printer()
             area = printer.pageRect(QPrinter.Unit.Point)
-            plan = plan_pages(self.visible, area.width(), area.height(), self.page_rows.value(), self.layout_name())
+            plan = plan_pages(self.visible, area.width(), area.height(), self.page_rows.value(), self.layout_name(), self.print_mode.currentData())
             dialog = QPrintDialog(printer, self)
             dialog.setMinMax(1, len(plan.pages))
             dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, True)
@@ -421,9 +456,8 @@ class Window(QMainWindow):
             products = self.print_products()
             path = self.save_path("PDF保存", "PDF (*.pdf)", ".pdf")
             if path:
-                plan = save_pdf(path, products, self.selected_day(), self.page_rows.value(), self.layout_name(), self.source)
-                notice = " / ".join(plan.warnings or [])
-                self.statusBar().showMessage(f"PDFを保存しました（{len(plan.pages)}ページ）：{path} {notice}", 15000)
+                plan = save_pdf(path, products, self.selected_day(), self.page_rows.value(), self.layout_name(), self.source, self.print_mode.currentData())
+                self.statusBar().showMessage(f"PDFを保存しました：{path} {plan.reason}", 15000)
         except Exception as exc:
             self.error(exc)
     def mark_dirty(self, *_):
@@ -502,7 +536,7 @@ class Window(QMainWindow):
         path = self.save_path("作業を一時保存", "JSON (*.json)", ".json")
         if path:
             try:
-                save_session(path, self.products, self.selected_day(), self.source, self.layout_name(), self.page_rows.value(), floor_layout=self.floor.state(), label_state=self.labels.state())
+                save_session(path, self.products, self.selected_day(), self.source, self.layout_name(), self.page_rows.value(), floor_layout=self.floor.state(), label_state=self.labels.state(), print_mode=self.print_mode.currentData())
                 self.dirty = False
                 self.statusBar().showMessage("一時保存しました。", 5000)
             except Exception as exc:
@@ -526,6 +560,7 @@ class Window(QMainWindow):
                 self.day.setDate(QDate(day.year, day.month, day.day))
                 self.layout_choice.setCurrentIndex(1 if data.get("layout") == "row" else 0)
                 self.page_rows.setValue(data.get("rows_per_page", 20))
+                self.print_mode.setCurrentIndex(self.print_mode.findData(data.get("print_mode","auto")))
                 if "floor_layout" in data:
                     self.floor.restore(data["floor_layout"])
                     self.floor.schedule_save()
