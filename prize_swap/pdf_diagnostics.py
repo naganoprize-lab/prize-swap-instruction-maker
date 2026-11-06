@@ -20,6 +20,7 @@ def run(output):
     from .labels_printing import save_labels_pdf
     from .floor import FloorWidget
     from .floor_data import Machine
+    from .floor_print import FloorPrintOptions, save_floor_pdf
     from .pdf_validation import normalized_pdf_text, require_searchable_pdf
 
     output = Path(output)
@@ -100,6 +101,26 @@ def run(output):
             report["optimization"][str(count)]=dict(pages=len(plan.pages),reason=plan.reason,
                 name_points=plan.name_size,body_points=plan.body_size,
                 column_heights_points=[[sum(g.height for g in col) for col in plan.columns(k)] for k in range(len(plan.pages))])
+        machines=[Machine(number=str(50000+i),product=f"FLOOR{i:03} 長い日本語商品名 フィギュア",
+            x=(i%20)*240,y=(i//20)*300,sales=1000,average=2000,
+            ratio=[49.9,50,99.9,100,199.9,200,None][i%7],ratio_from_excel=True,
+            installed_on="2026-11-01") for i in range(298)]
+        path=output/"floor-298.pdf"
+        floor_plan=save_floor_pdf(path,machines,{},FloorPrintOptions(paper="A3",mode="tile"),day)
+        evidence=require_searchable_pdf(path)
+        contents=compact("".join(p["text"] for p in evidence["pages"]))
+        if any(contents.count(f"FLOOR{i:03}")!=1 for i in range(298)):
+            raise ValueError("Missing or repeated floor cards")
+        doc=QPdfDocument();doc.load(str(path))
+        for page in (0,doc.pageCount()-1):
+            image=doc.render(page,QSize(1263,893))
+            if image.isNull() or not image.save(str(output/f"floor-298-{page+1}.png")):
+                raise ValueError("Floor PDF rasterization failed")
+        doc.close()
+        report["floor_operations"]=dict(machines=298,pages=len(floor_plan.pages),
+            warnings=floor_plan.warnings,fonts=evidence["fonts"],boundary_values=[49.9,50,99.9,100,199.9,200],
+            colours=[c.background for c in floor_plan.pages[0].cards],
+            text=[p["text"] for p in evidence["pages"]])
         report["ok"] = True
     except Exception:
         report["error"] = traceback.format_exc()
@@ -108,7 +129,7 @@ def run(output):
             floor.timer.stop()
             floor.close()
         (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({k:v for k,v in report.items() if k not in ("instructions", "floor", "labels")}, ensure_ascii=False, indent=2))
+    print(json.dumps({k:v for k,v in report.items() if k not in ("instructions", "floor", "labels", "floor_operations")}, ensure_ascii=False, indent=2))
     return 0 if report["ok"] else 1
 
 

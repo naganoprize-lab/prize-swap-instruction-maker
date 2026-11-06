@@ -48,6 +48,8 @@ jobs:
           tests/test_booth_planning.py::test_direct_print_dialog_uses_same_machine_and_plan_renderer
           tests/test_pdf_text.py
           tests/test_print_optimization.py
+          tests/test_floor_operations.py
+          tests/test_floor_printing.py
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
