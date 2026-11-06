@@ -146,7 +146,8 @@ def test_inline_and_global_numeric_tables_update_immediately_and_use_metric_colo
     assert editor.metric_labels["フック"]["unassigned"].text() == "2"
     assert editor.total_metrics["unassigned"].text() == "5"
     assert window.products[0].machine_methods[IDS[0]] == "フック"
-    assert "割当1／未割当5" in window.model.data(window.model.index(0, 7))
+    assert window.model.data(window.model.index(0, 7)).startswith("割当1／未割当5")
+    assert window.table.columnWidth(7) >= 220
     assert window.summary_table.item(3, 0).text() == "合計"
     assert window.summary_table.item(3, 2).text() == "1"
     assert window.summary_table.item(3, 3).text() == "5"

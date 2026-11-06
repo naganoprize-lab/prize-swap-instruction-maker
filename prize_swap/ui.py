@@ -198,7 +198,7 @@ class Window(QMainWindow):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setStretchLastSection(False)
-        for i, width in enumerate([48, 60, 115, 340, 68, 68, 165, 160, 52, 160]):
+        for i, width in enumerate([48, 60, 115, 340, 68, 68, 165, 240, 52, 160]):
             self.table.setColumnWidth(i, width)
         self.table.viewport().installEventFilter(self)
         center.addWidget(self.table, 1)

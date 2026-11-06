@@ -168,7 +168,8 @@ def format_cell_status(product):
     if status.excess:
         text += f"／超過{status.excess}"
     methods = format_allocations(product)
-    return f"{methods} ［{text}］" if methods else text
+    # Keep the counts visible even when the list of method names is elided.
+    return f"{text}　{methods}" if methods else text
 
 
 def format_plans(product, separator="\n"):
