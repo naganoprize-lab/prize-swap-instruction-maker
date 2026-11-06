@@ -166,6 +166,10 @@ def test_inline_and_global_numeric_tables_update_immediately_and_use_metric_colo
 
 def test_custom_method_can_be_added_planned_and_assigned_in_same_popup(window):
     editor = open_editor(window)
+    previous_metric = editor.metric_labels["橋渡し"]["assigned"]
+    editor.build_rows()
+    editor.update_status()
+    assert not previous_metric.isVisible()  # Deferred old labels must not cover the table.
     editor.custom_name.setText("アーム輪")
     QTest.keyClick(editor.custom_name, Qt.Key.Key_Return)
     QApplication.processEvents()

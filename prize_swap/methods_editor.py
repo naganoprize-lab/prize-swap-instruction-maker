@@ -129,6 +129,7 @@ class MethodsCombo(QComboBox):
         while self.grid.count():
             item = self.grid.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         self.rows = {}
         self.metric_labels = {}
@@ -248,6 +249,7 @@ class MethodsCombo(QComboBox):
         while self.machine_grid.count():
             item = self.machine_grid.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         self.assignment_editors = {}
         available = list(
