@@ -50,6 +50,8 @@ jobs:
           tests/test_print_optimization.py
           tests/test_floor_operations.py
           tests/test_floor_printing.py
+          tests/test_floor_workspace.py
+          tests/test_floor_control_print.py
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen

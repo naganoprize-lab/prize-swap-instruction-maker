@@ -89,6 +89,27 @@ def run(output):
         direct_text=normalized_pdf_text("".join(p["text"] for p in require_searchable_pdf(floor_direct)["pages"]))
         assert reference_text==direct_text and "アベ比49.9%" in direct_text and "投入4日" in direct_text
         report["floor_print"]={"paper":"A3","preview_pages":1,"direct_pdf_equal":True}
+        from .floor_details import MachineDetailDialog
+        positions=[(m.x,m.y,m.width,m.height) for m in w.floor.machines]
+        w.tabs.setCurrentWidget(w.floor)
+        w.floor.toggle_fullscreen();app.processEvents()
+        assert w.floor._fullscreen_host.isFullScreen()
+        for mode in ("readable","list","actual"):
+            w.floor.layout_mode.setCurrentIndex(w.floor.layout_mode.findData(mode))
+            assert [(m.x,m.y,m.width,m.height) for m in w.floor.machines]==positions
+        w.floor._fullscreen_host.close();app.processEvents()
+        assert w.tabs.currentWidget() is w.floor
+        detail=MachineDetailDialog(w.floor,w.floor.machines[0])
+        assert detail.name.toPlainText()=="現在の商品A" and detail.values["sales"].text()=="1,000"
+        assert len(detail.products)==1
+        detail.reject()
+        w.floor.set_print_options(FloorPrintOptions(mode="list",paper="A4"))
+        table_path=output/"売り場マシン一覧表.pdf"
+        table=w.floor.paint_floor(floor_printer(w.floor.print_options,table_path))
+        table_text=normalized_pdf_text("".join(p["text"] for p in require_searchable_pdf(table_path)["pages"]))
+        assert table_text.count("現在の商品A")==1 and table_text.count("現在の商品B")==1
+        report["floor_workspace"]={"fullscreen":True,"modes_keep_coordinates":True,"detail":True,"table_pages":len(table.pages)}
+        w.tabs.setCurrentIndex(0)
         source_name = w.products[0].name
         assert w.labels.model.entries[0].automatic_copies == 2
         assert w.labels.model.setData(w.labels.model.index(0, 1), "LABEL_ONLY 商品名")

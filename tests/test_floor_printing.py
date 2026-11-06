@@ -20,6 +20,7 @@ from prize_swap.floor_print import (
     save_floor_pdf,
 )
 from prize_swap.floor_print_ui import FloorPreviewDialog
+from prize_swap.floor_render import FIELDS
 from prize_swap.floor_status import COLORS, machine_status
 from prize_swap.pdf_validation import normalized_pdf_text, require_searchable_pdf
 
@@ -67,7 +68,7 @@ def test_paper_dimensions_and_japanese_text(tmp_path, paper, orientation):
 
 
 def test_custom_paper_and_empty_missing_values(tmp_path):
-    options = FloorPrintOptions(paper="custom", width_mm=250, height_mm=350, orientation="portrait")
+    options = FloorPrintOptions(paper="custom", width_mm=250, height_mm=350, orientation="portrait",fields=list(FIELDS))
     path = tmp_path / "独自用紙.pdf"
     save_floor_pdf(path, [Machine(number="1", product="欠測値の商品")], {}, options, DAY)
     page = PdfReader(path).pages[0]

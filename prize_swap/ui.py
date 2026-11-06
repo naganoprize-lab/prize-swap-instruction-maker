@@ -140,6 +140,8 @@ class Window(QMainWindow):
         list_layout.setContentsMargins(0, 0, 0, 0)
         self.tabs.addTab(list_page, "入替指示書")
         self.floor = FloorWidget(lambda: self.products, self.selected_day, layout_storage, self)
+        self.floor.product_edited.connect(self.refresh)
+        self.floor.product_edited.connect(self.mark_dirty)
         self.floor.message.connect(lambda message: self.statusBar().showMessage(message, 15000))
         self.tabs.addTab(self.floor, "売り場レイアウト")
         self.labels = LabelsWidget(lambda: self.products, self.selected_day, lambda: [self.source, self.floor.source], self)

@@ -7,11 +7,11 @@ import unicodedata
 from .core import parse_date
 
 COLORS = {
-    "planned": "#E1EFFC",
-    "high": "#FFF0DA",
-    "active": "#E7F4E9",
+    "planned": "#A9D7FF",
+    "high": "#FFE16A",
+    "active": "#94D8A0",
     "low": "#FFFFFF",
-    "poor": "#FCE4E4",
+    "poor": "#F4A6A6",
     "unknown": "#FFFFFF",
 }
 

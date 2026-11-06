@@ -26,9 +26,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
-    QGroupBox,
-    QSizePolicy,
-    QDateEdit,
     QDoubleSpinBox,
     QGraphicsItem,
     QGraphicsObject,
@@ -36,11 +33,9 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsView,
     QScrollArea,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -62,6 +57,10 @@ from .floor_print import (
     paper_supported,
 )
 from .floor_print_ui import FloorPrintControls, FloorPreviewDialog
+from .floor_toolbar import build_toolbar
+from .floor_workspace import FloorWorkspaceMixin
+from .floor_presentation import DEFAULTS
+
 
 GRID = 20
 
@@ -126,6 +125,7 @@ class MachineNode(QGraphicsObject):
     def __init__(self, owner, machine):
         super().__init__()
         self.owner, self.machine = owner, machine
+        self.display_rect = QRectF(0, 0, machine.width, machine.height)
         self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
         self.setPos(machine.x, machine.y)
         self.setFlags(
@@ -137,15 +137,18 @@ class MachineNode(QGraphicsObject):
         self.update_handles()
 
     def boundingRect(self):
-        return QRectF(0, 0, self.machine.width, self.machine.height)
+        return self.display_rect
 
     def update_handles(self):
         m = self.machine
-        for handle, point in zip(
-            self.handles, [(0, 0), (m.width, 0), (0, m.height), (m.width, m.height)]
-        ):
+        w, h = self.boundingRect().width(), self.boundingRect().height()
+        for handle, point in zip(self.handles, [(0, 0), (w, 0), (0, h), (w, h)]):
             handle.setPos(*point)
-            handle.setVisible(self.isSelected())
+            handle.setVisible(
+                self.isSelected()
+                and self.owner.presentation["edit"]
+                and self.owner.presentation["mode"] == "actual"
+            )
         plans = self.owner.assignments().get(m.number, [])
         installed = m.installed_on or "—"
         self.setToolTip(
@@ -165,13 +168,15 @@ class MachineNode(QGraphicsObject):
         background, status, priority, fields, font, methods = self.owner.card_context(self.machine)
         layout = self.owner.renderer.plan(
             self.machine,
-            self.machine.width,
-            self.machine.height,
+            self.boundingRect().width(),
+            self.boundingRect().height(),
             font,
             fields,
             self.owner.reference_day(),
             status,
             methods,
+            summary=self.owner.display_mode.currentData() == "compact",
+            truncate=True,
         )
         draw_card(
             painter,
@@ -184,6 +189,8 @@ class MachineNode(QGraphicsObject):
         )
 
     def itemChange(self, change, value):
+        if getattr(self.owner, "_projecting", False):
+            return super().itemChange(change, value)
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
             x, y = max(0, value.x()), max(0, value.y())
             if self.owner.snap.isChecked():
@@ -193,17 +200,23 @@ class MachineNode(QGraphicsObject):
             self.machine.x, self.machine.y = self.pos().x(), self.pos().y()
         if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
             for h in self.handles:
-                h.setVisible(bool(value))
+                h.setVisible(
+                    bool(value)
+                    and self.owner.presentation["edit"]
+                    and self.owner.presentation["mode"] == "actual"
+                )
         return super().itemChange(change, value)
 
     def resize_to(self, rect):
         self.prepareGeometryChange()
         self.machine.width, self.machine.height = rect.width(), rect.height()
+        self.display_rect = QRectF(0, 0, rect.width(), rect.height())
         self.setPos(rect.topLeft())
         self.update_handles()
         self.update()
 
     def mousePressEvent(self, event):
+        self.press_position = event.screenPos()
         self.before = self.owner.state()
         self.ctrl_select = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         if self.ctrl_select:
@@ -217,11 +230,17 @@ class MachineNode(QGraphicsObject):
             event.accept()
             return
         super().mouseReleaseEvent(event)
-        if hasattr(self, "before"):
+        if hasattr(self, "before") and self.owner.presentation["edit"]:
             self.owner.record(self.before, "マシンの移動")
+        if (
+            not self.owner.presentation["edit"]
+            and event.button() == Qt.MouseButton.LeftButton
+            and (event.screenPos() - self.press_position).manhattanLength() < 5
+        ):
+            QTimer.singleShot(0, lambda: self.owner.open_details(self.machine.uid))
 
     def mouseDoubleClickEvent(self, event):
-        self.owner.edit_machine(self.machine.uid)
+        self.owner.open_details(self.machine.uid)
         event.accept()
 
 
@@ -236,16 +255,26 @@ class FloorView(QGraphicsView):
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
 
     def wheelEvent(self, event):
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
-            self.owner.set_zoom(max(50, min(300, self.transform().m11() * 100 * factor)))
-            event.accept()
-        else:
-            super().wheelEvent(event)
+        delta = event.angleDelta().y() or event.pixelDelta().y()
+        if not delta:
+            event.ignore()
+            return
+        factor = 1.15 if delta > 0 else 1 / 1.15
+        self.owner.set_zoom(self.transform().m11() * 100 * factor)
+        self.owner.capture_view()
+        event.accept()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.MiddleButton or (
-            event.button() == Qt.MouseButton.LeftButton and getattr(self, "_space", False)
+            event.button() == Qt.MouseButton.LeftButton
+            and (
+                getattr(self, "_space", False)
+                or (
+                    not self.owner.presentation["edit"]
+                    and self.itemAt(event.position().toPoint()) is None
+                    and not event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                )
+            )
         ):
             self._pan = event.position().toPoint()
             self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -268,6 +297,7 @@ class FloorView(QGraphicsView):
         if getattr(self, "_pan", None) is not None:
             self._pan = None
             self.viewport().unsetCursor()
+            self.owner.capture_view()
             event.accept()
         else:
             super().mouseReleaseEvent(event)
@@ -288,6 +318,8 @@ class FloorView(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if self.owner.presentation["mode"] == "list" and hasattr(self.owner, "nodes"):
+            self.owner.apply_presentation()
         if getattr(self.owner, "_zoom", 100) is None and hasattr(self.owner, "nodes"):
             self.owner.fit(save=False)
 
@@ -316,7 +348,8 @@ class FloorView(QGraphicsView):
                 painter.drawPoint(x, y)
 
 
-class FloorWidget(QWidget):
+class FloorWidget(FloorWorkspaceMixin, QWidget):
+    product_edited = Signal()
     changed = Signal()
     message = Signal(str)
 
@@ -357,117 +390,15 @@ class FloorWidget(QWidget):
         self.follow_today = True
         self._last_today = QDate.currentDate()
         self._active_preview = None
+        self.presentation = dict(DEFAULTS)
+        self.card_presets = {}
+        self._view_center = None
+        self._projecting = False
+        self._building_view = True
+        self._fullscreen_host = None
+        self._detail_open = False
 
-        def group(title, parent):
-            box = QGroupBox(title)
-            box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-            row = QHBoxLayout(box)
-            row.setContentsMargins(8, 5, 8, 6)
-            parent.addWidget(box)
-            return row
-
-        def button(row, text, callback):
-            b = QPushButton(text)
-            b.clicked.connect(callback)
-            row.addWidget(b)
-            return b
-
-        top = QHBoxLayout()
-        layout.addLayout(top)
-        files = group("ファイル", top)
-        button(files, "レイアウトExcel読込", self.import_dialog)
-        button(files, "配置JSON読込", self.open_dialog)
-        button(files, "保存", self.save_dialog)
-        tools = group("マシン編集", top)
-        button(tools, "マシン追加", self.add_dialog)
-        button(tools, "削除", self.delete_selected)
-        button(tools, "複製", self.duplicate_selected)
-        undo = button(tools, "元に戻す", self.history.undo)
-        undo.setEnabled(False)
-        self.history.canUndoChanged.connect(undo.setEnabled)
-        redo = button(tools, "やり直し", self.history.redo)
-        redo.setEnabled(False)
-        self.history.canRedoChanged.connect(redo.setEnabled)
-        self.align = QComboBox()
-        self.align.addItems(["整列を選択", "左揃え", "上揃え", "横に等間隔", "縦に等間隔"])
-        self.align.activated.connect(self.align_selected)
-        tools.addWidget(self.align)
-        button(tools, "元のExcel配置へ戻す", self.reset_original)
-        display_box = QGroupBox("表示")
-        display_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        display = QVBoxLayout(display_box)
-        layout.addWidget(display_box)
-        row = QHBoxLayout()
-        display.addLayout(row)
-        self.display_mode = QComboBox()
-        for label, key in (
-            ("商品名のみ", "product"),
-            ("売上分析", "analysis"),
-            ("すべて表示", "all"),
-        ):
-            self.display_mode.addItem(label, key)
-        self.display_mode.setCurrentIndex(2)
-        self.display_mode.currentIndexChanged.connect(self.display_changed)
-        row.addWidget(QLabel("表示モード"))
-        row.addWidget(self.display_mode)
-        self.reference_date = QDateEdit(self._last_today)
-        self.reference_date.setCalendarPopup(True)
-        self.reference_date.setDisplayFormat("yyyy/MM/dd")
-        self.reference_date.setDateRange(QDate(1900, 1, 1), QDate(9999, 12, 31))
-        self.reference_date.dateChanged.connect(self.reference_changed)
-        row.addWidget(QLabel("基準日"))
-        row.addWidget(self.reference_date)
-        button(row, "今日に戻す", self.today)
-        self.show_methods = QCheckBox("運営方法を表示")
-        self.show_methods.toggled.connect(self.display_changed)
-        row.addWidget(self.show_methods)
-        self.snap = QCheckBox("グリッドにスナップ")
-        self.snap.setChecked(True)
-        self.snap.toggled.connect(self.schedule_save)
-        self.snap.toggled.connect(self.changed.emit)
-        row.addWidget(self.snap)
-        button(row, "カード・文字サイズ", self.card_settings)
-        row.addStretch()
-        zoom = QHBoxLayout()
-        display.addLayout(zoom)
-        self.zoom_combo = QComboBox()
-        self.zoom_combo.setEditable(True)
-        self.zoom_combo.setMinimumContentsLength(9)
-        self.zoom_combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self.zoom_combo.addItems(["50%", "75%", "100%", "150%", "200%", "300%"])
-        self.zoom_combo.setCurrentText("100%")
-        self.zoom_combo.activated.connect(self.zoom_entered)
-        self.zoom_combo.lineEdit().editingFinished.connect(self.zoom_entered)
-        zoom.addWidget(QLabel("倍率"))
-        zoom.addWidget(self.zoom_combo)
-        button(zoom, "−", lambda: self.set_zoom(max(50, self.view.transform().m11() * 100 / 1.15)))
-        button(
-            zoom, "＋", lambda: self.set_zoom(min(300, self.view.transform().m11() * 100 * 1.15))
-        )
-        button(zoom, "100%", lambda: self.set_zoom(100))
-        button(zoom, "全体表示", self.fit)
-        button(zoom, "選択へズーム", self.zoom_selected)
-        self.data_note = QLabel("売上等は現在の読込値です。基準日は投入日数だけに適用します。")
-        self.data_note.setWordWrap(True)
-        zoom.addWidget(self.data_note, 1)
-        print_row = QHBoxLayout()
-        layout.addLayout(print_row)
-        printing = group("印刷", print_row)
-        button(printing, "用紙・印刷設定", self.print_settings)
-        button(printing, "印刷プレビュー", self.preview)
-        button(printing, "PDF保存", self.export_floor_pdf)
-        button(printing, "印刷（直接）", self.print_floor)
-        self.print_note = QLabel()
-        self.print_note.setWordWrap(True)
-        printing.addWidget(self.print_note, 1)
-        self.info = QLabel(
-            "レイアウトExcelを読み込んで開始。Ctrl+ホイールで拡大縮小 / ダブルクリックで番号・商品を編集。"
-        )
-        self.info.setWordWrap(True)
-        self.info.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        layout.addWidget(self.info)
+        build_toolbar(self, layout)
         self.scene = QGraphicsScene(self)
         self.view = FloorView(self.scene, self)
         layout.addWidget(self.view, 1)
@@ -478,14 +409,18 @@ class FloorWidget(QWidget):
             ("Ctrl+Z", self.history.undo),
             ("Ctrl+Y", self.history.redo),
         ]:
-            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut = QShortcut(QKeySequence(key), self.view)
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(callback)
         self.day_timer = QTimer(self)
         self.day_timer.setInterval(30000)
         self.day_timer.timeout.connect(self.check_day)
         self.day_timer.start()
+        self._building_view = False
         self.scene.selectionChanged.connect(self.selection_changed)
+        for bar in (self.view.horizontalScrollBar(), self.view.verticalScrollBar()):
+            bar.sliderReleased.connect(self.capture_view)
+            bar.actionTriggered.connect(lambda *_: QTimer.singleShot(0, self.capture_view))
         self.update_print_note()
         if self.storage.exists():
             try:
@@ -502,6 +437,7 @@ class FloorWidget(QWidget):
         self.check_day()
         self.day_timer.start()
         super().showEvent(event)
+        QTimer.singleShot(0, self.restore_view_center)
 
     def assignments(self):
         return self._assignments
@@ -532,10 +468,14 @@ class FloorWidget(QWidget):
             zoom=self._zoom,
             loaded_at=self.loaded_at,
             print_options=asdict(self.print_options),
+            presentation=dict(self.presentation),
+            card_presets=deepcopy(self.card_presets),
+            view_center=deepcopy(self._view_center),
         )
 
     def restore(self, state, keep_history=False):
         validate_state(state)
+        self.restore_presentation(state)
         self.machines = validate_machines(state["machines"])
         self.original = deepcopy(state.get("original", []))
         self.source = state.get("source", "")
@@ -557,7 +497,9 @@ class FloorWidget(QWidget):
         self._setting_day = False
         self.display_mode.blockSignals(True)
         self.display_mode.setCurrentIndex(
-            self.display_mode.findData(state.get("display_mode", "all"))
+            self.display_mode.findData(
+                state.get("display_mode", "compact") if "presentation" in state else "compact"
+            )
         )
         self.display_mode.blockSignals(False)
         self._zoom = state.get("zoom", 100)
@@ -574,6 +516,8 @@ class FloorWidget(QWidget):
             self.fit(save=False)
         else:
             self.set_zoom(self._zoom, save=False)
+        self._view_center = deepcopy(state.get("view_center"))
+        self.restore_view_center()
         self.update_print_note()
         self.changed.emit()
 
@@ -585,6 +529,7 @@ class FloorWidget(QWidget):
             node = MachineNode(self, m)
             self.nodes[m.uid] = node
             self.scene.addItem(node)
+        self.apply_presentation()
         self.update_scene_rect()
         self.update_info()
 
@@ -595,12 +540,18 @@ class FloorWidget(QWidget):
     def update_info(self):
         unresolved = sum(not m.number for m in self.machines)
         self.overlaps = overlapping(self.machines)
-        text = f"{len(self.machines)}枠 ／ 番号未設定 {unresolved}枠　青：投入予定 ／ 黄枠：優先 ／ 橙：200%以上 ／ 緑：100%以上 ／ 白：50〜100%未満・不明 ／ 赤：50%未満"
+        self.apply_presentation()
+        text = (
+            f"表示 {len(self.visible_nodes())}/{len(self.machines)}台 ／ 番号未設定 {unresolved}台"
+        )
+        if self.presentation["legend"]:
+            text += "　青：投入予定 ／ 黄枠：優先 ／ 黄：200%以上 ／ 緑：100%以上 ／ 白：50〜100%未満・不明 ／ 赤：50%未満"
         if self.overlaps:
             text += (
                 f"　重なり {len(self.overlaps)}台：ドラッグまたはカードサイズで調整してください。"
             )
         self.info.setText(text)
+        self.info.setToolTip(self.data_note.text())
         self.data_note.setText(
             "売上等は現在の読込値です。基準日は投入日数だけに適用。"
             + (f" 読込 {self.loaded_at[:16]}" if self.loaded_at else "（履歴なし）")
@@ -612,6 +563,7 @@ class FloorWidget(QWidget):
 
     def sync(self):
         self.refresh_assignments()
+        self.apply_presentation()
         for node in self.nodes.values():
             node.update_handles()
             node.update()
@@ -640,12 +592,16 @@ class FloorWidget(QWidget):
             self.message.emit(f"売り場レイアウトの自動保存に失敗しました：{exc}")
 
     def machine_bounds(self, selected=False):
-        machines = self.selected() if selected else self.machines
-        if not machines:
+        nodes = (
+            [n for n in self.visible_nodes() if n.isSelected()]
+            if selected
+            else self.visible_nodes()
+        )
+        if not nodes:
             return QRectF(0, 0, 1500, 1000)
-        rect = QRectF(machines[0].x, machines[0].y, machines[0].width, machines[0].height)
-        for m in machines[1:]:
-            rect = rect.united(QRectF(m.x, m.y, m.width, m.height))
+        rect = nodes[0].sceneBoundingRect()
+        for node in nodes[1:]:
+            rect = rect.united(node.sceneBoundingRect())
         return rect
 
     def fit(self, *_, save=True):
@@ -660,6 +616,7 @@ class FloorWidget(QWidget):
             self.update_zoom_text()
         finally:
             self._fitting = False
+        self.capture_view(False)
         if save:
             self.schedule_save()
             self.changed.emit()
@@ -670,6 +627,7 @@ class FloorWidget(QWidget):
         self._zoom = value
         self.view.scale(value / 100 / current, value / 100 / current)
         self.update_zoom_text()
+        self.capture_view(False)
         if save:
             self.schedule_save()
             self.changed.emit()
@@ -705,6 +663,7 @@ class FloorWidget(QWidget):
         )
         self.set_zoom(max(50, min(300, scale * 100)))
         self.view.centerOn(rect.center())
+        self.capture_view()
 
     def reference_day(self):
         return self.reference_date.date().toPython()
@@ -757,13 +716,18 @@ class FloorWidget(QWidget):
             status,
             priority,
             DISPLAY_FIELDS[mode],
-            m.font_size * (1.35 if mode == "product" else 1.1 if mode == "analysis" else 1),
+            (self.presentation["font"] if self.presentation["mode"] != "actual" else m.font_size)
+            * (1.35 if mode == "product" else 1.1 if mode == "analysis" else 1),
             methods,
         )
 
     def selection_changed(self):
         if hasattr(self, "nodes"):
             self.refresh_frames()
+            for node in self.scene.selectedItems():
+                if isinstance(node, MachineNode):
+                    self.view.ensureVisible(node, 25, 25)
+            self.capture_view(False)
             self.view.viewport().update()
 
     def refresh_frames(self):
@@ -775,7 +739,7 @@ class FloorWidget(QWidget):
         ):
             try:
                 self.page_frames = plan_floor(
-                    self.machines,
+                    self.print_machines(),
                     self.assignments(),
                     self.print_options,
                     self.reference_day(),
@@ -787,9 +751,13 @@ class FloorWidget(QWidget):
                 pass
 
     def update_print_note(self):
-        mode = {"fit": "全体1枚", "tile": "分割", "selection": "選択範囲", "actual": "実寸相当"}[
-            self.print_options.mode
-        ]
+        mode = {
+            "fit": "全体1枚",
+            "tile": "分割",
+            "selection": "選択範囲",
+            "actual": "指定倍率",
+            "list": "マシン一覧表",
+        }[self.print_options.mode]
         self.print_note.setText(
             f"{self.print_options.paper} / {'横' if self.print_options.orientation=='landscape' else '縦'} / {mode}（画面倍率とは独立）"
         )
@@ -886,6 +854,7 @@ class FloorWidget(QWidget):
         self.nodes[machine.uid].setSelected(True)
         self.record(before, "マシン追加")
         self.view.centerOn(self.nodes[machine.uid])
+        self.capture_view(False)
 
     def machine_dialog(self, machine, title):
         dlg = QDialog(self)
@@ -1107,11 +1076,23 @@ class FloorWidget(QWidget):
                         "ratio",
                         "ratio_from_excel",
                         "installed_on",
+                        "maker",
+                        "po_rate",
+                        "units",
+                        "cases",
+                        "limit",
+                        "operation_method",
                     ):
                         setattr(m, field, getattr(fresh, field))
         self.rebuild()
+        if not preserve:
+            self.set_zoom(100, save=False)
+            if self.visible_nodes():
+                self.view.centerOn(self.visible_nodes()[0])
+            self.capture_view(False)
+        else:
+            self.restore_view_center()
         self.record(before, "レイアウトExcel読込")
-        self.fit()
         self.message.emit(f"{len(machines)}枠を読み込みました。" + " ".join(warnings))
         return warnings
 
@@ -1183,14 +1164,13 @@ class FloorWidget(QWidget):
                 before = self.state()
                 self.restore(state, keep_history=True)
                 self.record(before, "配置JSON読込")
-                self.fit()
             except Exception as exc:
                 QMessageBox.warning(self, "復元エラー", str(exc))
 
     def paint_floor(self, printer):
         return render_floor(
             printer,
-            self.machines,
+            self.print_machines(),
             self.assignments(),
             self.print_options,
             self.reference_day(),
@@ -1244,7 +1224,7 @@ class FloorWidget(QWidget):
 
     def prepare_print(self):
         plan = plan_floor(
-            self.machines,
+            self.print_machines(),
             self.assignments(),
             self.print_options,
             self.reference_day(),
@@ -1288,7 +1268,7 @@ class FloorWidget(QWidget):
             sources = (self.source, getattr(self.window(), "source", ""))
             plan = save_floor_pdf(
                 path,
-                self.machines,
+                self.print_machines(),
                 self.assignments(),
                 self.print_options,
                 self.reference_day(),
