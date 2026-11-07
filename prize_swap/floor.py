@@ -197,12 +197,14 @@ class MachineNode(QGraphicsObject):
             priority,
             self.isSelected(),
             self.machine.uid in self.owner.overlaps,
+            screen=True,
             search_match=getattr(self, "search_match", False)
             or self.machine.uid in getattr(self.owner, "_highlight_uids", set()),
         )
-        if (self.machine.analysis or {}).get("quality_issues"):
+        if (self.machine.analysis or {}).get("quality_issues") or self.machine.match_method=="review":
             painter.save()
-            painter.setPen(QPen(QColor("#8B1E15"), 2))
+            from .theme import tokens
+            painter.setPen(QPen(QColor(tokens()["danger"]), 2))
             painter.drawText(
                 self.boundingRect().adjusted(0, 12, -6, 0),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
@@ -272,7 +274,8 @@ class FloorView(QGraphicsView):
         self.owner = owner
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
-        self.setBackgroundBrush(QColor("#EFF3F0"))
+        from .theme import tokens
+        self.setBackgroundBrush(QColor(tokens()["canvas"]))
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
 
@@ -340,7 +343,7 @@ class FloorView(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if getattr(self.owner, "_fullscreen_transition", False):
+        if getattr(self.owner, "_fullscreen_transition", False) or getattr(self.owner,"_theme_transition",False):
             return
         if self.owner.presentation["mode"] == "list" and hasattr(self.owner, "nodes"):
             self.owner.apply_presentation()
@@ -363,7 +366,7 @@ class FloorView(QGraphicsView):
         super().drawBackground(painter, rect)
         if self.transform().m11() < 0.3:
             return
-        painter.setPen(QPen(QColor("#CED9D1"), 0))
+        painter.setPen(QPen(QColor(__import__("prize_swap.theme",fromlist=["tokens"]).tokens()["grid"]), 0))
         step = GRID
         left, top = int(rect.left()) // step * step, int(rect.top()) // step * step
         # Limit visible-grid work; normal viewports require only a few thousand dots.
@@ -443,6 +446,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.view.customContextMenuRequested.connect(self.canvas_menu)
         layout.addWidget(self.view, 1)
         self.nodes = {}
+        from .theme import manager
+        manager().about_to_change.connect(self.theme_changing)
+        manager().changed.connect(self.theme_changed)
         for key, callback in [
             ("Delete", self.delete_selected),
             ("Ctrl+D", self.duplicate_selected),
@@ -468,6 +474,21 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 self.info.setText(f"自動保存から{len(self.machines)}枠を復元しました。")
             except Exception as exc:
                 self.info.setText(f"自動保存を復元できません：{exc}")
+
+    def theme_changing(self):
+        if hasattr(self,"view"):
+            self._theme_camera=(self.view.transform(),self.view.mapToScene(self.view.viewport().rect().center()))
+            self._theme_transition=True
+
+    def theme_changed(self,*_):
+        from .theme import tokens
+        self.view.setBackgroundBrush(QColor(tokens()["canvas"]))
+        for node in self.nodes.values():node.update()
+        if hasattr(self,"_theme_camera"):
+            transform,center=self._theme_camera;self.view.setTransform(transform);self.view.centerOn(center)
+        self._theme_transition=False
+        self.view.viewport().update()
+        self.timer.start(800)
 
     def closeEvent(self, event):
         self.day_timer.stop()
@@ -502,6 +523,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def state(self):
         return dict(
             version=3,
+            theme_mode=__import__("prize_swap.theme",fromlist=["manager"]).manager().mode,
             number_references=deepcopy(self.number_references),
             performance_history=deepcopy(self.performance_history),
             analysis_settings=deepcopy(self.analysis_settings),
@@ -527,6 +549,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         state = validate_state(state)
         from .sales_analysis import validate_snapshot
 
+        from .theme import manager
+        if "theme_mode" in state and not keep_history:manager().set_mode(state["theme_mode"],persist=False)
         self.number_references=deepcopy(state.get("number_references", []))
         self.analysis_state = deepcopy(validate_snapshot(state.get("sales_analysis")))
         from .performance_history import validate_history

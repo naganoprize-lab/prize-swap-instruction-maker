@@ -23,9 +23,6 @@ def build_toolbar(owner, layout):
     def row():
         widget = QWidget()
         widget.setObjectName("floorTools")
-        widget.setStyleSheet(
-            "QWidget#floorTools QToolButton {padding:3px 6px; border:1px solid #CCD9D0; border-radius:4px; background:white;} QWidget#floorTools QComboBox, QWidget#floorTools QLineEdit, QWidget#floorTools QDateEdit, QWidget#floorTools QSpinBox {padding:2px 4px; min-height:18px;}"
-        )
         line = QHBoxLayout(widget)
         line.setContentsMargins(0, 0, 0, 0)
         line.setSpacing(4)

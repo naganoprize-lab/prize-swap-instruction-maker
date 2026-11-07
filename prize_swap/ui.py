@@ -23,27 +23,6 @@ from .machine_matching import machine_key
 from .labels_data import LabelStore
 from .labels_ui import LabelsWidget
 
-STYLE = """
-QMainWindow, QWidget#workspace { background: #F0F3F1; }
-QWidget { color: #253C33; font-family: 'Yu Gothic UI', 'Noto Sans CJK JP', 'Meiryo'; font-size: 10pt; }
-QFrame#card { background: white; border: 1px solid #DDE5DF; border-radius: 10px; }
-QLabel { background: transparent; border: none; }
-QLabel#title { font-size: 18pt; font-weight: 700; color: #244C3D; }
-QLabel#section { font-size: 12pt; font-weight: 700; }
-QLabel#muted { color: #677D72; }
-QLabel#count { color: #2F6D53; font-weight: 700; }
-QPushButton { background: white; border: 1px solid #CCD9D0; border-radius: 6px; padding: 6px 12px; min-height: 20px; }
-QPushButton:hover { background: #EAF3ED; border-color: #78A38B; }
-QPushButton:pressed { background: #D8E9DF; }
-QPushButton#primary { background: #3D795C; color: white; border-color: #3D795C; font-weight: 600; }
-QPushButton#primary:hover { background: #32664D; }
-QLineEdit, QComboBox, QDateEdit, QSpinBox, QPlainTextEdit { background: white; border: 1px solid #CCD9D0; border-radius: 5px; padding: 4px 6px; min-height: 20px; selection-background-color: #D4E9DD; }
-QTableView { background: white; alternate-background-color: #F6F9F7; border: 1px solid #E1E8E3; gridline-color: #E4EBE6; selection-background-color: #CEE6D8; selection-color: #183E2C; }
-QHeaderView::section { background: #EDF3EF; border: none; border-right: 1px solid #DBE5DE; border-bottom: 1px solid #DBE5DE; padding: 6px; font-weight: 600; }
-QTableView QLineEdit, QTableView QComboBox, QTableView QPlainTextEdit { border: 1px solid #488363; border-radius: 2px; padding: 0px 3px; }
-QComboBox QAbstractItemView { background: white; selection-background-color: #CEE6D8; color: #253C33; }
-QStatusBar { background: #F0F3F1; color: #536C5F; }
-"""
 
 
 def button(text, callback, primary=False):
@@ -85,7 +64,10 @@ class Window(QMainWindow):
         self.setWindowTitle("プライズ景品 入替指示書メーカー")
         self.setMinimumSize(1100, 700)
         self.resize(1500, 900)
-        self.setStyleSheet(STYLE)
+        from .theme import manager
+        self.themes=manager()
+        self.appearance_path=(Path(layout_storage).parent / "appearance.json") if layout_storage else (Path(__import__("PySide6.QtCore",fromlist=["QStandardPaths"]).QStandardPaths.writableLocation(__import__("PySide6.QtCore",fromlist=["QStandardPaths"]).QStandardPaths.StandardLocation.AppLocalDataLocation)) / "PrizeSwapInstructionMaker" / "appearance.json")
+        self.themes.load(self.appearance_path)
         self.products, self.visible = [], []
         self.source = ""
         self.dirty = False
@@ -105,6 +87,12 @@ class Window(QMainWindow):
         title_row.addWidget(button("印刷プレビュー", self.preview))
         title_row.addWidget(button("直接印刷", self.print_direct, True))
         title_row.addWidget(button("PDF保存", self.export_pdf))
+        from .theme import ThemeMenu
+        self.theme_button=QToolButton();self.theme_button.setFixedWidth(132)
+        self.theme_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);self.theme_button.setMenu(ThemeMenu(self.theme_button))
+        title_row.addWidget(self.theme_button)
+        self.settings_button=QToolButton();self.settings_button.setText("設定");self.settings_button.clicked.connect(self.show_settings);title_row.addWidget(self.settings_button)
+        self.themes.changed.connect(self.theme_changed)
         head.addLayout(title_row)
         top = QHBoxLayout()
         top.addWidget(button("Excelを開く", self.open_excel, True))
@@ -268,6 +256,22 @@ class Window(QMainWindow):
         self.tabs.currentChanged.connect(lambda *_: self.instruction_settings.setVisible(self.tabs.currentIndex() == 0))
         bottom_layout.addLayout(bottom)
         self.statusBar().showMessage("準備完了 — Excelを読み込んでください。")
+        self.themes.load(self.appearance_path)
+        self.theme_changed()
+
+    def show_settings(self):
+        from .theme import appearance_dialog
+        appearance_dialog(self)
+
+    def theme_changed(self,*_):
+        from .theme import MODES,line_icon
+        self.theme_button.setText("テーマ："+MODES[self.themes.mode])
+        self.theme_button.setIcon(line_icon({"system":"monitor","light":"sun","dark":"moon"}[self.themes.mode]))
+        if hasattr(self,"model"):
+            from PySide6.QtCore import QModelIndex
+            if self.model.rowCount():self.model.dataChanged.emit(self.model.index(0,0),self.model.index(self.model.rowCount()-1,self.model.columnCount()-1),[])
+        if hasattr(self,"summary_table"):self.update_booth_summary()
+        if hasattr(self,"labels"):self.labels.table.viewport().update() if hasattr(self.labels,"table") else self.labels.update()
 
     def eventFilter(self, obj, event):
         if obj is self.table.viewport() and event.type() == QEvent.Type.MouseButtonRelease:
@@ -312,7 +316,8 @@ class Window(QMainWindow):
         else:
             text = self.default_table_hint
         self.allocation_notice.setText(text)
-        self.allocation_notice.setStyleSheet("color: #B42318;" if excess else "color: #677D72;")
+        from .theme import tone
+        tone(self.allocation_notice,"danger" if excess else "muted")
         self.update_booth_summary()
 
     def update_booth_summary(self, *_):
@@ -329,7 +334,8 @@ class Window(QMainWindow):
                 value=total.method if col==0 else booth_value(total,field)
                 item=QTableWidgetItem(value)
                 if field in METRIC_COLORS:
-                    background,foreground=METRIC_COLORS[field]
+                    from .theme import metric_colors
+                    background,foreground=metric_colors(field)
                     item.setBackground(QColor(background))
                     item.setForeground(QColor(foreground))
                 if total.method=="合計":
@@ -496,7 +502,9 @@ class Window(QMainWindow):
     def update_dates(self):
         self.dates.clear()
         fmt = QTextCharFormat()
-        fmt.setBackground(QColor("#DBEAFE"))
+        from .theme import analysis_color,contrast_text
+        calendar_bg=analysis_color("#DBEAFE")
+        fmt.setBackground(QColor(calendar_bg));fmt.setForeground(QColor(contrast_text(calendar_bg)))
         self.day.calendarWidget().setDateTextFormat(QDate(), QTextCharFormat())
         for day in sorted({p.day for p in self.products}):
             self.dates.addItem(day.isoformat())

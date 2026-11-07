@@ -162,6 +162,8 @@ def validate_state(state):
         or not isinstance(state.get("source", ""), str)
     ):
         raise AppError("配置JSONの形式が不正です。")
+    from .theme import MODES
+    if state.get("theme_mode", "system") not in MODES:raise AppError("テーマ設定が不正です。")
     state = deepcopy(state)
     if state["version"] == 1:
         for record in [*state.get("machines", []), *state.get("original", [])]:

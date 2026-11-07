@@ -70,9 +70,9 @@ class LabelModel(QAbstractTableModel):
                 return "0（自動）でマシン数に戻ります。対象外にする場合は印刷チェックを外してください。"
         if role == Qt.ItemDataRole.BackgroundRole:
             if not e.product.included:
-                return QColor("#EDF0EE")
+                return QColor(__import__("prize_swap.theme",fromlist=["analysis_color"]).analysis_color("#EDF0EE"))
             if not e.machines and col in (2, 3, 4):
-                return QColor("#FFF4BF")
+                return QColor(__import__("prize_swap.theme",fromlist=["analysis_color"]).analysis_color("#FFF4BF"))
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         if not index.isValid():

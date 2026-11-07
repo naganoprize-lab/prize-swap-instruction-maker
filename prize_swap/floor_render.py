@@ -258,7 +258,10 @@ def draw_card(
     selected=False,
     overlap=False,
     search_match=False,
+    screen=False,
 ):
+    from .theme import analysis_color,contrast_text,tokens
+    if screen:background=analysis_color(background)
     painter.save()
     painter.setRenderHint(painter.RenderHint.Antialiasing)
     border = (
@@ -270,6 +273,9 @@ def draw_card(
             else "#9B6900" if priority else "#B42318" if overlap else "#60736A"
         )
     )
+    if screen:
+        if selected:border=tokens()["accent"]
+        elif priority:border="#FDE68A" if tokens()["background"]=="#111827" else border
     painter.setPen(
         QPen(
             QColor(border),
@@ -284,7 +290,7 @@ def draw_card(
         painter.drawEllipse(QPointF(rect.right() - 7, rect.top() + 7), 4, 4)
     painter.translate(rect.topLeft())
     painter.scale(layout.scale, layout.scale)
-    painter.setPen(QColor("#20242A"))
+    painter.setPen(QColor(contrast_text(background)))
     for point, block, _ in layout.blocks:
         block.draw(painter, point)
     painter.restore()

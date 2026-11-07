@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QComboBox, QLineEdit, QPlainTextEdit, QStyledItemD
 from .core import AppError, LIMITS, machine_numbers, quantity, split_values
 from .methods import allocation_status, format_allocations, format_cell_status, set_allocations, editor_state, sync_machine_methods
 from .booth_style import METRIC_COLORS
+from .theme import metric_colors,analysis_color
 from .methods_editor import MethodsCombo
 
 COLUMNS = ["出力", "順序", "メーカー", "商品名", "入数", "CS数", "マシン番号", "運営方法", "優先", "獲得個数制限"]
@@ -53,15 +54,15 @@ class ProductModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.BackgroundRole:
             if col == 7:
                 status = allocation_status(p)
-                if status.excess: return QColor(METRIC_COLORS["excess"][0])
-                if status.unknown or status.unassigned or status.unmapped: return QColor(METRIC_COLORS["unassigned"][0])
-                if status.assigned: return QColor(METRIC_COLORS["assigned"][0])
-            if p.priority: return QColor("#FCE4EC")
+                if status.excess: return QColor(metric_colors("excess")[0])
+                if status.unknown or status.unassigned or status.unmapped: return QColor(metric_colors("unassigned")[0])
+                if status.assigned: return QColor(metric_colors("assigned")[0])
+            if p.priority: return QColor(analysis_color("#FCE4EC"))
         if role == Qt.ItemDataRole.ForegroundRole and col == 7:
             status = allocation_status(p)
             field = "excess" if status.excess else "unassigned" if status.unknown or status.unassigned or status.unmapped else "assigned"
             if status.assigned or status.unknown or status.unassigned or status.unmapped or status.excess:
-                return QColor(METRIC_COLORS[field][1])
+                return QColor(metric_colors(field)[1])
         if role == Qt.ItemDataRole.ToolTipRole:
             if col == 7:
                 return format_allocations(p, "\n") + "\n" + allocation_status(p).message

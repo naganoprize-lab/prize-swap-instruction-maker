@@ -205,7 +205,8 @@ class MethodBars(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("white"))
+        from .theme import tokens,analysis_color
+        painter.fillRect(self.rect(), QColor(tokens()["card"]))
         records = self.records
         if not records:
             painter.drawText(10, 30, "集計対象がありません。")
@@ -215,14 +216,14 @@ class MethodBars(QWidget):
         height = max(20, (self.height() - 30) / max(1, len(records)))
         for i, (r, value) in enumerate(zip(records, values)):
             y = 20 + i * height
-            painter.setPen(QColor("#20242A"))
+            painter.setPen(QColor(tokens()["text"]))
             painter.drawText(4, round(y + 14), r["method"])
             painter.fillRect(
                 140,
                 round(y),
                 round(max(0, self.width() - 300) * value / largest),
                 max(8, round(height - 5)),
-                QColor("#94D8A0"),
+                QColor(analysis_color("#94D8A0")),
             )
             painter.drawText(
                 max(145, self.width() - 150), round(y + 14), money(r["average_sales"]) + "円"
