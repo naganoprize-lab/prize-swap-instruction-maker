@@ -113,6 +113,18 @@ def edit_analysis_settings(owner):
     add.clicked.connect(lambda: add_row())
     tlay.addWidget(add)
     tabs.addTab(typepage, "機種・色")
+    radar_page=QWidget()
+    radar_form=QFormLayout(radar_page)
+    min_peers=QSpinBox();min_peers.setRange(3,10000);min_peers.setValue(s["radar_min_peers"])
+    radar_form.addRow("売上スコアの最少比較台数（自身を含む）",min_peers)
+    radar_note=QLabel("POスコアは『指標と照合』のPO基準値を目標にします。各境界は基準値に対する倍率です。中央100%は最高100点。例：基準5%×40%=PO率2%。")
+    radar_note.setWordWrap(True);radar_form.addRow(radar_note)
+    knot_controls=[]
+    for i,(v,score) in enumerate(zip(s["radar_po_knots"],[20,60,80,100,80,60,20])):
+        c=QDoubleSpinBox();c.setRange(0,2000);c.setDecimals(2);c.setSuffix(" %");c.setValue(v*100);c.setEnabled(i!=3)
+        knot_controls.append(c);radar_form.addRow(f"PO境界 {i+1}（{score}点）・基準に対する倍率",c)
+    radar_form.addRow(QLabel("投入日数は新しさ、原価率は目標への適合度です。総合点は計算しません。"))
+    tabs.addTab(radar_page,"5軸スコア")
     buttons = QDialogButtonBox(
         QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
     )
@@ -127,6 +139,8 @@ def edit_analysis_settings(owner):
             if data["sales_benchmark"] == 0:
                 data["sales_benchmark"] = None
             data["sales_mode"] = mode.currentData()
+            data["radar_min_peers"]=min_peers.value()
+            data["radar_po_knots"]=[c.value()/100 for c in knot_controls]
             data["aliases"] = {}
             data["types"] = {}
             for i in range(types.rowCount()):

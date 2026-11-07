@@ -100,6 +100,14 @@ def build_overview(dialog, tabs, scroll, panel):
     d.evaluation_note = QLabel("各指標を個別に確認します。総合成績の平均点は作りません。")
     d.evaluation_note.setWordWrap(True)
     d.evaluation_layout.addWidget(d.evaluation_note)
+    from .radar import RadarChart
+    d.radar=RadarChart()
+    d.radar.setMinimumHeight(340)
+    d.evaluation_layout.addWidget(d.radar)
+    from .analysis_views import make_table
+    d.score_table=make_table(["項目","実測値","スコア","目標・意味"],[])
+    d.score_table.setMinimumHeight(200)
+    d.evaluation_layout.addWidget(d.score_table)
     d.evaluation_layout.addStretch()
     right_scroll.setWidget(d.evaluation_panel)
     d.splitter.addWidget(right_scroll)
@@ -131,6 +139,20 @@ def refresh_overview(d):
             text += " 日"
         card.set_value(text, color, label)
         card.setToolTip(r["sources"][key]["source"])
+    if hasattr(d,"radar"):
+        from .radar import evaluate, score_record, AGE_EXPLANATION
+        from PySide6.QtWidgets import QTableWidgetItem
+        peers=[score_record(m,o.reference_day(),o.analysis_settings) for m in o.machines]
+        d.scores=evaluate(m,o.reference_day(),o.analysis_settings,peers,o.assignments())
+        d.radar.set_axes(d.scores)
+        d.evaluation_note.setText(AGE_EXPLANATION+"\n"+"\n".join(a["warning"] for a in d.scores if a["warning"]))
+        d.score_table.setSortingEnabled(False)
+        d.score_table.setRowCount(5)
+        for i,a in enumerate(d.scores):
+            for j,value in enumerate((a["label"],a["actual"],"未評価" if a["score"] is None else f'{a["score"]:.1f}点',a["goal"])):
+                item=QTableWidgetItem(value);item.setToolTip(d.radar.tooltip(a));d.score_table.setItem(i,j,item)
+        d.score_table.setSortingEnabled(True)
+        d.score_table.setColumnWidth(0,80);d.score_table.setColumnWidth(1,170);d.score_table.setColumnWidth(2,75)
 
 
 def open_analysis(d):
