@@ -62,13 +62,20 @@ def test_paper_dimensions_and_japanese_text(tmp_path, paper, orientation):
     page = PdfReader(path).pages[0]
     assert float(page.mediabox.width) == pytest.approx(w * 72 / 25.4, abs=1)
     assert float(page.mediabox.height) == pytest.approx(h * 72 / 25.4, abs=1)
-    assert "アベ比49.9%" in text(path) and "投入5日" in text(path)
+    assert "アベ比49.9%" in text(path) and "設置日数" not in text(path)
     assert text(path).count("FLOOR000") == 2
     assert len(plan.pages) == 1
 
 
 def test_custom_paper_and_empty_missing_values(tmp_path):
-    options = FloorPrintOptions(paper="custom", width_mm=250, height_mm=350, orientation="portrait",fields=list(FIELDS))
+    options = FloorPrintOptions(
+        paper="custom",
+        width_mm=250,
+        height_mm=350,
+        orientation="portrait",
+        fields=list(FIELDS),
+        card_style="detailed",
+    )
     path = tmp_path / "独自用紙.pdf"
     save_floor_pdf(path, [Machine(number="1", product="欠測値の商品")], {}, options, DAY)
     page = PdfReader(path).pages[0]

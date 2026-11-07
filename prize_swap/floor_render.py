@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPen
 from .core import parse_date
 from .fonts import print_font
 from .printing import text_block
-from .floor_status import days_text, money, ratio_text
+from .floor_status import days_text, money, ratio_text, FILTER_FIELDS, effective_stat, ratio
 
 FIELDS = ("number", "product", "sales", "average", "ratio", "installed_on", "days")
 FIELD_LABELS = {
@@ -23,7 +23,7 @@ FIELD_LABELS = {
 }
 SUMMARY_FIELDS = ("number", "ratio", "days", "product")
 DISPLAY_FIELDS = {
-    "compact": SUMMARY_FIELDS,
+    "compact": FILTER_FIELDS["ratio"],
     "product": ("number", "product"),
     "analysis": ("number", "product", "sales", "average", "ratio"),
     "all": FIELDS,
@@ -67,9 +67,9 @@ class CardRenderer:
             records.append(("　".join(important), base * 1.15, True))
         financial = []
         if "sales" in fields:
-            financial.append("売上 " + money(machine.sales))
+            financial.append("売上 " + money(effective_stat(machine, "sales")))
         if "average" in fields:
-            financial.append("アベレージ " + money(machine.average))
+            financial.append("アベレージ " + money(effective_stat(machine, "average")))
         if financial:
             records.append(("　".join(financial), base * 0.85, False))
         if "installed_on" in fields:
@@ -111,7 +111,13 @@ class CardRenderer:
         if "ratio" in fields:
             records.append(("アベ比 " + ratio_text(machine), base * 1.8))
         if "days" in fields:
-            records.append(("投入 " + days_text(machine, reference), base * 1.4))
+            records.append(
+                (
+                    ("設置日数 " if "ratio" not in fields else "投入 ")
+                    + days_text(machine, reference),
+                    base * (1.8 if "ratio" not in fields else 1.4),
+                )
+            )
         if "product" in fields:
             records.append((machine.product or "商品未設定", base))
         y = 6
@@ -165,9 +171,9 @@ class CardRenderer:
             machine.number,
             machine.source_key,
             machine.product,
-            machine.sales,
-            machine.average,
-            machine.ratio,
+            effective_stat(machine, "sales"),
+            effective_stat(machine, "average"),
+            ratio(machine),
             machine.ratio_from_excel,
             machine.installed_on,
             width,

@@ -52,6 +52,8 @@ jobs:
           tests/test_floor_printing.py
           tests/test_floor_workspace.py
           tests/test_floor_control_print.py
+          tests/test_floor_color_filters.py
+          tests/test_sales_analysis.py
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
@@ -61,6 +63,30 @@ jobs:
         with:
           name: Pytest-results
           path: build-tests/
+          if-no-files-found: error
+      - name: Native Windows fullscreen and high DPI validation
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+        run: |
+          foreach ($scale in @('1', '1.5', '2')) {
+            $env:QT_SCALE_FACTOR = $scale
+            $outputPath = "build-visual/native-$scale"
+            python -m prize_swap.floor_visual_check $outputPath
+            $code = $LASTEXITCODE
+            if (!(Test-Path "$outputPath/report.json")) { throw "Native visual check produced no report ($scale)" }
+            $report = Get-Content "$outputPath/report.json" -Raw | ConvertFrom-Json
+            if ($code -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+              Write-Output "::error::$($report.error -replace "`n", ' | ')"
+              throw "Windows native visual check failed ($scale)"
+            }
+          }
+      - uses: actions/upload-artifact@v6
+        if: ${{ always() && hashFiles('build-visual/**') != '' }}
+        with:
+          name: Windows-native-visual-validation
+          path: build-visual/
           if-no-files-found: error
       - name: Build portable EXE
         run: python -m PyInstaller --clean --noconfirm --onefile --windowed --noupx --name PrizeSwapInstructionMaker main.py
@@ -80,6 +106,25 @@ jobs:
           if (!(Test-Path build-smoke/report.json)) { throw "EXE did not create build-smoke/report.json" }
           $report = Get-Content build-smoke/report.json -Raw | ConvertFrom-Json
           if (!$report.ok) { throw "EXE validation failed" }
+      - name: Native packaged EXE fullscreen at 200 percent DPI
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+          QT_SCALE_FACTOR: '2'
+        run: |
+          $exe = (Resolve-Path dist/PrizeSwapInstructionMaker.exe).Path
+          $process = Start-Process -FilePath $exe -ArgumentList @('--floor-visual-test', 'build-smoke/native-200') -PassThru
+          if (!$process.WaitForExit(120000)) {
+            $process.Kill()
+            throw "Native EXE visual test timed out"
+          }
+          $process.Refresh()
+          if (!(Test-Path build-smoke/native-200/report.json)) { throw "Native EXE visual report missing" }
+          $report = Get-Content build-smoke/native-200/report.json -Raw | ConvertFrom-Json
+          if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+            Write-Output "::error::$($report.error -replace "`n", ' | ')"
+            throw "Native packaged EXE visual check failed"
+          }
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-smoke/**') != '' }}
         with:

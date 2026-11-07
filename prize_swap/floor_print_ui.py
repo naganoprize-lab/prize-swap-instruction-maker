@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtPrintSupport import QPrintPreviewWidget
 
 from .core import AppError
+from .floor_status import COLOR_FILTERS
 from .floor_render import FIELDS, FIELD_LABELS
 from .floor_print import FloorPrintOptions, floor_printer
 
@@ -34,6 +35,7 @@ class FloorPrintControls(QWidget):
         self.numbers = {}
         self.checks = {}
         choices = {
+            "color_filter": [(label, key) for key, label in COLOR_FILTERS.items()],
             "paper": [(p, p) for p in ("A4", "A3", "A2", "A1", "A0")]
             + [("ユーザー指定", "custom")],
             "orientation": [("横向き", "landscape"), ("縦向き", "portrait")],
@@ -45,7 +47,7 @@ class FloorPrintControls(QWidget):
                 ("マシン一覧表", "list"),
             ],
             "font_size": [("標準", "standard"), ("大", "large"), ("特大", "xlarge")],
-            "card_style": [("通常（4項目を強調）", "summary"), ("詳細項目", "detailed")],
+            "card_style": [("通常（フィルターの3項目）", "summary"), ("詳細項目", "detailed")],
             "sort": [
                 ("マシン番号", "number"),
                 ("アベ比", "ratio"),
@@ -59,6 +61,7 @@ class FloorPrintControls(QWidget):
             ],
         }
         labels = {
+            "color_filter": "印刷用の色フィルター",
             "paper": "用紙",
             "orientation": "方向",
             "mode": "印刷方式",
@@ -100,7 +103,7 @@ class FloorPrintControls(QWidget):
             self.checks[key] = check
             form.addRow(check)
         self.fields = {}
-        form.addRow(QLabel("印刷項目（一覧表は番号・アベ比・投入日数・商品名の固定4列）"))
+        form.addRow(QLabel("詳細項目モードのみ選択可（通常・一覧表はフィルターの3項目）"))
         for field in FIELDS:
             check = QCheckBox(FIELD_LABELS[field])
             check.setChecked(field in options.fields)
@@ -122,7 +125,7 @@ class FloorPrintControls(QWidget):
     def update_enabled(self):
         table = self.combos["mode"].currentData() == "list"
         for field in self.fields.values():
-            field.setEnabled(not table)
+            field.setEnabled(not table and self.combos["card_style"].currentData() == "detailed")
         for key in ("card_width", "card_height"):
             self.numbers[key].setEnabled(not table)
         for key in ("card_style", "card_size"):

@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
 
 
 def build_toolbar(owner, layout):
+    owner.toolbar_rows = []
+
     def row():
         widget = QWidget()
         widget.setObjectName("floorTools")
@@ -26,6 +28,7 @@ def build_toolbar(owner, layout):
         line.setContentsMargins(0, 0, 0, 0)
         line.setSpacing(4)
         layout.addWidget(widget)
+        owner.toolbar_rows.append(widget)
         return line
 
     def button(line, text, callback):
@@ -56,6 +59,8 @@ def build_toolbar(owner, layout):
             ("保存", owner.save_dialog),
         ],
     )
+    button(top, "売上分析Excel読込", owner.import_analysis_dialog)
+    button(top, "実績読込結果", owner.show_analysis_report)
     editing = menu(
         top,
         "マシン編集",
@@ -84,6 +89,14 @@ def build_toolbar(owner, layout):
     for label, key in (("実配置", "actual"), ("見やすさ優先", "readable"), ("一覧", "list")):
         owner.layout_mode.addItem(label, key)
     top.addWidget(owner.layout_mode)
+    from .floor_status import COLOR_FILTERS
+
+    owner.color_filter = QComboBox()
+    for key, label in COLOR_FILTERS.items():
+        owner.color_filter.addItem(label + "フィルター", key)
+    owner.color_filter.setToolTip("色・表示項目の切替です。マシンを非表示にしません。")
+    top.addWidget(owner.color_filter)
+    owner.color_filter.currentIndexChanged.connect(owner.color_filter_changed)
     owner.layout_mode.currentIndexChanged.connect(owner.presentation_changed)
     owner.sort_by = QComboBox()
     for label, key in (
@@ -116,10 +129,10 @@ def build_toolbar(owner, layout):
     owner.floor_search.textChanged.connect(owner.presentation_changed)
     owner.filter_by = QComboBox()
     for label, key in (
-        ("すべて", "all"),
-        ("50%未満", "poor"),
-        ("200%以上", "high"),
-        ("投入予定のみ", "planned"),
+        ("絞込なし", "all"),
+        ("絞込：50%未満", "poor"),
+        ("絞込：200%以上", "high"),
+        ("絞込：投入予定", "planned"),
     ):
         owner.filter_by.addItem(label, key)
     second.addWidget(owner.filter_by)
@@ -203,3 +216,7 @@ def build_toolbar(owner, layout):
     owner.info = QLabel()
     owner.info.setWordWrap(True)
     layout.addWidget(owner.info)
+    owner.analysis_note = QLabel()
+    owner.analysis_note.setWordWrap(True)
+    owner.analysis_note.hide()
+    layout.addWidget(owner.analysis_note)

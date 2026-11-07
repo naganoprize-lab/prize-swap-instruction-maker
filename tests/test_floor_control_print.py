@@ -63,7 +63,7 @@ def test_machine_table_pages_text_and_row_placements(tmp_path, paper, orientatio
         for uid, blocks, height, colour in page.table_rows:
             ids.append(uid)
             assert all(block.height <= height - 12 + 0.1 for block in blocks)
-            assert len(blocks) == 4 and all(block.layout.font().bold() for block in blocks)
+            assert len(blocks) == 3 and all(block.layout.font().bold() for block in blocks)
     assert len(ids) == len(set(ids)) == 300
     expected = sorted(
         [m for m in source if m.ratio is not None], key=lambda m: m.ratio, reverse=True
@@ -72,7 +72,7 @@ def test_machine_table_pages_text_and_row_placements(tmp_path, paper, orientatio
     text = pdftext(path)
     for i in range(300):
         assert text.count(f"UNIQUE{i:03}") == 1
-    assert "49.9%" in text and "50.0%" in text and "200.0%" in text and "5日" in text
+    assert "49.9%" in text and "50.0%" in text and "200.0%" in text and "設置日数" not in text
     assert [asdict(m) for m in source] == before
 
 

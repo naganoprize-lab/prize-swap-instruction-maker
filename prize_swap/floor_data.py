@@ -36,6 +36,15 @@ class Machine:
     cases: int | float | str = ""
     limit: str = ""
     operation_method: str = ""
+    reference_average: float | None = None
+    analysis: dict | None = None
+    operating_days: float | None = None
+    gross_profit: float | None = None
+    cost_rate: float | None = None
+    dispensed: float | None = None
+    per_item: float | None = None
+    unit_price: float | None = None
+    cost: float | None = None
 
     def __post_init__(self):
         if isinstance(self.installed_on, (date, datetime)):
@@ -81,7 +90,20 @@ def validate_machines(records):
                     raise ValueError("位置・サイズが不正")
             if m.width < 80 or m.height < 60:
                 raise ValueError("サイズが小さすぎます")
-            for key in ("sales", "average", "ratio", "po_rate"):
+            for key in (
+                "sales",
+                "average",
+                "ratio",
+                "po_rate",
+                "reference_average",
+                "operating_days",
+                "gross_profit",
+                "cost_rate",
+                "dispensed",
+                "per_item",
+                "unit_price",
+                "cost",
+            ):
                 value = getattr(m, key)
                 if value is not None and (
                     isinstance(value, bool)
@@ -89,6 +111,11 @@ def validate_machines(records):
                     or not math.isfinite(value)
                 ):
                     raise ValueError("稼働数値が不正")
+            from .sales_analysis import validate_overlay
+
+            validate_overlay(m.analysis)
+            if m.reference_average is not None and m.reference_average <= 0:
+                raise ValueError("基準アベレージは正の値で指定してください")
             from .core import quantity
 
             m.units, m.cases = quantity(m.units), quantity(m.cases)
@@ -175,6 +202,9 @@ def validate_state(state):
             )
         ):
             raise AppError("カードプリセットのサイズが不正です。")
+    from .sales_analysis import validate_snapshot
+
+    validate_snapshot(state.get("sales_analysis"))
     return state
 
 
@@ -212,6 +242,35 @@ def block_metrics(ws, cell, epoch):
                 result[key] = numeric(first.value) if numeric(first.value) is not None else ""
             else:
                 result[key] = str(first.value).strip() if first.value is not None else ""
+        elif label in (
+            "平均売上",
+            "売上金額",
+            "稼働日数",
+            "粗利益",
+            "原価率",
+            "P/O率",
+            "払出数",
+            "個当たり",
+            "景品単価",
+            "原価",
+        ):
+            key = {
+                "平均売上": "average",
+                "売上金額": "sales",
+                "稼働日数": "operating_days",
+                "粗利益": "gross_profit",
+                "原価率": "cost_rate",
+                "P/O率": "po_rate",
+                "払出数": "dispensed",
+                "個当たり": "per_item",
+                "景品単価": "unit_price",
+                "原価": "cost",
+            }[label]
+            result[key] = (
+                percent(first.value, first.number_format)
+                if key in ("po_rate", "cost_rate")
+                else numeric(first.value)
+            )
         elif label in ("売上", "アベレージ", "アベ比", "アベ比(%)"):
             key = {
                 "売上": "sales",
@@ -315,6 +374,9 @@ def import_layout(path):
             warnings.append(
                 f"{unknown}枠は実マシン番号の対応がないため未設定です。参照IDから実番号を推測していません。"
             )
+        from .sales_analysis import ensure_references
+
+        ensure_references(machines)
         return machines, warnings
     finally:
         wb.close()

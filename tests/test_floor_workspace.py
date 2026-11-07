@@ -20,7 +20,7 @@ from prize_swap.floor_presentation import (
     visible_machines,
 )
 from prize_swap.floor_render import CardRenderer, SUMMARY_FIELDS
-from prize_swap.floor_status import machine_status
+from prize_swap.floor_status import machine_status, FILTER_FIELDS
 
 DAY = date(2026, 11, 6)
 
@@ -86,13 +86,18 @@ def test_summary_hierarchy_and_ellipsis_only_on_screen(floor):
     m = floor.machines[0]
     m.product = "日本語の非常に長い商品名 フィギュア ABC123 🎁 " * 40
     background, status, _, fields, font, _ = floor.card_context(m)
-    assert tuple(fields) == SUMMARY_FIELDS
+    assert tuple(fields) == FILTER_FIELDS["ratio"]
     renderer = CardRenderer()
     layout = renderer.plan(m, 260, 210, 14, fields, DAY, status, summary=True, truncate=True)
-    assert len(layout.blocks) == 4
-    number, ratio, days, name = layout.blocks
-    assert ratio[2] > days[2] > name[2]
-    assert ratio[1].layout.font().bold() and days[1].layout.font().bold()
+    assert len(layout.blocks) == 3
+    number, ratio, name = layout.blocks
+    assert ratio[2] > name[2]
+    assert ratio[1].layout.font().bold()
+    age_layout = renderer.plan(
+        m, 260, 210, 14, FILTER_FIELDS["age"], DAY, status, summary=True, truncate=True
+    )
+    assert len(age_layout.blocks) == 3 and age_layout.blocks[1][2] > age_layout.blocks[2][2]
+    assert age_layout.blocks[1][1].layout.font().bold()
     assert name[1].layout.lineCount() <= 3 and name[1].text.endswith("…")
     assert name[1].text != m.product and m.product.endswith("🎁 " * 1)
     assert "現在" not in name[1].text

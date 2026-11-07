@@ -12,7 +12,14 @@ from .core import AppError
 from .floor_render import CardRenderer, FIELDS, SUMMARY_FIELDS, draw_card
 from .floor_presentation import ordered_machines
 from .floor_status import ratio_text, days_text
-from .floor_status import machine_status, overlapping
+from .floor_status import (
+    machine_status,
+    overlapping,
+    filter_status,
+    filter_legend,
+    FILTER_FIELDS,
+    COLOR_FILTERS,
+)
 from .printing import configured_printer, render_pages, save_rendered_pdf, text_block
 from .fonts import print_font
 
@@ -33,6 +40,7 @@ class FloorPrintOptions:
     card_height: float = 150
     fields: list = field(default_factory=lambda: list(SUMMARY_FIELDS))
     card_style: str = "summary"
+    color_filter: str = "ratio"
     sort: str = "number"
     descending: bool = False
     visible_only: bool = False
@@ -48,6 +56,8 @@ class FloorPrintOptions:
             or self.mode not in ("fit", "tile", "selection", "actual", "list")
         ):
             raise AppError("売り場印刷の用紙・方向・印刷方式が不正です。")
+        if self.color_filter not in COLOR_FILTERS:
+            raise AppError("印刷の色フィルターが不正です。")
         if self.card_style not in ("summary", "detailed") or self.sort not in (
             "number",
             "ratio",
@@ -229,7 +239,7 @@ def plan_floor(
     width, height = page_size or options.printable_points()
     heading = f"売り場レイアウト　基準日 {reference:%Y/%m/%d}"
     note = "売上・アベレージ・アベ比は読込時の値です。基準日は投入日数だけに適用。" + (
-        f" 読込：{loaded_at[:16]}" if loaded_at else ""
+        f" 読込：{loaded_at}" if loaded_at else ""
     )
     headers = [
         text_block(heading, width, print_font(14), renderer.device),
@@ -238,7 +248,7 @@ def plan_floor(
     header_height = sum(b.height for b in headers) + 8
     footers = [
         text_block(
-            "青：投入予定／黄枠：優先入替／黄：高稼働（200%以上）／緑：100%以上／白：50〜100%未満・不明／赤：低稼働（50%未満）",
+            filter_legend(options.color_filter),
             width,
             print_font(9),
             renderer.device,
@@ -258,7 +268,7 @@ def plan_floor(
     for m in chosen:
         plans = assignments.get(m.number, [])
         priority = any(p.priority for p in plans)
-        colour, status = machine_status(m, bool(plans), priority)
+        colour, status = filter_status(m, options.color_filter, reference, bool(plans), priority)
         methods = (
             "／".join(dict.fromkeys(p.machine_methods.get(m.number) or "未設定" for p in plans))
             if options.show_methods
@@ -270,14 +280,16 @@ def plan_floor(
             w,
             h,
             font,
-            options.fields,
+            (
+                FILTER_FIELDS[options.color_filter]
+                if options.card_style == "summary"
+                else options.fields
+            ),
             reference,
             status,
             methods,
             grow=options.card_size == "auto",
-            summary=options.card_style == "summary"
-            and set(options.fields) <= set(SUMMARY_FIELDS)
-            and not options.show_methods,
+            summary=options.card_style == "summary",
         )
         if options.card_size == "auto":
             h = max(h, layout.height)
@@ -333,29 +345,42 @@ def plan_table(
     machines, assignments, options, reference, renderer, body, width, height, headers, footers
 ):
     font_size = {"standard": 11, "large": 13, "xlarge": 15}[options.font_size]
-    widths = [width * 0.16, width * 0.15, width * 0.15, width * 0.54]
+    fields = FILTER_FIELDS[options.color_filter]
+    widths = [width * 0.22, width * 0.24, width * 0.54]
+    labels = [
+        {"number": "マシン番号 / 状態", "ratio": "アベ比", "days": "設置日数", "product": "商品名"}[
+            key
+        ]
+        for key in fields
+    ]
     table_headers = [
         text_block(label, w - 12, print_font(font_size), renderer.device)
-        for label, w in zip(("マシン番号 / 状態", "アベ比", "投入日数", "商品名"), widths)
+        for label, w in zip(labels, widths)
     ]
     heading = max(b.height for b in table_headers) + 12
     rows = []
     for m in ordered_machines(machines, options.sort, options.descending, reference):
         plans = assignments.get(m.number, [])
-        colour, status = machine_status(m, bool(plans), any(p.priority for p in plans))
-        values = [
+        colour, status = filter_status(
+            m, options.color_filter, reference, bool(plans), any(p.priority for p in plans)
+        )
+        number = (
             (m.number or m.source_key or "未設定")
             + (" / 投入予定" if plans else "")
-            + (" / 優先" if any(p.priority for p in plans) else ""),
-            ratio_text(m),
-            days_text(m, reference),
-            m.product or "商品未設定",
-        ]
+            + (" / 優先" if any(p.priority for p in plans) else "")
+        )
+        data = {
+            "number": number,
+            "ratio": ratio_text(m),
+            "days": days_text(m, reference),
+            "product": m.product or "商品未設定",
+        }
+        values = [data[key] for key in fields]
         blocks = [
             text_block(
                 value,
                 w - 12,
-                print_font(font_size + 1 if i in (1, 2) else font_size),
+                print_font(font_size + 2 if fields[i] in ("ratio", "days") else font_size),
                 renderer.device,
             )
             for i, (value, w) in enumerate(zip(values, widths))

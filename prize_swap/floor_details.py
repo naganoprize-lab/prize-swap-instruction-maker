@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from .core import AppError, LIMITS, METHODS, quantity
 from .floor_data import validate_machines
-from .floor_status import money, ratio_text, days_text
+from .floor_status import money, ratio_text, days_text, effective_stat, reference_average
 from .methods import editor_state, set_allocations, format_counts, plans
 from .methods_editor import MethodsCombo
 
@@ -137,7 +137,10 @@ class MachineDetailDialog(QDialog):
         self.original = machine
         self.updated = deepcopy(machine)
         self.setWindowTitle(f"マシン詳細 — {machine.number or machine.source_key or '未設定'}")
-        self.resize(820, 800)
+        available = self.screen().availableGeometry()
+        self.resize(
+            min(820, max(360, available.width() - 30)), min(800, max(300, available.height() - 50))
+        )
         outer = QVBoxLayout(self)
         tabs = QTabWidget()
         outer.addWidget(tabs, 1)
@@ -150,10 +153,18 @@ class MachineDetailDialog(QDialog):
         self.values = {}
         for key, label, value in (
             ("number", "マシン番号", machine.number),
-            ("sales", "売上", money(machine.sales)),
-            ("average", "アベレージ", money(machine.average)),
+            ("sales", "売上金額", money(effective_stat(machine, "sales"))),
+            ("average", "平均売上", money(effective_stat(machine, "average"))),
             ("ratio", "アベ比", ratio_text(machine)),
-            ("po_rate", "PO率", "—" if machine.po_rate is None else f"{machine.po_rate:.1f}%"),
+            (
+                "po_rate",
+                "PO率",
+                (
+                    "—"
+                    if effective_stat(machine, "po_rate") is None
+                    else f"{effective_stat(machine,'po_rate'):.2f}%"
+                ),
+            ),
             ("installed_on", "設置日", machine.installed_on),
             ("reference", "基準日", owner.reference_day().isoformat()),
             ("days", "投入日数", days_text(machine, owner.reference_day())),
@@ -164,6 +175,31 @@ class MachineDetailDialog(QDialog):
             )
             self.values[key] = widget
             form.addRow(label, widget)
+        for key, label in (
+            ("operating_days", "稼働日数（売上集計期間）"),
+            ("gross_profit", "粗利益"),
+            ("cost_rate", "原価率"),
+            ("dispensed", "払出数"),
+            ("per_item", "個当たり"),
+            ("unit_price", "景品単価"),
+            ("cost", "原価"),
+        ):
+            value = effective_stat(machine, key)
+            text = "—" if value is None else f"{value:.2f}%" if key == "cost_rate" else money(value)
+            widget = QLabel(text)
+            self.values[key] = widget
+            form.addRow(label, widget)
+        form.addRow("基準アベレージ（維持）", QLabel(money(reference_average(machine))))
+        source = machine.analysis
+        label = QLabel(
+            (
+                f"売上分析優先：{source['file_name']} ／ 読込（JST） {source['loaded_at']}"
+                if source
+                else "従来のレイアウトExcelの実績値（未取得は —）"
+            )
+        )
+        label.setWordWrap(True)
+        form.addRow(label)
         self.name = QPlainTextEdit(machine.product)
         self.name.setMaximumHeight(130)
         self.name.setPlaceholderText("—")

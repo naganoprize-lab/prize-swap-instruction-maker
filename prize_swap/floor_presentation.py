@@ -4,10 +4,11 @@ import math
 import re
 from PySide6.QtCore import QRectF
 from .core import AppError
-from .floor_status import ratio, days
+from .floor_status import ratio, days, COLOR_FILTERS
 
 DEFAULTS = dict(
     mode="actual",
+    color_filter="ratio",
     sort="number",
     descending=False,
     search="",
@@ -26,6 +27,8 @@ def validate_presentation(value):
     if not isinstance(value, dict) or any(k not in DEFAULTS for k in value):
         raise AppError("売り場表示設定が不正です。")
     settings = DEFAULTS | value
+    if settings["color_filter"] not in COLOR_FILTERS:
+        raise AppError("色フィルターが不正です。")
     if (
         settings["mode"] not in ("actual", "readable", "list")
         or settings["sort"] not in ("number", "ratio", "days", "product")

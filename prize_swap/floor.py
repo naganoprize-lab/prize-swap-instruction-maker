@@ -44,8 +44,17 @@ from PySide6.QtPrintSupport import QPrintDialog
 from .core import AppError, machine_numbers
 from .floor_data import Machine, import_layout, save_layout, validate_machines, validate_state
 from .fonts import print_font
-from .floor_status import machine_status, days_text, money, ratio_text, overlapping
-from .floor_status import numeric
+from .floor_status import (
+    machine_status,
+    days_text,
+    money,
+    ratio_text,
+    overlapping,
+    filter_status,
+    filter_legend,
+    FILTER_FIELDS,
+)
+from .floor_status import numeric, effective_stat
 from .core import parse_date
 from .floor_render import CardRenderer, DISPLAY_FIELDS, draw_card
 from .floor_print import (
@@ -152,7 +161,7 @@ class MachineNode(QGraphicsObject):
         plans = self.owner.assignments().get(m.number, [])
         installed = m.installed_on or "—"
         self.setToolTip(
-            f"{m.number or '番号未設定'} / {m.kind}\n{m.product}\n売上 {money(m.sales)} / アベレージ {money(m.average)} / アベ比 {ratio_text(m)}\n設置日 {installed} / 投入日数 {days_text(m,self.owner.reference_day())}\n参照ID：{m.source_key or '追加マシン'}"
+            f"{m.number or '番号未設定'} / {m.kind}\n{m.product}\n売上 {money(effective_stat(m,"sales"))} / アベレージ {money(effective_stat(m,"average"))} / アベ比 {ratio_text(m)}\n設置日 {installed} / 投入日数 {days_text(m,self.owner.reference_day())}\n参照ID：{m.source_key or '追加マシン'}"
             + (
                 "\n入替予定："
                 + "、".join(
@@ -318,6 +327,8 @@ class FloorView(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if getattr(self.owner, "_fullscreen_transition", False):
+            return
         if self.owner.presentation["mode"] == "list" and hasattr(self.owner, "nodes"):
             self.owner.apply_presentation()
         if getattr(self.owner, "_zoom", 100) is None and hasattr(self.owner, "nodes"):
@@ -390,17 +401,23 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.follow_today = True
         self._last_today = QDate.currentDate()
         self._active_preview = None
+        from .sales_analysis import empty_snapshot
+
+        self.analysis_state = empty_snapshot()
         self.presentation = dict(DEFAULTS)
         self.card_presets = {}
         self._view_center = None
         self._projecting = False
         self._building_view = True
         self._fullscreen_host = None
+        self._fullscreen_transition = False
         self._detail_open = False
 
         build_toolbar(self, layout)
         self.scene = QGraphicsScene(self)
         self.view = FloorView(self.scene, self)
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.view.customContextMenuRequested.connect(self.canvas_menu)
         layout.addWidget(self.view, 1)
         self.nodes = {}
         for key, callback in [
@@ -437,12 +454,16 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.check_day()
         self.day_timer.start()
         super().showEvent(event)
-        QTimer.singleShot(0, self.restore_view_center)
+        if not self._fullscreen_transition:
+            QTimer.singleShot(0, self.restore_view_center)
 
     def assignments(self):
         return self._assignments
 
     def refresh_assignments(self):
+        from .sales_analysis import apply_snapshot
+
+        apply_snapshot(self.machines, self.analysis_state)
         result = {}
         for p in self.products():
             if p.day == self.selected_day() and p.included:
@@ -456,6 +477,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def state(self):
         return dict(
             version=1,
+            sales_analysis=deepcopy(self.analysis_state),
             initialized=self.initialized,
             source=self.source,
             machines=[asdict(m) for m in self.machines],
@@ -475,6 +497,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
     def restore(self, state, keep_history=False):
         validate_state(state)
+        from .sales_analysis import validate_snapshot
+
+        self.analysis_state = deepcopy(validate_snapshot(state.get("sales_analysis")))
         self.restore_presentation(state)
         self.machines = validate_machines(state["machines"])
         self.original = deepcopy(state.get("original", []))
@@ -545,12 +570,13 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             f"表示 {len(self.visible_nodes())}/{len(self.machines)}台 ／ 番号未設定 {unresolved}台"
         )
         if self.presentation["legend"]:
-            text += "　青：投入予定 ／ 黄枠：優先 ／ 黄：200%以上 ／ 緑：100%以上 ／ 白：50〜100%未満・不明 ／ 赤：50%未満"
+            text += "　" + filter_legend(self.presentation["color_filter"])
         if self.overlaps:
             text += (
                 f"　重なり {len(self.overlaps)}台：ドラッグまたはカードサイズで調整してください。"
             )
         self.info.setText(text)
+        self.update_analysis_note()
         self.info.setToolTip(self.data_note.text())
         self.data_note.setText(
             "売上等は現在の読込値です。基準日は投入日数だけに適用。"
@@ -698,7 +724,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def card_context(self, m):
         plans = self.assignments().get(m.number, [])
         priority = any(p.priority for p in plans)
-        background, status = machine_status(m, bool(plans), priority)
+        background, status = filter_status(
+            m, self.presentation["color_filter"], self.reference_day(), bool(plans), priority
+        )
         mode = self.display_mode.currentData()
         if mode == "product":
             status = ("投入予定" if plans else "通常") + (" / 優先入替" if priority else "")
@@ -715,7 +743,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             background,
             status,
             priority,
-            DISPLAY_FIELDS[mode],
+            (
+                FILTER_FIELDS[self.presentation["color_filter"]]
+                if mode == "compact"
+                else DISPLAY_FIELDS[mode]
+            ),
             (self.presentation["font"] if self.presentation["mode"] != "actual" else m.font_size)
             * (1.35 if mode == "product" else 1.1 if mode == "analysis" else 1),
             methods,
@@ -745,7 +777,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                     self.reference_day(),
                     self.print_renderer,
                     [m.uid for m in self.selected()],
-                    loaded_at=self.loaded_at,
+                    loaded_at=self.print_data_timestamp(),
                 ).frames
             except AppError:
                 pass
@@ -885,6 +917,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         ratio_input.setPlaceholderText("空欄なら売上÷アベレージから計算")
         installed = QLineEdit(machine.installed_on or "")
         installed.setPlaceholderText("YYYY/MM/DD、未入力可")
+        if machine.analysis:
+            form.addRow(QLabel("以下は従来データです。売上分析Excelの実績値が優先されます。"))
         form.addRow("売上", sales)
         form.addRow("アベレージ", average)
         form.addRow("アベ比（%）", ratio_input)
@@ -1082,6 +1116,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                         "cases",
                         "limit",
                         "operation_method",
+                        "reference_average",
                     ):
                         setattr(m, field, getattr(fresh, field))
         self.rebuild()
@@ -1176,7 +1211,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             self.reference_day(),
             self.print_renderer,
             [m.uid for m in self.selected()],
-            self.loaded_at,
+            self.print_data_timestamp(),
         )
 
     def print_settings(self, *_):
@@ -1230,7 +1265,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             self.reference_day(),
             self.print_renderer,
             [m.uid for m in self.selected()],
-            loaded_at=self.loaded_at,
+            loaded_at=self.print_data_timestamp(),
         )
         if plan.warnings:
             parent = self._active_preview or self
@@ -1274,7 +1309,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 self.reference_day(),
                 self.print_renderer,
                 [m.uid for m in self.selected()],
-                self.loaded_at,
+                self.print_data_timestamp(),
                 sources,
             )
             self.message.emit(f"売り場PDFを保存しました（{len(plan.pages)}ページ）：{path}")

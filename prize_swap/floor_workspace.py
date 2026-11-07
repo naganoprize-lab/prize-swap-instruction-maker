@@ -13,9 +13,16 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QMenu,
     QGraphicsItem,
+    QComboBox,
+    QHBoxLayout,
+    QToolButton,
+    QCheckBox,
+    QSizePolicy,
 )
 from .floor_presentation import validate_presentation, visible_machines, project_machines
+from .floor_status import COLOR_FILTERS
 
 
 class FullscreenHost(QDialog):
@@ -27,9 +34,60 @@ class FullscreenHost(QDialog):
         self.setWindowTitle("売り場レイアウト — Escで戻る")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(floor)
+        # removeTab() hides its page explicitly. Reparenting alone does not undo
+        # that hidden state, even when the new top-level window is shown.
+        self.hidden_controls = [
+            (w, not w.isHidden()) for w in [*floor.toolbar_rows, floor.info, floor.analysis_note]
+        ]
+        for widget, _ in self.hidden_controls:
+            widget.hide()
+        self.toolbar = QWidget(self)
+        self.toolbar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        row = QHBoxLayout(self.toolbar)
+        row.setContentsMargins(6, 4, 6, 4)
+        self.filter_combo = QComboBox()
+        for key, label in COLOR_FILTERS.items():
+            self.filter_combo.addItem(label, key)
+        self.filter_combo.setCurrentIndex(
+            self.filter_combo.findData(floor.presentation["color_filter"])
+        )
+        self.filter_combo.currentIndexChanged.connect(
+            lambda *_: floor.set_color_filter(self.filter_combo.currentData())
+        )
+        row.addWidget(self.filter_combo)
+        self.buttons = {}
+        for key, label, callback in (
+            ("zoom_in", "＋", lambda: floor.set_zoom(floor.view.transform().m11() * 115)),
+            ("zoom_out", "−", lambda: floor.set_zoom(floor.view.transform().m11() * 100 / 1.15)),
+            ("fit", "全体", floor.fit),
+            ("details", "詳細", floor.open_selected_details),
+        ):
+            button = QToolButton()
+            button.setText(label)
+            button.clicked.connect(callback)
+            row.addWidget(button)
+            self.buttons[key] = button
+        self.edit = QCheckBox("配置編集")
+        self.edit.setChecked(floor.edit_mode.isChecked())
+        self.edit.toggled.connect(floor.edit_mode.setChecked)
+        row.addWidget(self.edit)
+        row.addStretch()
+        close = QToolButton()
+        close.setText("解除（Esc）")
+        close.clicked.connect(self.close)
+        row.addWidget(close)
+        self.buttons["close"] = close
+        layout.addWidget(self.toolbar)
+        layout.addWidget(floor, 1)
+        floor.show()
+        self.resize(self.screen().availableGeometry().size())
+        layout.activate()
         shortcut = QShortcut(QKeySequence("Esc"), self)
         shortcut.activated.connect(self.close)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self.floor.finish_screen_transition)
 
     def reject(self):
         self.close()
@@ -39,7 +97,10 @@ class FullscreenHost(QDialog):
         event.accept()
 
 
-class FloorWorkspaceMixin:
+from .sales_analysis_ui import SalesAnalysisMixin
+
+
+class FloorWorkspaceMixin(SalesAnalysisMixin):
     def presentation_changed(self, *_):
         if getattr(self, "_building_view", True):
             return
@@ -62,6 +123,10 @@ class FloorWorkspaceMixin:
             edit=self.edit_mode.isChecked(),
             legend=self.legend_toggle.isChecked(),
         )
+        if self._fullscreen_host:
+            self._fullscreen_host.edit.blockSignals(True)
+            self._fullscreen_host.edit.setChecked(self.presentation["edit"])
+            self._fullscreen_host.edit.blockSignals(False)
         self.apply_presentation()
         if previous != self.presentation["mode"]:
             self.set_zoom(100, save=False)
@@ -83,6 +148,9 @@ class FloorWorkspaceMixin:
             (self.filter_by, "filter"),
         ):
             control.setCurrentIndex(control.findData(self.presentation[key]))
+        self.color_filter.setCurrentIndex(
+            self.color_filter.findData(self.presentation["color_filter"])
+        )
         self.floor_search.setText(self.presentation["search"])
         self.descending.setChecked(self.presentation["descending"])
         self.edit_mode.setChecked(self.presentation["edit"])
@@ -134,7 +202,7 @@ class FloorWorkspaceMixin:
         self.view.viewport().update()
 
     def capture_view(self, save=True):
-        if not hasattr(self, "view") or self._projecting:
+        if not hasattr(self, "view") or self._projecting or self._fullscreen_transition:
             return
         p = self.view.mapToScene(self.view.viewport().rect().center())
         self._view_center = [p.x(), p.y()]
@@ -231,11 +299,26 @@ class FloorWorkspaceMixin:
                 self.apply_presentation()
             self.schedule_save()
 
+    def canvas_menu(self, point):
+        menu = QMenu(self)
+        for label, callback in (
+            ("選択マシンの詳細", self.open_selected_details),
+            ("保存", self.save_dialog),
+            ("売上分析Excel読込", self.import_analysis_dialog),
+            ("実績読込結果", self.show_analysis_report),
+            ("印刷プレビュー", self.preview),
+            ("PDF保存", self.export_floor_pdf),
+            ("直接印刷", self.print_floor),
+        ):
+            menu.addAction(label, callback)
+        menu.exec(self.view.viewport().mapToGlobal(point))
+
     def toggle_fullscreen(self):
         if self._fullscreen_host:
             self._fullscreen_host.close()
             return
         self.capture_view(False)
+        self._fullscreen_transition = True
         parent = self.parentWidget()
         tabs = None
         while parent:
@@ -253,10 +336,49 @@ class FloorWorkspaceMixin:
         self._fullscreen_host = FullscreenHost(self)
         self.fullscreen_button.setText("全画面解除（Esc）")
         self._fullscreen_host.showFullScreen()
-        QTimer.singleShot(0, self.restore_view_center)
+        QTimer.singleShot(0, self.finish_screen_transition)
+
+    def finish_screen_transition(self):
+        if not self._fullscreen_transition:
+            return
+        if self._fullscreen_host:
+            self._fullscreen_host.layout().activate()
+        self.layout().activate()
+        self._fullscreen_transition = False
+        self.apply_presentation()
+        if self._zoom is None:
+            self.fit(save=False)
+        else:
+            self.restore_view_center()
+        self.view.viewport().update()
+        self.view.setFocus()
+
+    def color_filter_changed(self, *_):
+        if self._building_view:
+            return
+        self.set_color_filter(self.color_filter.currentData())
+
+    def set_color_filter(self, mode):
+        if mode not in COLOR_FILTERS:
+            raise ValueError("色フィルターが不正です。")
+        self.presentation["color_filter"] = mode
+        for combo in [self.color_filter] + (
+            [self._fullscreen_host.filter_combo] if self._fullscreen_host else []
+        ):
+            combo.blockSignals(True)
+            combo.setCurrentIndex(combo.findData(mode))
+            combo.blockSignals(False)
+        self.display_mode.blockSignals(True)
+        self.display_mode.setCurrentIndex(self.display_mode.findData("compact"))
+        self.display_mode.blockSignals(False)
+        self.sync()
+        self.schedule_save()
+        self.changed.emit()
 
     def leave_fullscreen(self):
         self.capture_view(False)
+        self._fullscreen_transition = True
+        host = self._fullscreen_host
         tabs, index, parent = self._fullscreen_return
         self.setParent(parent)
         if tabs:
@@ -264,10 +386,13 @@ class FloorWorkspaceMixin:
             tabs.insertTab(index, self, "売り場レイアウト")
             tabs.setCurrentIndex(index)
             self._placeholder.deleteLater()
+        for widget, was_visible in host.hidden_controls:
+            widget.setVisible(was_visible)
         self._fullscreen_host = None
+        self.update_analysis_note()
         self.fullscreen_button.setText("全画面")
         self.show()
-        QTimer.singleShot(0, self.restore_view_center)
+        QTimer.singleShot(0, self.finish_screen_transition)
 
     def open_selected_details(self):
         if self.selected():
