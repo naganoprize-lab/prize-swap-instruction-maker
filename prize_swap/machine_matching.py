@@ -13,6 +13,38 @@ MATCH_LABELS = {
     "layout": "レイアウト情報のみ",
     "review": "照合要確認",
 }
+MANUAL_FIELDS = (
+    "sales",
+    "average",
+    "ratio",
+    "po_rate",
+    "cost_rate",
+    "operating_days",
+    "gross_profit",
+    "dispensed",
+    "per_item",
+    "unit_price",
+    "cost",
+    "reference_average",
+    "installed_on",
+    "kind",
+    "product",
+    "maker",
+    "units",
+    "cases",
+    "limit",
+    "operation_method",
+    "number",
+)
+
+
+def mark_manual_updates(machine, before):
+    from datetime import datetime
+
+    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    for key in MANUAL_FIELDS:
+        if getattr(machine, key) != getattr(before, key):
+            machine.manual_updates[key] = stamp
 
 
 def clean(value):
@@ -224,6 +256,15 @@ def value_source(machine, key):
             and reference_average(machine) is not None
         ):
             return "景品運営分析表（既存基準から算出）"
+        if machine.ratio is not None and "ratio" in machine.manual_updates:
+            return "手動入力"
+        if (
+            machine.ratio is None
+            and machine.sales is not None
+            and machine.average
+            and any(k in machine.manual_updates for k in ("sales", "average"))
+        ):
+            return "手動入力から算出"
         return (
             "レイアウト由来"
             if machine.ratio is not None
@@ -240,6 +281,8 @@ def value_source(machine, key):
             if effective_stat(machine, key) is not None
             else "景品運営分析表：未取得"
         )
+    if key in machine.manual_updates:
+        return "手動入力" if getattr(machine, key, None) is not None else "手動入力：未設定"
     return "レイアウト由来" if getattr(machine, key, None) is not None else "データなし"
 
 
@@ -253,4 +296,27 @@ def metric_info(machine, key):
         if source.startswith("景品運営分析表")
         else machine.layout_loaded_at
     )
+    if source.startswith("手動入力"):
+        updated = machine.manual_updates.get(key) or max(
+            (machine.manual_updates.get(k, "") for k in ("sales", "average")), default=""
+        )
     return dict(value=value, source=source, updated_at=updated, match_method=machine.match_method)
+
+
+def machine_updated_at(machine):
+    """Most recent known edit/import timestamp, without comparing offset strings."""
+    from datetime import datetime
+
+    values = [
+        (machine.analysis or {}).get("loaded_at") or machine.layout_loaded_at,
+        *machine.manual_updates.values(),
+    ]
+    values = [value for value in values if value]
+
+    def timestamp(value):
+        try:
+            return datetime.fromisoformat(value).timestamp()
+        except (ValueError, OverflowError, OSError):
+            return float("-inf")
+
+    return max(values, key=timestamp) if values else ""

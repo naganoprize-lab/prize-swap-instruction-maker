@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from .core import AppError, LIMITS, METHODS, quantity
 from .floor_data import validate_machines
 from .machine_matching import display_identity, machine_key, MATCH_LABELS, value_source, metric_info
+from .machine_matching import machine_updated_at
 from .floor_status import money, ratio_text, days_text, effective_stat, reference_average
 from .methods import editor_state, set_allocations, format_counts, plans
 from .methods_editor import MethodsCombo
@@ -140,7 +141,10 @@ class MachineDetailDialog(QDialog):
         self.setWindowTitle(f"マシン詳細 — {display_identity(machine)}")
         available = self.screen().availableGeometry()
         size = owner.analytics_ui["detail_size"]
-        self.resize(min(size[0], max(360, available.width()-30)), min(size[1], max(300, available.height()-50)))
+        self.resize(
+            min(size[0], max(360, available.width() - 30)),
+            min(size[1], max(300, available.height() - 50)),
+        )
         outer = QVBoxLayout(self)
         tabs = QTabWidget()
         outer.addWidget(tabs, 1)
@@ -165,13 +169,17 @@ class MachineDetailDialog(QDialog):
             (
                 "provenance",
                 "実績データの取得元",
-                "景品運営分析表" if machine.analysis else "レイアウト由来",
+                (
+                    "景品運営分析表"
+                    if machine.analysis
+                    else "手動入力・レイアウト情報" if machine.manual_updates else "レイアウト由来"
+                ),
             ),
             ("ratio_source", "アベ比の取得元", value_source(machine, "ratio")),
             (
                 "updated_at",
                 "データ更新日時",
-                (machine.analysis or {}).get("loaded_at") or machine.layout_loaded_at,
+                machine_updated_at(machine),
             ),
             ("sales", "売上金額", money(effective_stat(machine, "sales"))),
             ("average", "平均売上", money(effective_stat(machine, "average"))),
@@ -304,6 +312,7 @@ class MachineDetailDialog(QDialog):
         from .detail_widgets import build_overview
 
         build_overview(self, tabs, scroll, panel)
+        self.update_responsive_layout()
 
     def refresh_overview(self, *_):
         from .detail_widgets import refresh_overview
@@ -312,27 +321,81 @@ class MachineDetailDialog(QDialog):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self.update_responsive_layout()
+
+    def update_responsive_layout(self):
         if hasattr(self, "splitter"):
-            self.splitter.setOrientation(Qt.Orientation.Vertical if self.width()<960 else Qt.Orientation.Horizontal)
+            orientation = (
+                Qt.Orientation.Vertical if self.width() < 960 else Qt.Orientation.Horizontal
+            )
+            reflow = orientation != self.splitter.orientation() or not getattr(
+                self, "_split_initialized", False
+            )
+            self.splitter.setOrientation(orientation)
+            self.splitter.setMinimumHeight(500 if self.width() < 960 else 320)
+            if reflow:
+                self.splitter.setSizes([320, 400] if self.width() < 960 else [560, 440])
+                self._split_initialized = True
+            self.analysis_scope.setMinimumContentsLength(3)
+            self.analysis_scope.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+            )
+            self.analysis_scope.setMaximumWidth(110 if self.width() < 700 else 220)
+            self.analysis_button.setText("分析へ" if self.width() < 700 else "売上分析で表示")
 
     def done(self, result):
-        self.owner.analytics_ui["detail_size"] = [max(300,self.width()), max(300,self.height())]
+        self.owner.analytics_ui["detail_size"] = [max(300, self.width()), max(300, self.height())]
         self.owner.schedule_save()
         super().done(result)
 
     def edit_metrics(self):
         draft = deepcopy(self.updated)
         if self.owner.machine_dialog(draft, "番号・稼働値を編集"):
+            from .machine_matching import prepare_references, mark_manual_updates
+            from .sales_analysis import apply_snapshot
+            from .analytics_data import NUMERIC, formatted
+
+            mark_manual_updates(draft, self.updated)
+            if draft.number != self.updated.number:
+                draft.resolved_number = ""
+                draft.manual_number = None
+                draft.number_origin = "direct"
+                draft.direct_number_raw = draft.number
+            drafts = [deepcopy(m) if m.uid != draft.uid else draft for m in self.owner.machines]
+            if self.owner.number_references:
+                prepare_references(drafts, self.owner.number_references)
+            apply_snapshot(drafts, self.owner.analysis_state)
             self.updated = draft
+            self.name.setPlainText(draft.product)
             for key, value in (
-                ("number", draft.number),
-                ("sales", money(draft.sales)),
-                ("average", money(draft.average)),
+                ("number", display_identity(draft)),
+                ("resolved_number", draft.resolved_number),
+                ("match_method", MATCH_LABELS[draft.match_method]),
+                ("match_message", draft.match_message),
                 ("ratio", ratio_text(draft)),
+                ("ratio_source", value_source(draft, "ratio")),
+                ("updated_at", machine_updated_at(draft)),
+                (
+                    "provenance",
+                    (
+                        "景品運営分析表"
+                        if draft.analysis
+                        else (
+                            "手動入力・レイアウト情報" if draft.manual_updates else "レイアウト由来"
+                        )
+                    ),
+                ),
                 ("installed_on", draft.installed_on),
                 ("days", days_text(draft, self.owner.reference_day())),
             ):
                 self.values[key].setText(missing(value))
+            for key in NUMERIC:
+                if key not in ("ratio", "days"):
+                    self.values[key].setText(formatted(key, effective_stat(draft, key)))
+                    info = metric_info(draft, key)
+                    self.values[key].setToolTip(
+                        info["source"] + " / " + (info["updated_at"] or "不明")
+                    )
             self.refresh_overview()
 
     def accept(self):
@@ -348,6 +411,9 @@ class MachineDetailDialog(QDialog):
             self.updated.cases = quantity(self.cases.text())
             self.updated.limit = self.limit.currentText().strip()
             self.updated.operation_method = self.method.currentText().strip()
+            from .machine_matching import mark_manual_updates
+
+            mark_manual_updates(self.updated, self.original)
             validate_machines(
                 [
                     asdict(self.updated) if m.uid == self.updated.uid else asdict(m)

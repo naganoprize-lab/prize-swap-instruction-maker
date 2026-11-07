@@ -35,7 +35,7 @@ DEFAULTS = dict(
     dashboard_visible=True,
     fullscreen_dashboard=False,
     radar_min_peers=5,
-    radar_po_knots=[.4,.6,.8,1,1.2,1.4,1.6],
+    radar_po_knots=[0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6],
 )
 
 
@@ -45,7 +45,14 @@ def validate_settings(value=None):
     s = deepcopy(DEFAULTS) | deepcopy(value or {})
     for key, default in DEFAULTS.items():
         v = s[key]
-        if key in ("aliases", "types", "sales_mode", "dashboard_visible", "fullscreen_dashboard", "radar_po_knots"):
+        if key in (
+            "aliases",
+            "types",
+            "sales_mode",
+            "dashboard_visible",
+            "fullscreen_dashboard",
+            "radar_po_knots",
+        ):
             continue
         if key == "sales_benchmark" and v is None:
             continue
@@ -54,10 +61,18 @@ def validate_settings(value=None):
     for key in ("poor_days", "consider_days", "stale_days", "long_days"):
         if type(s[key]) is not int or s[key] > 100000:
             raise AppError("判定日数は0〜100000の整数で指定してください。")
-    knots=s["radar_po_knots"]
-    if type(s["radar_min_peers"]) is not int or not 3<=s["radar_min_peers"]<=10000:
+    knots = s["radar_po_knots"]
+    if type(s["radar_min_peers"]) is not int or not 3 <= s["radar_min_peers"] <= 10000:
         raise AppError("売上スコアの比較対象は3〜10000台で指定してください。")
-    if not isinstance(knots,list) or len(knots)!=7 or any(type(v) not in (int,float) or not math.isfinite(v) or v<0 or v>20 for v in knots) or knots[3]!=1 or any(a>=b for a,b in zip(knots,knots[1:])):
+    if (
+        not isinstance(knots, list)
+        or len(knots) != 7
+        or any(
+            type(v) not in (int, float) or not math.isfinite(v) or v < 0 or v > 20 for v in knots
+        )
+        or knots[3] != 1
+        or any(a >= b for a, b in zip(knots, knots[1:]))
+    ):
         raise AppError("POスコア境界は7つの昇順倍率（中央は基準の100%）にしてください。")
     if not 0 <= s["po_low"] < s["po_high"] <= 1 or not 0 <= s["po_reference"] <= 1:
         raise AppError("PO率の下限・上限は0〜100%で下限＜上限にしてください。")

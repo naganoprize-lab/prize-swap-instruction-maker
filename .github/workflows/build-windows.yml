@@ -64,6 +64,9 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q --junitxml=build-tests/pytest.xml
+      - name: Report test failures
+        if: ${{ always() && hashFiles('build-tests/*.xml') != '' }}
+        run: python scripts/report_test_failures.py
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-tests/**') != '' }}
         with:
@@ -104,6 +107,24 @@ jobs:
             if ($code -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
               Write-Output "::error::$($report.error -replace "`n", ' | ')"
               throw "Native workspace validation failed ($scale)"
+            }
+          }
+      - name: Native Windows interactive analytics and detail validation
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+        run: |
+          foreach ($scale in @('1', '1.25', '1.5')) {
+            $env:QT_SCALE_FACTOR = $scale
+            $outputPath = "build-visual/analytics-$scale"
+            python -m prize_swap.analytics_visual_check $outputPath
+            $code = $LASTEXITCODE
+            if (!(Test-Path "$outputPath/report.json")) { throw "Analytics visual report missing ($scale)" }
+            $report = Get-Content "$outputPath/report.json" -Raw | ConvertFrom-Json
+            if ($code -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+              Write-Output "::error::$($report.error -replace "`n", ' | ')"
+              throw "Native analytics validation failed ($scale)"
             }
           }
       - uses: actions/upload-artifact@v6
@@ -164,6 +185,22 @@ jobs:
           if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
             Write-Output "::error::$($report.error -replace "`n", ' | ')"
             throw "Packaged matching/theme validation failed"
+          }
+      - name: Native packaged EXE analytics and machine detail at 150 percent DPI
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+          QT_SCALE_FACTOR: '1.5'
+        run: |
+          $exe = (Resolve-Path dist/PrizeSwapInstructionMaker.exe).Path
+          $process = Start-Process -FilePath $exe -ArgumentList @('--analytics-visual-test', 'build-smoke/analytics-150') -PassThru
+          if (!$process.WaitForExit(180000)) { $process.Kill(); throw "Packaged analytics validation timed out" }
+          $process.Refresh()
+          if (!(Test-Path build-smoke/analytics-150/report.json)) { throw "Packaged analytics report missing" }
+          $report = Get-Content build-smoke/analytics-150/report.json -Raw | ConvertFrom-Json
+          if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+            Write-Output "::error::$($report.error -replace "`n", ' | ')"
+            throw "Packaged analytics validation failed"
           }
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-smoke/**') != '' }}

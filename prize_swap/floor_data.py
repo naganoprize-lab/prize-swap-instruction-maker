@@ -56,6 +56,7 @@ class Machine:
     match_message: str = ""
     layout_loaded_at: str = ""
     direct_number_raw: str = ""
+    manual_updates: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if isinstance(self.installed_on, (date, datetime)):
@@ -92,6 +93,9 @@ def validate_machines(records):
             ):
                 raise ValueError("文字列項目が不正")
             from .machine_matching import normalize_number, MATCH_LABELS
+            from .machine_matching import MANUAL_FIELDS
+            if not isinstance(m.manual_updates,dict) or set(m.manual_updates)-set(MANUAL_FIELDS) or any(not isinstance(v,str) or len(v)>100 for v in m.manual_updates.values()):
+                raise ValueError('手動入力の取得元情報が不正')
 
             if m.number_origin not in ("direct", "reference") or m.match_method not in MATCH_LABELS:
                 raise ValueError("照合状態が不正")

@@ -81,13 +81,16 @@ class FullscreenHost(QDialog):
             ("zoom_out", "−", lambda: floor.set_zoom(floor.view.transform().m11() * 100 / 1.15)),
             ("fit", "全体", floor.fit),
             ("details", "詳細", floor.open_selected_details),
-            ("clear_analysis", "分析強調を解除", floor.clear_analysis_highlight),
         ):
             button = QToolButton()
             button.setText(label)
             button.clicked.connect(callback)
             row.addWidget(button)
             self.buttons[key] = button
+        self.clear_analysis=QToolButton()
+        self.clear_analysis.setText('分析強調を解除')
+        self.clear_analysis.clicked.connect(floor.clear_analysis_highlight)
+        row.addWidget(self.clear_analysis)
         self.edit = QCheckBox("配置編集")
         self.edit.setChecked(floor.edit_mode.isChecked())
         self.edit.toggled.connect(floor.edit_mode.setChecked)
@@ -111,7 +114,7 @@ class FullscreenHost(QDialog):
         close.clicked.connect(self.close)
         row.addWidget(close)
         self.buttons["close"] = close
-        self.buttons["clear_analysis"].setVisible(floor.analysis_highlight_uids is not None)
+        self.clear_analysis.setVisible(floor.analysis_highlight_uids is not None)
         layout.addWidget(self.toolbar)
         layout.addWidget(floor, 1)
         floor.show()
@@ -293,14 +296,14 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         self.analysis_highlight_uids=valid
         self.analysis_clear.setText(f"分析強調 {len(valid)}台を解除")
         self.analysis_clear.show()
-        if self._fullscreen_host:self._fullscreen_host.buttons['clear_analysis'].show()
+        if self._fullscreen_host:self._fullscreen_host.clear_analysis.show()
         self.apply_presentation()
         return True
 
     def clear_analysis_highlight(self):
         self.analysis_highlight_uids=None
         self.analysis_clear.hide()
-        if self._fullscreen_host:self._fullscreen_host.buttons['clear_analysis'].hide()
+        if self._fullscreen_host:self._fullscreen_host.clear_analysis.hide()
         self.apply_presentation()
 
     def next_match(self, direction=1):

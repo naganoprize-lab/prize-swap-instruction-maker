@@ -699,6 +699,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             node.update()
         self.refresh_frames()
         self.scene.update()
+        self.changed.emit()
 
     def record(self, before, text):
         after = self.state()
@@ -1008,6 +1009,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.capture_view(False)
 
     def machine_dialog(self, machine, title):
+        initial_data=deepcopy(machine)
         dlg = QDialog(self)
         dlg.setWindowTitle(title)
         form = QFormLayout(dlg)
@@ -1081,6 +1083,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 machine.sales, machine.average, machine.ratio = values
                 machine.ratio_from_excel = bool(ratio_input.text().strip())
                 machine.installed_on = installation.isoformat() if installation else None
+                from .machine_matching import mark_manual_updates
+                mark_manual_updates(machine,initial_data)
                 dlg.accept()
             except AppError as exc:
                 error.setText(str(exc))
@@ -1102,6 +1106,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         updated = deepcopy(old)
         if not self.machine_dialog(updated, "マシン編集"):
             return
+        from .machine_matching import mark_manual_updates
+        mark_manual_updates(updated,old)
         if updated.number != old.number:
             updated.resolved_number = ""
             updated.manual_number = None
