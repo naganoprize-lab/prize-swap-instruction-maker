@@ -3,7 +3,7 @@
 from copy import deepcopy
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QSplitter, QTabWidget, QScrollArea, QStackedWidget, QCheckBox, QMenu, QToolButton, QWidgetAction, QFormLayout, QFileDialog, QMessageBox
-from .analytics_data import FIELDS, NUMERIC, AXES, RATIOS, AGGREGATIONS, formatted, filter_records, history_series
+from .analytics_data import FIELDS, NUMERIC, AXES, RATIOS, AGGREGATIONS, formatted, filter_records, history_series, validate_ui_state
 from .analysis_views import make_table, MethodAnalysisPanel
 from .analytics_charts import ChartCanvas, CHARTS, chart_icon, chart_constraints, histogram, scatter
 from .performance_validation import period_text
@@ -54,6 +54,22 @@ class SalesPage(QWidget):
         self.expand_button=QPushButton('グラフを拡大');self.expand_button.setCheckable(True);self.expand_button.toggled.connect(self.expand_chart);actions.addWidget(self.expand_button)
         save=QPushButton('グラフ画像保存');save.clicked.connect(lambda:self.save_image());actions.addWidget(save)
         actions.addStretch()
+        self.export_button=QToolButton();self.export_button.setText('CSV・Excel出力');export_menu=QMenu(self.export_button)
+        for name in ('集計結果','詳細','グラフデータ','クロス集計'):
+            export_menu.addAction('CSV：'+name,lambda checked=False,n=name:self.save_csv(table=n))
+        export_menu.addAction('Excel：全データ',lambda:self.save_excel())
+        self.export_button.setMenu(export_menu);self.export_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);actions.addWidget(self.export_button)
+        self.filter_row=QHBoxLayout();outer.addLayout(self.filter_row)
+        self.filter_field=QComboBox();self.filter_operator=QComboBox();self.filter_value=QLineEdit();self.filter_upper=QLineEdit()
+        self.filter_row.addWidget(QLabel('条件'))
+        for key,text in FIELDS.items():self.filter_field.addItem(text,key)
+        for text,key in [('含む','contains'),('一致','eq'),('以上','ge'),('以下','le'),('範囲','range'),('未取得','missing')]:self.filter_operator.addItem(text,key)
+        for c in (self.filter_field,self.filter_operator,self.filter_value,self.filter_upper):self.filter_row.addWidget(c)
+        add=QPushButton('条件追加');add.clicked.connect(self.add_condition);self.filter_row.addWidget(add)
+        self.condition_button=QToolButton();self.condition_button.setText('適用条件 0');self.condition_menu=QMenu(self.condition_button);self.condition_button.setMenu(self.condition_menu);self.condition_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);self.filter_row.addWidget(self.condition_button)
+        self.filter_field.currentIndexChanged.connect(self.filter_editor_changed);self.filter_operator.currentIndexChanged.connect(self.filter_editor_changed)
+        self.filter_value.returnPressed.connect(self.add_condition);self.filter_upper.returnPressed.connect(self.add_condition)
+        self.filter_editor_changed()
         self.notice=QLabel();self.notice.setWordWrap(True);outer.addWidget(self.notice)
         self.splitter=QSplitter(Qt.Orientation.Vertical);outer.addWidget(self.splitter,1)
         self.chart_stack=QStackedWidget();self.splitter.addWidget(self.chart_stack)
@@ -83,7 +99,8 @@ class SalesPage(QWidget):
         for key,control in (("axis",self.axis),("metric",self.metric),("operation",self.operation),("chart",self.chart_type),("stack",self.stack_axis),("x_metric",self.x_metric),("y_metric",self.y_metric)):
             control.setCurrentIndex(max(0,control.findData(s[key])))
         self.search.setText(s['search']);self.conditions=deepcopy(s['conditions'])
-        self.legend.setChecked(s['legend']);self.order.setCurrentIndex(0 if s['descending'] else 1)
+        self.legend.setChecked(s['legend']);self.order.setCurrentIndex(['descending','ascending','label'].index(s['sort']))
+        self.focus_uids=set(s['focus_uids']) if s['focus_uids'] is not None else None
         self._loaded_ui=deepcopy(s);self._loading=False
 
     def changed(self,*_):
@@ -96,6 +113,8 @@ class SalesPage(QWidget):
             s[key]=control.currentData()
         s['search']=self.search.text();s['conditions']=deepcopy(self.conditions)
         s['legend']=self.legend.isChecked();s['descending']=self.order.currentIndex()==0
+        s['sort']=['descending','ascending','label'][self.order.currentIndex()]
+        s['focus_uids']=sorted(self.focus_uids) if self.focus_uids is not None else None
         self._loaded_ui=deepcopy(s);self.owner.schedule_save();self.dirty=True
         self.timer.start()
 
@@ -108,19 +127,20 @@ class SalesPage(QWidget):
         if self.dirty:self.refresh()
 
     def clear_focus(self):
-        self.focus_uids=None;self.refresh()
+        self.focus_uids=None;self.changed();self.refresh()
 
     def focus_machine(self,uid,scope='machine'):
         rs=self.owner.analytics.records();r=next((r for r in rs if r['uid']==uid),None)
         if r is None:self.focus_uids=None
         elif scope=='machine':self.focus_uids={uid}
         elif scope in ('machine_type','method'):self.focus_uids={a['uid'] for a in rs if a[scope]==r[scope]}
-        self.refresh()
+        self.changed();self.refresh()
 
     def refresh(self):
         if self._loading:return
         if self.owner.analytics_ui!=self._loaded_ui:self.load_state()
         self.timer.stop();self.dirty=False
+        self.update_condition_menu()
         try:
             self.records,self.results=self.owner.analytics.query(self.conditions,self.search.text(),self.focus_uids,self.axis.currentData(),self.metric.currentData(),self.operation.currentData(),self.stack_axis.currentData() if self.chart_type.currentData() in ('stacked','cross') else None)
             self.results=sorted(self.results,key=lambda r:(r['value'] is None,-r['value'] if self.order.currentIndex()==0 and r['value'] is not None else r['value'] if r['value'] is not None else 0) if self.order.currentIndex()!=2 else (r['label'],r['period_text']))
@@ -150,6 +170,81 @@ class SalesPage(QWidget):
         self.detail_table.setSortingEnabled(True)
         self.update_chart()
         self.legacy.refresh()
+
+    def filter_editor_changed(self,*_):
+        numeric=self.filter_field.currentData() in NUMERIC
+        for i in range(self.filter_operator.count()):
+            key=self.filter_operator.itemData(i);self.filter_operator.model().item(i).setEnabled(key in ('eq','missing') or key=='contains' and not numeric or key in ('ge','le','range') and numeric)
+        current=self.filter_operator.currentData()
+        if current=='contains' and numeric:self.filter_operator.setCurrentIndex(self.filter_operator.findData('ge'))
+        elif current in ('ge','le','range') and not numeric:self.filter_operator.setCurrentIndex(0)
+        self.filter_upper.setVisible(self.filter_operator.currentData()=='range')
+        self.filter_value.setVisible(self.filter_operator.currentData()!='missing')
+        percent=self.filter_field.currentData() in ('po_rate','cost_rate')
+        self.filter_value.setPlaceholderText('割合(%)：5 → 5%' if percent else '数値または文字')
+        self.filter_upper.setPlaceholderText('上限(%)' if percent else '上限')
+
+    def add_condition(self):
+        from .core import AppError
+        import math,unicodedata
+        try:
+            key=self.filter_field.currentData();op=self.filter_operator.currentData();c=dict(field=key,op=op)
+            def value(edit):
+                text=unicodedata.normalize('NFKC',edit.text()).strip()
+                if key in NUMERIC:
+                    number=float(text.replace(',','').rstrip('%'))
+                    if not math.isfinite(number):raise ValueError('有限の数値を入力してください。')
+                    return number/100 if key in ('po_rate','cost_rate') else number
+                if key=='planned' and op=='eq':
+                    if text not in ('投入予定','予定なし','あり','なし'):raise ValueError('投入予定は「投入予定」または「予定なし」と入力してください。')
+                    return text in ('投入予定','あり')
+                return text
+            if op!='missing':c['value']=value(self.filter_value)
+            if op=='range':c['upper']=value(self.filter_upper)
+            candidate=self.owner.analytics_ui|dict(conditions=self.conditions+[c]);validate_ui_state(candidate)
+            self.conditions.append(c);self.changed();self.refresh()
+        except (ValueError,AppError) as exc:self.notice.setText('条件を追加できません：'+str(exc))
+
+    def update_condition_menu(self):
+        self.condition_menu.clear();self.condition_button.setText(f'適用条件 {len(self.conditions)}')
+        for i,c in enumerate(self.conditions):
+            text=FIELDS[c['field']]+' '+c['op']+' '+formatted(c['field'],c.get('value'))
+            if c['op']=='range':text+=' 〜 '+formatted(c['field'],c['upper'])
+            self.condition_menu.addAction('解除：'+text,lambda checked=False,index=i:self.remove_condition(index))
+        self.condition_menu.addAction('すべての条件を解除',self.clear_conditions)
+
+    def remove_condition(self,index):
+        if index<len(self.conditions):self.conditions.pop(index)
+        self.changed();self.refresh()
+
+    def clear_conditions(self):
+        self.conditions=[];self.changed();self.refresh()
+
+    def protected_paths(self):
+        return [self.owner.source,self.window.source,self.owner.analysis_state.get('source')]+[e['snapshot'].get('source') for e in self.owner.performance_history]
+
+    def save_csv(self,path=None,table='集計結果',overwrite=False):
+        from .analytics_export import write_csv,export_tables
+        chosen=path is None
+        if chosen:path,_=QFileDialog.getSaveFileName(self,'CSV出力：'+table,'売上分析_'+table+'.csv','CSV (*.csv)')
+        if not path:return False
+        try:
+            self.refresh();tables=export_tables(self)
+            if table not in tables:raise ValueError('クロス集計グラフを選択してから出力してください。')
+            write_csv(path,*tables[table],protected=self.protected_paths(),overwrite=overwrite or chosen);return True
+        except Exception as exc:
+            self.notice.setText('CSV保存エラー：'+str(exc));return False
+
+    def save_excel(self,path=None,overwrite=False):
+        from .analytics_export import write_workbook,export_tables
+        chosen=path is None
+        if chosen:path,_=QFileDialog.getSaveFileName(self,'分析データをExcel出力','売上分析.xlsx','Excel (*.xlsx)')
+        if not path:return False
+        try:
+            self.refresh();state=self.owner.analysis_state
+            metadata=[('対象期間',period_text(state)),('抽出日時',state.get('extracted_at') or '不明'),('読込日時',state.get('loaded_at') or '不明'),('ファイル名',state.get('file_name') or '未読込'),('グラフ',self.chart_type.currentText()),('集計軸',self.axis.currentText()),('計算方式',self.operation.currentText()),('条件',str(self.conditions)),('注意',self.notice.text())]
+            write_workbook(path,export_tables(self),metadata,self.protected_paths(),overwrite or chosen);return True
+        except Exception as exc:self.notice.setText('Excel保存エラー：'+str(exc));return False
 
     def theme_changed(self,*_):
         for i in range(self.chart_type.count()):self.chart_type.setItemIcon(i,chart_icon(self.chart_type.itemData(i)))

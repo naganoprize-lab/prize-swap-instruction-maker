@@ -57,3 +57,42 @@ def test_graph_choices_constraints_expansion_image_and_cross(window,tmp_path):
     p.expand_button.click();assert not p.data_tabs.isVisible();p.expand_button.click();assert p.data_tabs.isVisible()
     p.focus_machine(w.floor.machines[0].uid);p.chart_type.setCurrentIndex(p.chart_type.findData('radar'));p.refresh()
     assert p.chart_stack.currentWidget() is p.radar and len(p.radar.axes)==5
+
+
+def test_all_fields_compound_conditions_and_saved_state(window):
+    from prize_swap.analytics_data import FIELDS
+    w=window;p=w.analysis_page
+    assert {p.metric.itemData(i) for i in range(p.metric.count())}==set(FIELDS)
+    p.filter_field.setCurrentIndex(p.filter_field.findData('ratio'));p.filter_operator.setCurrentIndex(p.filter_operator.findData('range'))
+    p.filter_value.setText('50');p.filter_upper.setText('99.9');p.add_condition()
+    assert len(p.records)==50
+    p.filter_field.setCurrentIndex(p.filter_field.findData('method'));p.filter_operator.setCurrentIndex(p.filter_operator.findData('eq'));p.filter_value.setText('リング');p.add_condition()
+    assert len(p.records)==25 and len(p.conditions)==2
+    saved=w.floor.state();assert saved['analytics_ui']['conditions']==p.conditions
+    p.clear_conditions();assert len(p.records)==300
+    w.floor.restore(saved);p.refresh();assert len(p.records)==25 and len(p.conditions)==2
+    p.remove_condition(0);assert len(p.records)==150
+    p.clear_conditions();p.filter_field.setCurrentIndex(p.filter_field.findData('po_rate'));p.filter_value.setText('5');p.add_condition()
+    assert p.conditions[-1]['value']==.05 and p.records==[] # missing is not zero
+
+
+def test_csv_excel_missing_zero_provenance_and_formula_safety(window,tmp_path):
+    import csv
+    from openpyxl import load_workbook
+    from prize_swap.analytics_data import FIELDS
+    p=window.analysis_page;m=window.floor.machines[0]
+    m.product='=HYPERLINK("bad")';m.po_rate=0;m.cost_rate=.6;m.sales=0;m.average=None
+    window.floor.sync();p.focus_machine(m.uid)
+    path=tmp_path/'分析_日本語.xlsx';assert p.save_excel(path)
+    b=load_workbook(path,data_only=False);s=b['詳細'];headers=[c.value for c in s[1]]
+    assert s.cell(2,headers.index('売上金額')+1).value==0
+    assert s.cell(2,headers.index('平均売上')+1).value is None
+    cell=s.cell(2,headers.index('商品名')+1);assert cell.value==m.product and cell.data_type=='s'
+    po=s.cell(2,headers.index('PO率（内部比率 0.05=5%）')+1);assert po.value==0 and po.number_format=='0.00%'
+    assert s.cell(2,headers.index('売上金額・取得元')+1).value=='レイアウト由来'
+    assert '景品種別' not in headers and set(b.sheetnames)>={'詳細','集計結果','グラフデータ','設定・取得元'};b.close()
+    csvpath=tmp_path/'分析.csv';assert p.save_csv(csvpath,table='詳細')
+    with csvpath.open(encoding='utf-8-sig',newline='') as stream:rows=list(csv.reader(stream))
+    assert rows[1][rows[0].index('商品名')].startswith("'=HYPERLINK")
+    before=path.read_bytes();assert not p.save_excel(path) and path.read_bytes()==before
+    window.source=str(path);assert not p.save_excel(path,overwrite=True) and path.read_bytes()==before

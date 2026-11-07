@@ -262,16 +262,19 @@ def history_series(owner, records, metric="average"):
 
 
 def validate_ui_state(value=None):
-    defaults = dict(version=1, chart="horizontal", axis="method", metric="average", operation="mean", stack="machine_type", x_metric="ratio", y_metric="po_rate", conditions=[], search="", legend=True, descending=True, detail_size=[1120, 800])
+    defaults = dict(version=1, chart="horizontal", axis="method", metric="average", operation="mean", stack="machine_type", x_metric="ratio", y_metric="po_rate", conditions=[], search="", legend=True, descending=True, sort="descending", focus_uids=None, detail_size=[1120, 800])
     if value is None:
         return defaults
     if not isinstance(value, dict) or set(value)-set(defaults):
         raise AppError("分析画面の保存形式が不正です。")
     s = defaults | deepcopy(value)
+    if 'sort' not in value:s['sort']='descending' if s['descending'] else 'ascending'
     if s["version"] != 1 or s["axis"] not in AXES or s["stack"] not in AXES or s["metric"] not in FIELDS or s["operation"] not in AGGREGATIONS or s["x_metric"] not in NUMERIC or s["y_metric"] not in NUMERIC:
         raise AppError("分析画面の選択項目が不正です。")
     if s["chart"] not in ("horizontal", "vertical", "pie", "donut", "line", "area", "stacked", "scatter", "histogram", "radar", "cross") or any(type(s[k]) is not bool for k in ("legend", "descending")) or not isinstance(s["search"], str) or len(s["search"])>1000:
         raise AppError("グラフの表示設定が不正です。")
+    if s['sort'] not in ('descending','ascending','label') or s['focus_uids'] is not None and (not isinstance(s['focus_uids'],list) or len(s['focus_uids'])>10000 or any(not isinstance(v,str) or len(v)>200 for v in s['focus_uids'])):
+        raise AppError('分析の並び順・対象マシン設定が不正です。')
     if not isinstance(s["detail_size"], list) or len(s["detail_size"]) != 2 or any(type(v) is not int or not 300 <= v <= 8000 for v in s["detail_size"]):
         raise AppError("詳細画面サイズが不正です。")
     if not isinstance(s["conditions"], list) or len(s["conditions"])>50:
