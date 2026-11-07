@@ -261,7 +261,8 @@ def apply_snapshot(machines, snapshot):
             machine_name=record.get("machine_name", "") if record else "",
             file_name=snapshot["file_name"], loaded_at=snapshot["loaded_at"],
             period_start=snapshot.get("period_start"), period_end=snapshot.get("period_end"),
-            extracted_at=snapshot.get("extracted_at")) if snapshot["file_name"] else None
+            extracted_at=snapshot.get("extracted_at"),fingerprint=snapshot.get("fingerprint", ""),
+            product_context=deepcopy(record.get("product_context")) if record else None) if snapshot["file_name"] else None
 
 
 def import_summary(machines, snapshot):

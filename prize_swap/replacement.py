@@ -1,21 +1,64 @@
-"""Explainable assessments; no instruction assignment is changed by evaluation."""
+"""Explainable assessments. Insufficient history is never inferred from one report."""
+from datetime import datetime, timezone
 from .analysis_settings import validate_settings
 from .floor_status import ratio, days, effective_stat
+from .floor_dashboard import freshness
+
+
+def episode(machine):
+    return dict(product=machine.product,installed_on=machine.installed_on)
+
+
+def comparable_trend(machine, history):
+    overlay=machine.analysis or {};current=overlay.get('values',{}).get('average')
+    start,end=overlay.get('period_start'),overlay.get('period_end')
+    context=overlay.get('product_context')
+    if current is None or not start or not end or not context or context!=episode(machine):return None,[]
+    candidates=[]
+    for entry in history:
+        if entry.get('deleted'):continue
+        snapshot=entry.get('snapshot',entry)
+        if snapshot.get('period_source') not in ('excel','manual'):continue
+        prior=snapshot.get('records',{}).get(machine.number)
+        stop=snapshot.get('period_end');begin=snapshot.get('period_start')
+        if not prior or not begin or not stop or stop>=start:continue
+        if prior.get('product_context')!=context:continue
+        value=prior['values'].get('average')
+        if value is None or value<=0:continue
+        candidates.append((stop,begin,value,snapshot.get('fingerprint','')))
+    if not candidates:return None,[]
+    latest=max(candidates,key=lambda item:(item[0],item[1]))
+    # If the nearest comparison period itself has competing/overlapping reports,
+    # do not choose an arbitrary one as a trend baseline.
+    overlaps=[c for c in candidates if c[1]<=latest[0] and c[0]>=latest[1]]
+    if len({c[3] for c in overlaps})>1:return None,[]
+    return current/latest[2],[latest[3],overlay.get('fingerprint','')]
 
 
 def assess(machine, reference, settings=None, history=()):
     s=validate_settings(settings);value=ratio(machine);age=days(machine,reference)
-    status,priority='判定保留',3
-    reasons=[]
-    if value is None or age is None or age<0:
+    status,priority='判定保留',3;reasons=[]
+    overlay=machine.analysis or {};context=overlay.get('product_context')
+    changed=context is not None and context!=episode(machine)
+    if changed:
+        reasons.append('商品または設置日が実績読込時から変わったため判定保留')
+    elif value is None or age is None or age<0:
         reasons.append('アベ比・設置日などの有効データが不足しています。')
     elif value<s['poor_ratio'] and age>=s['poor_days']:
-        status,priority='要確認',0
-        reasons.append(f'投入{age}日・アベ比{value:.1f}%のため要確認')
+        status,priority='要確認',0;reasons.append(f'投入{age}日・アベ比{value:.1f}%のため要確認')
     elif s['poor_ratio']<=value<s['consider_ratio'] and age>=s['consider_days']:
-        status,priority='入替検討',1
-        reasons.append(f'投入{age}日・アベ比{value:.1f}%のため入替検討')
+        status,priority='入替検討',1;reasons.append(f'投入{age}日・アベ比{value:.1f}%のため入替検討')
     elif value>=s['consider_ratio']:
         status,priority='好調',2;reasons.append(f'アベ比{value:.1f}%で好調')
     else:reasons.append('投入日数が判定条件に達していません。')
-    return dict(machine_id=machine.number,uid=machine.uid,status=status,priority=priority,reasons=reasons,trend=None,source_record_ids=[])
+    po,cost=effective_stat(machine,'po_rate'),effective_stat(machine,'cost_rate')
+    if po is not None and po>s['po_high']:reasons.append(f'PO率{po:.1%}：設定上限を超過（要確認）')
+    if cost is not None and (cost<s['cost_near'] or cost>s['cost_high']):reasons.append(f'原価率{cost:.1%}：目標{s["cost_target"]:.0%}との差を確認（入替確定条件ではありません）')
+    if age is not None and age>=s['long_days']:reasons.append(f'長期投入：{age}日')
+    stamp=freshness(overlay,s['stale_days'])
+    if '古い' in stamp or '不明' in stamp or '未来' in stamp:reasons.append(stamp)
+    trend,sources=comparable_trend(machine,history)
+    if trend is None:reasons.append('売上推移：未評価（比較可能な別期間・同一商品の履歴不足）')
+    elif trend<s['decline_ratio']:reasons.append(f'平均売上が前回比{trend:.1%}に低下')
+    return dict(machine_id=machine.number,uid=machine.uid,status=status,priority=priority,reasons=reasons,trend=trend,
+        evaluated_at=datetime.now(timezone.utc).isoformat(timespec='seconds'),source_record_ids=sources or [overlay.get('fingerprint','')])

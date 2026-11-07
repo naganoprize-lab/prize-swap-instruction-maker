@@ -24,6 +24,10 @@ class SalesAnalysisMixin:
     def import_analysis_path(self, path):
         snapshot = load_analysis(path, dict(absolute=self.analysis_settings["tolerance_absolute"],relative=self.analysis_settings["tolerance_relative"]))  # Parse before changing any current state.
         before = self.state()
+        from .replacement import episode
+        by_number={m.number:m for m in self.machines if m.number}
+        for number,record in snapshot["records"].items():
+            if number in by_number:record["product_context"]=episode(by_number[number])
         snapshot["issues"] = reconcile(self.machines, snapshot, self.analysis_state)
         from .analysis_settings import normalize_type,type_style
         for record in snapshot["records"].values():

@@ -60,7 +60,7 @@ def build_toolbar(owner, layout):
         ],
     )
     button(top, "売上分析Excel読込", owner.import_analysis_dialog)
-    button(top, "実績読込結果", owner.show_analysis_report)
+    menu(top, "分析", [("実績読込結果・異常一覧",owner.show_analysis_report),("入替候補",owner.show_candidates)])
     editing = menu(
         top,
         "マシン編集",
