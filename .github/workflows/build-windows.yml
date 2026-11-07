@@ -54,6 +54,9 @@ jobs:
           tests/test_floor_control_print.py
           tests/test_floor_color_filters.py
           tests/test_sales_analysis.py
+          tests/test_analysis_integration.py
+          tests/test_replacement_analysis.py
+          tests/test_performance_history.py
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen

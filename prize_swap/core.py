@@ -158,6 +158,7 @@ def atomic_json(path: Path, payload: dict):
         with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False) as f:
             temp = Path(f.name)
             json.dump(payload, f, ensure_ascii=False, indent=2, allow_nan=False)
+        backup_json(path)
         temp.replace(path)
     finally:
         if temp and temp.exists():
@@ -215,3 +216,15 @@ def load_session(path):
         return products, selected, data
     except (ValueError, TypeError, KeyError, AttributeError) as exc:
         raise AppError(f"一時保存ファイルの形式が不正です：{exc}") from exc
+
+
+def backup_json(path):
+    """Keep the previous user data before replacement; never touch input Excel."""
+    from pathlib import Path
+    import shutil
+    path=Path(path)
+    if path.exists():
+        backup=path.with_name(path.name+".bak")
+        temporary=backup.with_name(backup.name+".tmp")
+        shutil.copyfile(path,temporary)
+        temporary.replace(backup)

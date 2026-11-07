@@ -93,10 +93,24 @@ def visible_machines(machines, assignments, settings, reference):
 def matching_machines(machines, assignments, settings, reference, analysis_settings=None):
     def normalized(value):
         return "".join(unicodedata.normalize("NFKC", value).split()).casefold()
+
     needle = normalized(settings["search"])
     result = []
     for m in machines:
-        if needle and needle not in normalized(" ".join((m.number, m.product, m.source_key, machine_type(m, analysis_settings), m.operation_method, " ".join(p.machine_methods.get(m.number, "") for p in assignments.get(m.number, []))))):
+        if needle and needle not in normalized(
+            " ".join(
+                (
+                    m.number,
+                    m.product,
+                    m.source_key,
+                    machine_type(m, analysis_settings),
+                    m.operation_method,
+                    " ".join(
+                        p.machine_methods.get(m.number, "") for p in assignments.get(m.number, [])
+                    ),
+                )
+            )
+        ):
             continue
         value = ratio(m)
         kind = settings["filter"]

@@ -271,7 +271,19 @@ def plan_floor(
     for m in chosen:
         plans = assignments.get(m.number, [])
         priority = any(p.priority for p in plans)
-        colour, status = filter_status(m, options.color_filter, reference, bool(plans), priority, validate_settings(options.analysis_settings) | {"_sales_bounds":sales_boundaries(chosen,validate_settings(options.analysis_settings))})
+        colour, status = filter_status(
+            m,
+            options.color_filter,
+            reference,
+            bool(plans),
+            priority,
+            validate_settings(options.analysis_settings)
+            | {
+                "_sales_bounds": sales_boundaries(
+                    chosen, validate_settings(options.analysis_settings)
+                )
+            },
+        )
         methods = (
             "／".join(dict.fromkeys(p.machine_methods.get(m.number) or "未設定" for p in plans))
             if options.show_methods
@@ -352,9 +364,17 @@ def plan_table(
     fields = FILTER_FIELDS[options.color_filter]
     widths = [width * 0.22, width * 0.24, width * 0.54]
     labels = [
-        {"number": "マシン番号 / 状態", "ratio": "アベ比", "days": "設置日数", "product": "商品名", "po_rate":"PO率", "cost_rate":"原価率", "sales_metric":"平均売上 / 総売上", "machine_type":"機種", "assessment":"入替候補"}[
-            key
-        ]
+        {
+            "number": "マシン番号 / 状態",
+            "ratio": "アベ比",
+            "days": "設置日数",
+            "product": "商品名",
+            "po_rate": "PO率",
+            "cost_rate": "原価率",
+            "sales_metric": "平均売上 / 総売上",
+            "machine_type": "機種",
+            "assessment": "入替候補",
+        }[key]
         for key in fields
     ]
     table_headers = [
@@ -366,7 +386,17 @@ def plan_table(
     for m in ordered_machines(machines, options.sort, options.descending, reference):
         plans = assignments.get(m.number, [])
         colour, status = filter_status(
-            m, options.color_filter, reference, bool(plans), any(p.priority for p in plans), validate_settings(options.analysis_settings) | {"_sales_bounds":sales_boundaries(machines,validate_settings(options.analysis_settings))}
+            m,
+            options.color_filter,
+            reference,
+            bool(plans),
+            any(p.priority for p in plans),
+            validate_settings(options.analysis_settings)
+            | {
+                "_sales_bounds": sales_boundaries(
+                    machines, validate_settings(options.analysis_settings)
+                )
+            },
         )
         number = (
             (m.number or m.source_key or "未設定")
@@ -379,7 +409,13 @@ def plan_table(
             "days": days_text(m, reference),
             "product": m.product or "商品未設定",
         }
-        data.update({k:metric_text(m,k,reference,options.analysis_settings) for k in ("po_rate","cost_rate","sales_metric","machine_type","assessment") if k in fields})
+        data.update(
+            {
+                k: metric_text(m, k, reference, options.analysis_settings)
+                for k in ("po_rate", "cost_rate", "sales_metric", "machine_type", "assessment")
+                if k in fields
+            }
+        )
         values = [data[key] for key in fields]
         blocks = [
             text_block(

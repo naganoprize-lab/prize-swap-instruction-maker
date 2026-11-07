@@ -206,7 +206,10 @@ def run(output):
         assert label_preview == [len(label_plan.pages)]
         report.update(ok=True, label_pages=len(label_plan.pages), label_preview_pages=label_preview[0],
                       label_count=sum(len(p) for p in label_plan.pages), label_fonts=label_report["fonts"])
+        from .performance_smoke import run_analysis_checks
+        report["integrated_analysis"]=run_analysis_checks(w.floor,output)
     except Exception:
+        report["ok"]=False
         report["error"] = traceback.format_exc()
     finally:
         if w:

@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QToolButton,
     QWidget,
+    QWidgetAction,
+    QVBoxLayout,
 )
 
 
@@ -60,7 +62,17 @@ def build_toolbar(owner, layout):
         ],
     )
     button(top, "売上分析Excel読込", owner.import_analysis_dialog)
-    menu(top, "分析", [("実績読込結果・異常一覧",owner.show_analysis_report),("入替候補",owner.show_candidates),("運営方法別分析",owner.show_method_analysis)])
+    menu(
+        top,
+        "分析",
+        [
+            ("実績読込結果・異常一覧", owner.show_analysis_report),
+            ("入替候補", owner.show_candidates),
+            ("運営方法別分析", owner.show_method_analysis),
+            ("売上履歴", owner.show_history),
+            ("集計期間を手動設定", owner.manual_period),
+        ],
+    )
     editing = menu(
         top,
         "マシン編集",
@@ -127,10 +139,22 @@ def build_toolbar(owner, layout):
     owner.floor_search.setClearButtonEnabled(True)
     second.addWidget(owner.floor_search, 1)
     owner.floor_search.textChanged.connect(owner.presentation_changed)
-    owner.search_count=QLabel("検索結果：0 / 0ブース")
+    owner.search_count = QLabel("検索結果：0 / 0ブース")
+    owner.search_count.setMinimumWidth(0)
     second.addWidget(owner.search_count)
-    button(second,"前へ",lambda:owner.next_match(-1))
-    button(second,"次へ",lambda:owner.next_match(1))
+    button(second, "前へ", lambda: owner.next_match(-1))
+    button(second, "次へ", lambda: owner.next_match(1))
+    conditions = QToolButton()
+    conditions.setText("強調条件")
+    conditions_menu = QMenu(conditions)
+    conditions_page = QWidget()
+    conditions_layout = QVBoxLayout(conditions_page)
+    action = QWidgetAction(conditions_menu)
+    action.setDefaultWidget(conditions_page)
+    conditions_menu.addAction(action)
+    conditions.setMenu(conditions_menu)
+    conditions.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+    second.addWidget(conditions)
     owner.filter_by = QComboBox()
     for label, key in (
         ("強調なし", "all"),
@@ -139,18 +163,18 @@ def build_toolbar(owner, layout):
         ("強調：投入予定", "planned"),
     ):
         owner.filter_by.addItem(label, key)
-    second.addWidget(owner.filter_by)
+    conditions_layout.addWidget(owner.filter_by)
     owner.filter_by.currentIndexChanged.connect(owner.presentation_changed)
     owner.days_filter = QCheckBox("投入日数")
-    second.addWidget(owner.days_filter)
+    conditions_layout.addWidget(owner.days_filter)
     owner.min_days = QSpinBox()
     owner.min_days.setRange(0, 100000)
     owner.max_days = QSpinBox()
     owner.max_days.setRange(0, 100000)
     owner.max_days.setValue(9999)
-    second.addWidget(owner.min_days)
-    second.addWidget(QLabel("〜"))
-    second.addWidget(owner.max_days)
+    conditions_layout.addWidget(owner.min_days)
+    conditions_layout.addWidget(QLabel("〜"))
+    conditions_layout.addWidget(owner.max_days)
     for c in (owner.min_days, owner.max_days):
         c.valueChanged.connect(owner.presentation_changed)
     owner.days_filter.toggled.connect(owner.presentation_changed)

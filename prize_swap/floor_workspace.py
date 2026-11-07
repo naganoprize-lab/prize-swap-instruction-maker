@@ -22,7 +22,12 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QLineEdit,
 )
-from .floor_presentation import validate_presentation, visible_machines, project_machines, matching_machines
+from .floor_presentation import (
+    validate_presentation,
+    visible_machines,
+    project_machines,
+    matching_machines,
+)
 from .floor_status import COLOR_FILTERS
 
 
@@ -38,7 +43,8 @@ class FullscreenHost(QDialog):
         # removeTab() hides its page explicitly. Reparenting alone does not undo
         # that hidden state, even when the new top-level window is shown.
         self.hidden_controls = [
-            (w, not w.isHidden()) for w in [*floor.toolbar_rows, floor.info, floor.analysis_note, floor.dashboard]
+            (w, not w.isHidden())
+            for w in [*floor.toolbar_rows, floor.info, floor.analysis_note, floor.dashboard]
         ]
         for widget, _ in self.hidden_controls:
             widget.hide()
@@ -56,11 +62,18 @@ class FullscreenHost(QDialog):
             lambda *_: floor.set_color_filter(self.filter_combo.currentData())
         )
         row.addWidget(self.filter_combo)
-        self.search=QLineEdit();self.search.setPlaceholderText("番号・商品・機種・方法を検索");self.search.setClearButtonEnabled(True)
-        self.search.setText(floor.floor_search.text());self.search.textChanged.connect(floor.floor_search.setText)
-        floor.floor_search.textChanged.connect(self.search.setText);row.addWidget(self.search,1)
-        for label, direction in (("前へ",-1),("次へ",1)):
-            b=QToolButton();b.setText(label);b.clicked.connect(lambda checked=False,d=direction:floor.next_match(d));row.addWidget(b)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("番号・商品・機種・方法を検索")
+        self.search.setClearButtonEnabled(True)
+        self.search.setText(floor.floor_search.text())
+        self.search.textChanged.connect(floor.floor_search.setText)
+        floor.floor_search.textChanged.connect(self.search.setText)
+        row.addWidget(self.search, 1)
+        for label, direction in (("前へ", -1), ("次へ", 1)):
+            b = QToolButton()
+            b.setText(label)
+            b.clicked.connect(lambda checked=False, d=direction: floor.next_match(d))
+            row.addWidget(b)
 
         self.buttons = {}
         for key, label, callback in (
@@ -78,11 +91,19 @@ class FullscreenHost(QDialog):
         self.edit.setChecked(floor.edit_mode.isChecked())
         self.edit.toggled.connect(floor.edit_mode.setChecked)
         row.addWidget(self.edit)
-        dashboard=QToolButton();dashboard.setText("概要");dashboard.setCheckable(True);dashboard.setChecked(floor.analysis_settings["fullscreen_dashboard"])
+        dashboard = QToolButton()
+        dashboard.setText("概要")
+        dashboard.setCheckable(True)
+        dashboard.setChecked(floor.analysis_settings["fullscreen_dashboard"])
         floor.dashboard.setVisible(dashboard.isChecked())
+
         def toggle_dashboard(value):
-            floor.analysis_settings["fullscreen_dashboard"]=value;floor.dashboard.setVisible(value);floor.schedule_save()
-        dashboard.toggled.connect(toggle_dashboard);row.addWidget(dashboard)
+            floor.analysis_settings["fullscreen_dashboard"] = value
+            floor.dashboard.setVisible(value)
+            floor.schedule_save()
+
+        dashboard.toggled.connect(toggle_dashboard)
+        row.addWidget(dashboard)
         row.addStretch()
         close = QToolButton()
         close.setText("解除（Esc）")
@@ -127,8 +148,8 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         old_query = self.presentation["search"]
         new_query = self.floor_search.text()
         if new_query and not old_query:
-            p=self.view.mapToScene(self.view.viewport().rect().center())
-            self._pre_search_view=(self._zoom, [p.x(),p.y()])
+            p = self.view.mapToScene(self.view.viewport().rect().center())
+            self._pre_search_view = (self._zoom, [p.x(), p.y()])
 
         self.presentation.update(
             mode=self.layout_mode.currentData(),
@@ -147,10 +168,13 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
             self._fullscreen_host.edit.blockSignals(False)
         self.apply_presentation()
         if old_query and not new_query and getattr(self, "_pre_search_view", None):
-            zoom,center=self._pre_search_view
-            if zoom is None:self.fit(save=False)
-            else:self.set_zoom(zoom,save=False)
-            self.view.centerOn(QPointF(*center));self._pre_search_view=None
+            zoom, center = self._pre_search_view
+            if zoom is None:
+                self.fit(save=False)
+            else:
+                self.set_zoom(zoom, save=False)
+            self.view.centerOn(QPointF(*center))
+            self._pre_search_view = None
         if previous != self.presentation["mode"]:
             self.set_zoom(100, save=False)
             if self.selected():
@@ -194,15 +218,29 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         if not hasattr(self, "nodes"):
             return
         from .analysis_settings import sales_boundaries
-        self._effective_metric_settings=self.analysis_settings | {"_sales_bounds": sales_boundaries(self.machines,self.analysis_settings)}
+
+        self._effective_metric_settings = self.analysis_settings | {
+            "_sales_bounds": sales_boundaries(self.machines, self.analysis_settings)
+        }
         visible = visible_machines(
             self.machines, self.assignments(), self.presentation, self.reference_day()
         )
-        matches=matching_machines(self.machines,self.assignments(),self.presentation,self.reference_day(),self.analysis_settings)
-        self._match_uids=[m.uid for m in matches]
+        matches = matching_machines(
+            self.machines,
+            self.assignments(),
+            self.presentation,
+            self.reference_day(),
+            self.analysis_settings,
+        )
+        self._match_uids = [m.uid for m in matches]
         self.search_count.setText(f"検索結果：{len(matches)} / {len(self.machines)}ブース")
-        active=bool(self.presentation["search"].strip() or self.presentation["filter"]!="all" or self.presentation["min_days"] is not None or self.presentation["max_days"] is not None)
-        matched=set(self._match_uids)
+        active = bool(
+            self.presentation["search"].strip()
+            or self.presentation["filter"] != "all"
+            or self.presentation["min_days"] is not None
+            or self.presentation["max_days"] is not None
+        )
+        matched = set(self._match_uids)
         width = self.view.viewport().width()
         rects = project_machines(visible, self.presentation, self.reference_day(), width)
         self._projecting = True
@@ -212,14 +250,17 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
                 if not visible:
                     node.setSelected(False)
                 node.setVisible(visible)
-                node.search_match=active and uid in matched
-                node.setOpacity(1 if not active or uid in matched else .35)
+                node.search_match = active and uid in matched
+                node.setOpacity(1 if not active or uid in matched else 0.35)
                 if not visible:
                     continue
                 rect = rects[uid]
-                node.prepareGeometryChange()
-                node.display_rect = QRectF(0, 0, rect.width(), rect.height())
-                node.setPos(rect.topLeft())
+                projected = QRectF(0, 0, rect.width(), rect.height())
+                if node.display_rect != projected:
+                    node.prepareGeometryChange()
+                    node.display_rect = projected
+                if node.pos() != rect.topLeft():
+                    node.setPos(rect.topLeft())
                 node.setFlag(
                     QGraphicsItem.GraphicsItemFlag.ItemIsMovable,
                     self.presentation["edit"] and self.presentation["mode"] == "actual",
@@ -233,27 +274,49 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         self.update_scene_rect()
         self.view.viewport().update()
 
-    def highlight_group(self,uids):
-        self._highlight_uids=set(uids)
-        for node in self.nodes.values():node.update()
+    def highlight_group(self, uids):
+        self._highlight_uids = set(uids)
+        for node in self.nodes.values():
+            node.update()
 
     def next_match(self, direction=1):
-        ids=getattr(self,"_match_uids",[])
-        if not ids:return
-        current=next((m.uid for m in self.selected() if m.uid in ids),None)
-        index=(ids.index(current)+direction)%len(ids) if current else (0 if direction>0 else len(ids)-1)
-        self.scene.clearSelection();node=self.nodes[ids[index]];node.setSelected(True);self.view.ensureVisible(node,40,40)
+        ids = getattr(self, "_match_uids", [])
+        if not ids:
+            return
+        current = next((m.uid for m in self.selected() if m.uid in ids), None)
+        index = (
+            (ids.index(current) + direction) % len(ids)
+            if current
+            else (0 if direction > 0 else len(ids) - 1)
+        )
+        self.scene.clearSelection()
+        node = self.nodes[ids[index]]
+        node.setSelected(True)
+        self.view.ensureVisible(node, 40, 40)
+
+    def show_history(self):
+        from .history_ui import show_history
+
+        show_history(self)
+
+    def manual_period(self):
+        from .history_ui import manual_period
+
+        manual_period(self)
 
     def show_method_analysis(self):
         from .analysis_views import show_method_analysis
+
         show_method_analysis(self)
 
     def show_candidates(self):
         from .analysis_views import show_candidates
+
         show_candidates(self)
 
     def analysis_settings_dialog(self):
         from .analysis_settings_ui import edit_analysis_settings
+
         edit_analysis_settings(self)
 
     def capture_view(self, save=True):
@@ -504,5 +567,11 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
 
     def print_machines(self):
         if self.print_options.visible_only:
-            return matching_machines(self.machines, self.assignments(), self.presentation, self.reference_day(),self.analysis_settings)
+            return matching_machines(
+                self.machines,
+                self.assignments(),
+                self.presentation,
+                self.reference_day(),
+                self.analysis_settings,
+            )
         return self.machines

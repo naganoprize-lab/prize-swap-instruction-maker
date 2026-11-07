@@ -196,8 +196,18 @@ class MachineNode(QGraphicsObject):
             priority,
             self.isSelected(),
             self.machine.uid in self.owner.overlaps,
-            search_match=getattr(self,"search_match",False) or self.machine.uid in getattr(self.owner,"_highlight_uids",set()),
+            search_match=getattr(self, "search_match", False)
+            or self.machine.uid in getattr(self.owner, "_highlight_uids", set()),
         )
+        if (self.machine.analysis or {}).get("quality_issues"):
+            painter.save()
+            painter.setPen(QPen(QColor("#8B1E15"), 2))
+            painter.drawText(
+                self.boundingRect().adjusted(0, 12, -6, 0),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+                "⚠",
+            )
+            painter.restore()
 
     def itemChange(self, change, value):
         if getattr(self.owner, "_projecting", False):
@@ -406,7 +416,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         from .sales_analysis import empty_snapshot
 
         self.analysis_state = empty_snapshot()
+        self.performance_history = []
         from .analysis_settings import validate_settings
+
         self.analysis_settings = validate_settings()
         self.presentation = dict(DEFAULTS)
         self.card_presets = {}
@@ -420,6 +432,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
         build_toolbar(self, layout)
         from .floor_dashboard import FloorDashboard
+
         self.dashboard = FloorDashboard(self)
         layout.addWidget(self.dashboard)
         self.scene = QGraphicsScene(self)
@@ -485,6 +498,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def state(self):
         return dict(
             version=2,
+            performance_history=deepcopy(self.performance_history),
             analysis_settings=deepcopy(self.analysis_settings),
             sales_analysis=deepcopy(self.analysis_state),
             initialized=self.initialized,
@@ -509,7 +523,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         from .sales_analysis import validate_snapshot
 
         self.analysis_state = deepcopy(validate_snapshot(state.get("sales_analysis")))
+        from .performance_history import validate_history
+
+        self.performance_history = validate_history(state.get("performance_history"))
         from .analysis_settings import validate_settings
+
         self.analysis_settings = validate_settings(state.get("analysis_settings"))
         self.restore_presentation(state)
         self.machines = validate_machines(state["machines"])
@@ -735,13 +753,18 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.changed.emit()
 
     def metric_settings(self):
-        return getattr(self,"_effective_metric_settings",self.analysis_settings)
+        return getattr(self, "_effective_metric_settings", self.analysis_settings)
 
     def card_context(self, m):
         plans = self.assignments().get(m.number, [])
         priority = any(p.priority for p in plans)
         background, status = filter_status(
-            m, self.presentation["color_filter"], self.reference_day(), bool(plans), priority, self.metric_settings()
+            m,
+            self.presentation["color_filter"],
+            self.reference_day(),
+            bool(plans),
+            priority,
+            self.metric_settings(),
         )
         mode = self.display_mode.currentData()
         if mode == "product":

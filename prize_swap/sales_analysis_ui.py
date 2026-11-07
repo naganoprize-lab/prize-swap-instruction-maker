@@ -22,20 +22,48 @@ from .performance_validation import period_text, reconcile
 
 class SalesAnalysisMixin:
     def import_analysis_path(self, path):
-        snapshot = load_analysis(path, dict(absolute=self.analysis_settings["tolerance_absolute"],relative=self.analysis_settings["tolerance_relative"]))  # Parse before changing any current state.
+        snapshot = load_analysis(
+            path,
+            dict(
+                absolute=self.analysis_settings["tolerance_absolute"],
+                relative=self.analysis_settings["tolerance_relative"],
+            ),
+        )  # Parse before changing any current state.
         before = self.state()
         from .replacement import episode
-        by_number={m.number:m for m in self.machines if m.number}
-        for number,record in snapshot["records"].items():
-            if number in by_number:record["product_context"]=episode(by_number[number])
+        from .performance_history import archive, identity
+
+        history = archive(self.performance_history, self.analysis_state)
+        existing = next((e["snapshot"] for e in history if e["id"] == identity(snapshot)), None)
+        if existing and existing.get("period_source") == "manual":
+            snapshot.update(
+                {k: existing[k] for k in ("period_start", "period_end", "period_source")}
+            )
+        by_number = {m.number: m for m in self.machines if m.number}
+        for number, record in snapshot["records"].items():
+            if existing:
+                record["product_context"] = deepcopy(
+                    existing["records"].get(number, {}).get("product_context")
+                )
+            elif number in by_number:
+                record["product_context"] = episode(by_number[number])
         snapshot["issues"] = reconcile(self.machines, snapshot, self.analysis_state)
-        from .analysis_settings import normalize_type,type_style
+        from .analysis_settings import normalize_type, type_style
+
         for record in snapshot["records"].values():
-            name=normalize_type(record.get("machine_name", ""))
+            name = normalize_type(record.get("machine_name", ""))
             if name and name not in self.analysis_settings["types"]:
-                canonical_name=next((k for k in self.analysis_settings["types"] if k.casefold()==name.casefold()),name)
-                if canonical_name!=name:self.analysis_settings["aliases"][name]=canonical_name
-                self.analysis_settings["types"].setdefault(canonical_name,type_style(canonical_name,self.analysis_settings))
+                canonical_name = next(
+                    (k for k in self.analysis_settings["types"] if k.casefold() == name.casefold()),
+                    name,
+                )
+                if canonical_name != name:
+                    self.analysis_settings["aliases"][name] = canonical_name
+                self.analysis_settings["types"].setdefault(
+                    canonical_name, type_style(canonical_name, self.analysis_settings)
+                )
+        history = archive(history, snapshot)
+        self.performance_history = history
         self.analysis_state = snapshot
         self.rebuild()
         self.record(before, "売上分析Excel読込")
@@ -57,7 +85,7 @@ class SalesAnalysisMixin:
     def analysis_summary_text(self):
         data = import_summary(self.machines, self.analysis_state)
         return (
-            f"{data['file_name']} ／ 実績{data['read']}件・照合更新{data['matched']}件・未照合{len(data['unmatched'])}件・数値エラー{data['numeric_errors']}件（読込エラー計{data['read_errors']}件）"
+            f"{data['file_name']} ／ 実績{data['read']}件・照合更新{data['matched']}件・未照合{data['unmatched_count']}件・数値エラー{data['numeric_errors']}件（読込エラー計{data['read_errors']}件）"
             f" ／ エラー{data['errors']}・警告{data['warnings']} ／ {period_text(self.analysis_state)} ／ 抽出 {self.analysis_state.get('extracted_at') or '不明'} ／ 最終読込（JST）{data['loaded_at'].replace('T',' ')}"
         )
 
@@ -66,10 +94,14 @@ class SalesAnalysisMixin:
             return
         loaded = bool(self.analysis_state["file_name"])
         self.analysis_note.setText(
-            self.analysis_summary_text() if loaded else "売上分析Excel：未読込"
+            f"売上実績：{self.analysis_state['file_name']} ／ {period_text(self.analysis_state)}"
+            if loaded
+            else "売上分析Excel：未読込"
         )
         self.analysis_note.setVisible(loaded and not self._fullscreen_host)
-        self.analysis_note.setToolTip(self.analysis_state["source"])
+        self.analysis_note.setToolTip(
+            self.analysis_summary_text() + "\n" + self.analysis_state["source"]
+        )
 
     def print_data_timestamp(self):
         if self.analysis_state["file_name"]:
@@ -105,9 +137,18 @@ class SalesAnalysisMixin:
                     widget.setItem(i, j, QTableWidgetItem(str(value)))
             widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             widget.setSortingEnabled(True)
+
             def filter_rows(text):
                 for i in range(widget.rowCount()):
-                    widget.setRowHidden(i, bool(text) and not any(text.casefold() in widget.item(i,j).text().casefold() for j in range(widget.columnCount())))
+                    widget.setRowHidden(
+                        i,
+                        bool(text)
+                        and not any(
+                            text.casefold() in widget.item(i, j).text().casefold()
+                            for j in range(widget.columnCount())
+                        ),
+                    )
+
             search.textChanged.connect(filter_rows)
             return widget
 
@@ -123,6 +164,10 @@ class SalesAnalysisMixin:
                     money(r["values"]["average"]),
                 )
             )
+        rows.extend(
+            (r["number"], "正規化不能", "—", "—", "—")
+            for r in self.analysis_state.get("unmatched_rows", [])
+        )
         tabs.addTab(
             table(["Excel機器番号", "照合用番号", "商品名（参考）", "売上金額", "平均売上"], rows),
             f"未照合（{len(rows)}件）",
@@ -136,8 +181,14 @@ class SalesAnalysisMixin:
                 f"付随情報などの除外：{info['ignored']}行 ／ 重複：{info['duplicates']}行（同一値は一度だけ、異なる値の重複は照合せず除外）"
             )
         )
-        issues = [(i["number"], i["severity"], i["kind"], i["message"], i["remedy"]) for i in info["issues"]]
-        tabs.addTab(table(["機器番号", "重要度", "種類", "内容", "対応方法"], issues), f"異常・情報（{len(issues)}件）")
+        issues = [
+            (i["number"], i["severity"], i["kind"], i["message"], i["remedy"])
+            for i in info["issues"]
+        ]
+        tabs.addTab(
+            table(["機器番号", "重要度", "種類", "内容", "対応方法"], issues),
+            f"異常・情報（{len(issues)}件）",
+        )
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)

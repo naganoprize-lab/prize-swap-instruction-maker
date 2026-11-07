@@ -78,6 +78,9 @@ def run(output):
             Machine(
                 number=f"{20000+i}右",
                 product=f"マシン描画検証 商品{i}",
+                po_rate=0.05,
+                cost_rate=0.6,
+                kind="UFO9 third",
                 ratio=[49.9, 200, 49.9, None][i],
                 x=40 + (i % 2) * 300,
                 y=40 + (i // 2) * 220,
@@ -107,12 +110,33 @@ def run(output):
         report["ratio"] = inspect_card(floor, uid, "#F4A6A6")
         assert report["ratio"]["dpr"] >= float(report["scale_requested"]) * 0.9
         assert host.grab().save(str(output / "fullscreen-ratio.png"))
-        for mode, colour in (("planned", "#A9D7FF"), ("age", "#C5A5ED"), ("ratio", "#F4A6A6")):
+        from .analysis_settings import type_style
+
+        for mode, colour in (
+            ("planned", "#A9D7FF"),
+            ("age", "#C5A5ED"),
+            ("po_rate", "#94D8A0"),
+            ("cost_rate", "#94D8A0"),
+            ("machine_type", type_style("UFO9 third")["color"]),
+            ("assessment", "#F4A6A6"),
+            ("ratio", "#F4A6A6"),
+        ):
             host.filter_combo.setCurrentIndex(host.filter_combo.findData(mode))
             app.processEvents()
             report[mode] = inspect_card(floor, uid, colour)
             assert [asdict(m) for m in floor.machines] == before
             assert host.grab().save(str(output / f"fullscreen-{mode}.png"))
+        node_ids = {k: id(n) for k, n in floor.nodes.items()}
+        QTest.keyClicks(host.search, "20000")
+        app.processEvents()
+        assert len(floor._match_uids) == 1 and len(floor.visible_nodes()) == 4
+        host.search.setText("NO_MATCH")
+        app.processEvents()
+        assert not floor._match_uids and len(floor.visible_nodes()) == 4
+        host.search.clear()
+        app.processEvents()
+        assert {k: id(n) for k, n in floor.nodes.items()} == node_ids
+        report["search_keeps_scene"] = True
         scale = floor.view.transform().m11()
         QTest.mouseClick(host.buttons["zoom_in"], Qt.MouseButton.LeftButton)
         assert floor.view.transform().m11() > scale

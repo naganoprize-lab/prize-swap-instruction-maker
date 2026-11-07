@@ -16,19 +16,34 @@ COLORS = {
     "aged": "#C5A5ED",
 }
 
-COLOR_FILTERS = {"ratio": "アベ比", "planned": "投入予定地", "age": "設置日数", "po_rate": "PO率", "cost_rate": "原価率", "sales_metric": "売上", "machine_type": "機器名・機種", "assessment": "入替候補"}
+COLOR_FILTERS = {
+    "ratio": "アベ比",
+    "planned": "投入予定地",
+    "age": "設置日数",
+    "po_rate": "PO率",
+    "cost_rate": "原価率",
+    "sales_metric": "売上",
+    "machine_type": "機器名・機種",
+    "assessment": "入替候補",
+}
 FILTER_FIELDS = {
     "ratio": ("number", "ratio", "product"),
     "planned": ("number", "ratio", "product"),
     "age": ("number", "days", "product"),
-    **{k: ("number", k, "product") for k in ("po_rate", "cost_rate", "sales_metric", "machine_type", "assessment")},
+    **{
+        k: ("number", k, "product")
+        for k in ("po_rate", "cost_rate", "sales_metric", "machine_type", "assessment")
+    },
 }
 
 
 def filter_status(machine, mode, reference, planned=False, priority=False, settings=None):
     from .analysis_settings import validate_settings, machine_type, type_style
+
     bounds = (settings or {}).get("_sales_bounds")
-    settings = validate_settings({k:v for k,v in (settings or {}).items() if k != "_sales_bounds"})
+    settings = validate_settings(
+        {k: v for k, v in (settings or {}).items() if k != "_sales_bounds"}
+    )
     if bounds is not None:
         settings["_sales_bounds"] = bounds
     if mode == "ratio":
@@ -39,7 +54,9 @@ def filter_status(machine, mode, reference, planned=False, priority=False, setti
         label = "投入予定" if planned else "投入予定なし"
     elif mode == "age":
         age = days(machine, reference)
-        colour = COLORS["unknown"] if age is None else COLORS["aged"] if age >= 10 else COLORS["low"]
+        colour = (
+            COLORS["unknown"] if age is None else COLORS["aged"] if age >= 10 else COLORS["low"]
+        )
         label = "設置日数 " + days_text(machine, reference)
         if planned:
             label += " / 投入予定"
@@ -48,9 +65,21 @@ def filter_status(machine, mode, reference, planned=False, priority=False, setti
         colour = COLORS["unknown"]
         label = metric_text(machine, mode, reference, settings)
         if mode == "po_rate" and value is not None:
-            colour = "#8FC5F4" if value < settings["po_low"] else "#94D8A0" if value <= settings["po_high"] else "#F4A6A6"
+            colour = (
+                "#8FC5F4"
+                if value < settings["po_low"]
+                else "#94D8A0" if value <= settings["po_high"] else "#F4A6A6"
+            )
         elif mode == "cost_rate" and value is not None:
-            colour = "#8FC5F4" if value < settings["cost_low"] else "#C5E2FA" if value < settings["cost_near"] else "#94D8A0" if value <= settings["cost_high"] else "#F4A6A6"
+            colour = (
+                "#8FC5F4"
+                if value < settings["cost_low"]
+                else (
+                    "#C5E2FA"
+                    if value < settings["cost_near"]
+                    else "#94D8A0" if value <= settings["cost_high"] else "#F4A6A6"
+                )
+            )
             if value < settings["cost_low"]:
                 label += " / 原価率要確認"
         elif mode == "sales_metric":
@@ -58,19 +87,44 @@ def filter_status(machine, mode, reference, planned=False, priority=False, setti
             bounds = settings.get("_sales_bounds")
             if bounds is None:
                 from .analysis_settings import sales_boundaries
-                bounds = sales_boundaries([machine], settings) if settings["sales_mode"] != "quantile" else None
+
+                bounds = (
+                    sales_boundaries([machine], settings)
+                    if settings["sales_mode"] != "quantile"
+                    else None
+                )
             if value is not None and bounds is not None:
-                colour = "#F4A6A6" if value < bounds[0] else "#F7D5A0" if value < bounds[1] else "#94D8A0" if value < bounds[2] else "#FFE16A"
+                colour = (
+                    "#F4A6A6"
+                    if value < bounds[0]
+                    else (
+                        "#F7D5A0"
+                        if value < bounds[1]
+                        else "#94D8A0" if value < bounds[2] else "#FFE16A"
+                    )
+                )
             elif bounds is None:
                 label += " / 比較基準未設定"
         elif mode == "machine_type":
             name = machine_type(machine, settings)
-            colour = type_style(name, settings)["color"] if name and name != "クレーン" else COLORS["unknown"]
+            colour = (
+                type_style(name, settings)["color"]
+                if name and name != "クレーン"
+                else COLORS["unknown"]
+            )
         elif mode == "assessment":
             from .replacement import assess
-            result = assess(machine, reference, {k:v for k,v in settings.items() if k != "_sales_bounds"})
+
+            result = assess(
+                machine, reference, {k: v for k, v in settings.items() if k != "_sales_bounds"}
+            )
             label = result["status"] + " / " + result["reasons"][0]
-            colour = {"要確認": "#F4A6A6", "入替検討": "#FFE16A", "好調": "#94D8A0", "判定保留": COLORS["unknown"]}[result["status"]]
+            colour = {
+                "要確認": "#F4A6A6",
+                "入替検討": "#FFE16A",
+                "好調": "#94D8A0",
+                "判定保留": COLORS["unknown"],
+            }[result["status"]]
         if planned:
             label += " / 投入予定"
     else:
@@ -82,32 +136,44 @@ def filter_status(machine, mode, reference, planned=False, priority=False, setti
 
 def filter_legend(mode, settings=None):
     from .analysis_settings import validate_settings, type_style
-    s=validate_settings(settings)
+
+    s = validate_settings(settings)
     return {
         "ratio": "黄：200%以上／緑：100〜200%未満／白：50〜100%未満／赤：低稼働（50%未満）／灰：不明／投入予定は青マーカー",
         "planned": "青：投入予定地／白：投入予定なし／黄枠：優先入替",
         "age": "紫：設置10日以上／白：10日未満・未来／灰：設置日不明",
         "po_rate": f"青：{s['po_low']:.1%}未満／緑：{s['po_low']:.1%}〜{s['po_high']:.1%}／赤：超過／基準 {s['po_reference']:.1%}／灰：不明",
         "cost_rate": f"青：{s['cost_low']:.0%}未満（要確認）／薄青：{s['cost_near']:.0%}未満／緑：{s['cost_high']:.0%}以下／赤：超過／目標 {s['cost_target']:.0%}／灰：不明",
-        "sales_metric": "平均売上で比較（アベ比と独立）／赤・薄橙・緑・黄／比較方式：" + {"benchmark":"設定基準額への比率", "fixed":"設定固定金額", "quantile":"最新有効実績の四分位"}[s['sales_mode']] + "／灰：値・基準不明",
-        "machine_type": "機種ごとの固定色（略称と枠線でも識別）／灰：不明 " + "、".join(f"{k} {v['color']}" for k,v in s['types'].items()),
+        "sales_metric": "平均売上で比較（アベ比と独立）／赤・薄橙・緑・黄／比較方式："
+        + {
+            "benchmark": "設定基準額への比率",
+            "fixed": "設定固定金額",
+            "quantile": "最新有効実績の四分位",
+        }[s["sales_mode"]]
+        + "／灰：値・基準不明",
+        "machine_type": "機種ごとの固定色（略称と枠線でも識別）／灰：不明 "
+        + "、".join(f"{k} {v['color']}" for k, v in s["types"].items()),
         "assessment": "赤：要確認／黄：入替検討／緑：好調／灰：判定保留（確定は手動）",
     }[mode]
 
 
 def metric_text(machine, key, reference, settings=None):
     from .analysis_settings import machine_type, type_style
-    if key in ('po_rate','cost_rate'):
-        value=effective_stat(machine,key)
-        return ('PO率 ' if key=='po_rate' else '原価率 ') + ('—' if value is None else f'{value*100:.1f}%')
-    if key=='sales_metric':
+
+    if key in ("po_rate", "cost_rate"):
+        value = effective_stat(machine, key)
+        return ("PO率 " if key == "po_rate" else "原価率 ") + (
+            "—" if value is None else f"{value*100:.1f}%"
+        )
+    if key == "sales_metric":
         return f"平均売上 {money(effective_stat(machine,'average'))}円\n総売上 {money(effective_stat(machine,'sales'))}円"
-    if key=='machine_type':
-        name=machine_type(machine,settings)
-        return type_style(name,settings)['short'] if name and name!='クレーン' else '機種 —'
-    if key=='assessment':
+    if key == "machine_type":
+        name = machine_type(machine, settings)
+        return type_style(name, settings)["short"] if name and name != "クレーン" else "機種 —"
+    if key == "assessment":
         from .replacement import assess
-        return assess(machine,reference,settings)['status']
+
+        return assess(machine, reference, settings)["status"]
     raise ValueError(key)
 
 
@@ -142,9 +208,16 @@ def percent(value, number_format="General"):
 
 def effective_stat(machine, key):
     overlay = getattr(machine, "analysis", None)
-    if overlay:
-        return overlay.get("values", {}).get(key)
-    return getattr(machine, key, None)
+    value = overlay.get("values", {}).get(key) if overlay else getattr(machine, key, None)
+    if value is not None and (
+        key in ("po_rate", "cost_rate")
+        and not 0 <= value <= 1
+        or key
+        in ("sales", "average", "operating_days", "dispensed", "per_item", "unit_price", "cost")
+        and value < 0
+    ):
+        return None
+    return value
 
 
 def reference_average(machine):
@@ -173,7 +246,7 @@ def ratio(machine):
         value = average / reference * 100
         return value if math.isfinite(value) else None
     if machine.ratio is not None or machine.ratio_from_excel:
-        return machine.ratio
+        return machine.ratio if machine.ratio is None or machine.ratio >= 0 else None
     if machine.sales is None or machine.average is None or machine.average <= 0:
         return None
     value = machine.sales / machine.average * 100

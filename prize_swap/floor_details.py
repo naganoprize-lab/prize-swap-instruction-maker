@@ -185,7 +185,11 @@ class MachineDetailDialog(QDialog):
             ("cost", "原価"),
         ):
             value = effective_stat(machine, key)
-            text = "—" if value is None else f"{value * 100:.2f}%" if key == "cost_rate" else money(value)
+            text = (
+                "—"
+                if value is None
+                else f"{value * 100:.2f}%" if key == "cost_rate" else money(value)
+            )
             widget = QLabel(text)
             self.values[key] = widget
             form.addRow(label, widget)
@@ -200,6 +204,15 @@ class MachineDetailDialog(QDialog):
         )
         label.setWordWrap(True)
         form.addRow(label)
+        if source:
+            from .performance_validation import period_text
+
+            form.addRow("実績対象期間", QLabel(period_text(source)))
+            form.addRow("機器（分析表）", QLabel(source.get("machine_name") or "—"))
+            if source.get("quality_issues"):
+                quality = QLabel("\n".join(i["message"] for i in source["quality_issues"]))
+                quality.setWordWrap(True)
+                form.addRow("実績の要確認事項", quality)
         self.name = QPlainTextEdit(machine.product)
         self.name.setMaximumHeight(130)
         self.name.setPlaceholderText("—")
