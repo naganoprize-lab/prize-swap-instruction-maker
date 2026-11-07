@@ -162,7 +162,7 @@ class MachineDetailDialog(QDialog):
                 (
                     "—"
                     if effective_stat(machine, "po_rate") is None
-                    else f"{effective_stat(machine,'po_rate'):.2f}%"
+                    else f"{effective_stat(machine,'po_rate') * 100:.2f}%"
                 ),
             ),
             ("installed_on", "設置日", machine.installed_on),
@@ -185,7 +185,7 @@ class MachineDetailDialog(QDialog):
             ("cost", "原価"),
         ):
             value = effective_stat(machine, key)
-            text = "—" if value is None else f"{value:.2f}%" if key == "cost_rate" else money(value)
+            text = "—" if value is None else f"{value * 100:.2f}%" if key == "cost_rate" else money(value)
             widget = QLabel(text)
             self.values[key] = widget
             form.addRow(label, widget)

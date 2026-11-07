@@ -11,6 +11,8 @@ from datetime import date, datetime
 from openpyxl import load_workbook
 from .core import AppError, atomic_json, machine_numbers, parse_date
 from .floor_status import numeric, percent
+from .performance_validation import ratio_value
+from copy import deepcopy
 
 
 @dataclass
@@ -144,10 +146,17 @@ def validate_machines(records):
 def validate_state(state):
     if (
         not isinstance(state, dict)
-        or state.get("version") != 1
+        or state.get("version") not in (1, 2)
         or not isinstance(state.get("source", ""), str)
     ):
         raise AppError("配置JSONの形式が不正です。")
+    state = deepcopy(state)
+    if state["version"] == 1:
+        for record in [*state.get("machines", []), *state.get("original", [])]:
+            for key in ("po_rate", "cost_rate"):
+                if record.get(key) is not None:
+                    record[key] /= 100
+        state["version"] = 2
     validate_machines(state.get("machines"))
     validate_machines(state.get("original", []))
     if type(state.get("initialized", False)) is not bool:
@@ -220,7 +229,7 @@ def block_metrics(ws, cell, epoch):
             result.update(sales=numeric(first.value), average=numeric(second.value))
         elif label in ("PO率/アベ比", "PO率／アベ比"):
             result.update(
-                po_rate=percent(first.value, first.number_format),
+                po_rate=ratio_value(first.value),
                 ratio=percent(second.value, second.number_format),
                 ratio_from_excel=second.value is not None and str(second.value).strip() != "",
             )
@@ -237,7 +246,7 @@ def block_metrics(ws, cell, epoch):
                 "PO率": "po_rate",
             }[label]
             if key == "po_rate":
-                result[key] = percent(first.value, first.number_format)
+                result[key] = ratio_value(first.value)
             elif key in ("units", "cases"):
                 result[key] = numeric(first.value) if numeric(first.value) is not None else ""
             else:
@@ -267,7 +276,7 @@ def block_metrics(ws, cell, epoch):
                 "原価": "cost",
             }[label]
             result[key] = (
-                percent(first.value, first.number_format)
+                ratio_value(first.value)
                 if key in ("po_rate", "cost_rate")
                 else numeric(first.value)
             )
@@ -383,7 +392,7 @@ def import_layout(path):
 
 
 def save_layout(path, state):
-    validate_state(state)
+    state = validate_state(state)
     if state.get("source") and Path(path).resolve() == Path(state["source"]).resolve():
         raise AppError("元のExcelには上書きできません。")
     if Path(path).suffix.lower() != ".json":

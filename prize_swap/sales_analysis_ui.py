@@ -13,15 +13,18 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QMessageBox,
     QAbstractItemView,
+    QLineEdit,
 )
 from .sales_analysis import load_analysis, import_summary
 from .floor_status import money
+from .performance_validation import period_text, reconcile
 
 
 class SalesAnalysisMixin:
     def import_analysis_path(self, path):
         snapshot = load_analysis(path)  # Parse before changing any current state.
         before = self.state()
+        snapshot["issues"] = reconcile(self.machines, snapshot, self.analysis_state)
         self.analysis_state = snapshot
         self.rebuild()
         self.record(before, "売上分析Excel読込")
@@ -44,7 +47,7 @@ class SalesAnalysisMixin:
         data = import_summary(self.machines, self.analysis_state)
         return (
             f"{data['file_name']} ／ 実績{data['read']}件・照合更新{data['matched']}件・未照合{len(data['unmatched'])}件・数値エラー{data['numeric_errors']}件（読込エラー計{data['read_errors']}件）"
-            f" ／ 最終読込（JST）{data['loaded_at'].replace('T',' ')}"
+            f" ／ エラー{data['errors']}・警告{data['warnings']} ／ {period_text(self.analysis_state)} ／ 抽出 {self.analysis_state.get('extracted_at') or '不明'} ／ 最終読込（JST）{data['loaded_at'].replace('T',' ')}"
         )
 
     def update_analysis_note(self):
@@ -59,7 +62,7 @@ class SalesAnalysisMixin:
 
     def print_data_timestamp(self):
         if self.analysis_state["file_name"]:
-            return f"{self.analysis_state['loaded_at']}（売上分析 {self.analysis_state['file_name']} を優先、未取得は従来値）"
+            return f"{self.analysis_state['loaded_at']}（売上分析 {self.analysis_state['file_name']} を優先、最新欠損は不明）"
         return self.loaded_at
 
     def show_analysis_report(self, *_):
@@ -75,6 +78,9 @@ class SalesAnalysisMixin:
         )
         note.setWordWrap(True)
         layout.addWidget(note)
+        search = QLineEdit()
+        search.setPlaceholderText("異常の番号・種類・内容・対応方法を検索")
+        layout.addWidget(search)
         info = import_summary(self.machines, self.analysis_state)
         tabs = QTabWidget()
         layout.addWidget(tabs, 1)
@@ -87,6 +93,11 @@ class SalesAnalysisMixin:
                 for j, value in enumerate(row):
                     widget.setItem(i, j, QTableWidgetItem(str(value)))
             widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            widget.setSortingEnabled(True)
+            def filter_rows(text):
+                for i in range(widget.rowCount()):
+                    widget.setRowHidden(i, bool(text) and not any(text.casefold() in widget.item(i,j).text().casefold() for j in range(widget.columnCount())))
+            search.textChanged.connect(filter_rows)
             return widget
 
         rows = []
@@ -114,6 +125,8 @@ class SalesAnalysisMixin:
                 f"付随情報などの除外：{info['ignored']}行 ／ 重複：{info['duplicates']}行（同一値は一度だけ、異なる値の重複は照合せず除外）"
             )
         )
+        issues = [(i["number"], i["severity"], i["kind"], i["message"], i["remedy"]) for i in info["issues"]]
+        tabs.addTab(table(["機器番号", "重要度", "種類", "内容", "対応方法"], issues), f"異常・情報（{len(issues)}件）")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)

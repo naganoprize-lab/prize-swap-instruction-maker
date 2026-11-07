@@ -10,7 +10,9 @@ import unicodedata
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from .core import AppError, machine_numbers
-from .floor_status import numeric, percent, reference_average
+from .floor_status import numeric, reference_average
+from .performance_validation import canonical, ratio_value, metadata, issue, record_issues, validate_tolerance, reconcile
+import hashlib
 
 METRICS = {
     "sales": "売上金額",
@@ -48,7 +50,9 @@ def normalize_number(value):
 
 def empty_snapshot():
     return dict(
-        version=1,
+        version=2,
+        issues=[], unmatched_rows=[], fingerprint="", period_start=None, period_end=None,
+        period_source="unknown", extracted_at=None, filename_timestamp=None,
         records={},
         file_name="",
         source="",
@@ -64,8 +68,6 @@ def validate_values(values):
         raise AppError("売上分析の項目が不正です。")
     for key, value in values.items():
         if value is None:
-            if key in ("sales", "average", "operating_days"):
-                raise AppError("売上・平均売上・稼働日数は必須です。")
             continue
         if (
             isinstance(value, bool)
@@ -83,9 +85,19 @@ def validate_values(values):
 def validate_snapshot(value):
     if value is None:
         return empty_snapshot()
-    if not isinstance(value, dict) or value.get("version") != 1:
+    if not isinstance(value, dict) or value.get("version") not in (1, 2):
         raise AppError("売上分析の保存形式が不正です。")
+    value = deepcopy(value)
+    legacy = value["version"] == 1
+    value = empty_snapshot() | value
+    value["version"] = 2
     records = value.get("records")
+    if legacy:
+        for record in records.values():
+            for key in ("po_rate", "cost_rate"):
+                if record["values"].get(key) is not None:
+                    record["values"][key] /= 100
+
     if not isinstance(records, dict) or len(records) > 10000:
         raise AppError("売上分析の件数が不正です。")
     for number, record in records.items():
@@ -130,8 +142,9 @@ def validate_overlay(value):
     validate_values(value.get("values"))
 
 
-def load_analysis(path):
+def load_analysis(path, tolerance=None):
     path = Path(path)
+    tolerance = validate_tolerance(tolerance)
     try:
         workbook = load_workbook(path, data_only=True, read_only=True)
     except Exception as exc:
@@ -142,82 +155,75 @@ def load_analysis(path):
         sheet = workbook["景品運営分析表"]
         if sheet.max_row > 10001:
             raise AppError("売上分析は10000行以下で読み込んでください。")
-
-        def canonical(v):
-            return unicodedata.normalize("NFKC", str(v or "")).replace(" ", "").replace("/", "")
-
-        header = next(sheet.iter_rows(min_row=1, max_row=1, max_col=16))
-        for col, label in HEADERS.items():
-            if canonical(header[col].value) != canonical(label):
-                raise AppError(
-                    f"{get_column_letter(col+1)}列のヘッダーは「{label}」にしてください。"
-                )
+        rows = list(sheet.iter_rows())
+        labels = {canonical(c.value).replace("/", ""): i for i, c in enumerate(rows[0])}
+        columns = {}
+        for key, label in {"number": "機器番号", "reference_name": "商品名", **METRICS}.items():
+            match = labels.get(canonical(label).replace("/", ""))
+            if match is None:
+                raise AppError(f"ヘッダー「{label}」がありません。")
+            columns[key] = match
+        columns["machine_name"] = labels.get(canonical("機器"))
         result = empty_snapshot()
-        result.update(
-            source=str(path.resolve()),
-            file_name=path.name,
-            loaded_at=datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds"),
-        )
+        result.update(source=str(path.resolve()), file_name=path.name,
+            fingerprint=hashlib.sha256(path.read_bytes()).hexdigest(),
+            loaded_at=datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds"))
+        result.update(metadata(rows[1:]))
+        stamp = re.search(r"(\d{12,14})(?=\D|$)", path.stem)
+        if stamp:
+            try:
+                result["filename_timestamp"] = datetime.strptime(stamp[1], "%Y%m%d%H%M%S" if len(stamp[1]) == 14 else "%Y%m%d%H%M").isoformat()
+            except ValueError:
+                pass
         conflicts = set()
-        for row in sheet.iter_rows(min_row=2, max_col=16):
-            number = normalize_number(row[1].value)
+        for row_index, row in enumerate(rows[1:], 2):
+            def cell(key):
+                col = columns.get(key)
+                return row[col].value if col is not None and col < len(row) else None
+            raw = cell("number")
+            number = normalize_number(raw)
             if number is None:
                 if any(c.value is not None for c in row):
                     result["ignored_rows"] += 1
+                    # Ancillary conditions have no numeric sales; malformed IDs with actual values are reported.
+                    if raw is not None and re.match(r"^\s*\d", str(raw)) and numeric(cell("sales")) is not None:
+                        result["unmatched_rows"].append(dict(number=str(raw), row=row_index))
+                        result["issues"].append(issue(str(raw), "number_format", "機器番号を正規化できません。", "エラー", row_index))
                 continue
-            values = {
-                key: (
-                    percent(row[col].value, row[col].number_format)
-                    if key in ("cost_rate", "po_rate")
-                    else numeric(row[col].value)
-                )
-                for col, key in COLUMNS.items()
-            }
+            values = {k: ratio_value(cell(k)) if k in ("po_rate", "cost_rate") else numeric(cell(k)) for k in METRICS}
             try:
-                for col, key in COLUMNS.items():
-                    if (
-                        key not in ("po_rate", "cost_rate")
-                        and isinstance(row[col].value, str)
-                        and "%" in unicodedata.normalize("NFKC", row[col].value)
-                    ):
-                        raise AppError(f"{METRICS[key]}にパーセント文字列は使用できません。")
-                    if row[col].value not in (None, "") and values[key] is None:
+                for key in METRICS:
+                    raw_value = cell(key)
+                    if raw_value not in (None, "") and values[key] is None:
                         raise AppError(f"{METRICS[key]}を数値として読み込めません。")
+                    if key not in ("po_rate", "cost_rate") and isinstance(raw_value, str) and "%" in unicodedata.normalize("NFKC", raw_value):
+                        raise AppError(f"{METRICS[key]}にパーセント文字列は使用できません。")
                 validate_values(values)
+                if any(values[k] is None for k in ("sales", "average", "operating_days")):
+                    raise AppError("売上・平均売上・稼働日数が欠損しています。")
             except AppError as exc:
-                result["errors"].append(
-                    dict(row=row[1].row, number=number, message=str(exc), kind="numeric")
-                )
+                result["errors"].append(dict(row=row_index, number=number, message=str(exc), kind="numeric"))
+                result["issues"].append(issue(number, "numeric", str(exc), "エラー", row_index))
                 continue
-            record = dict(
-                raw_number=row[1].value.strip(),
-                reference_name=str(row[4].value or ""),
-                row=row[1].row,
-                values=values,
-            )
+            result["issues"].extend(record_issues(number, values, row_index, tolerance))
+            record = dict(raw_number=raw.strip(), reference_name=str(cell("reference_name") or ""),
+                machine_name=str(cell("machine_name") or ""), row=row_index, values=values)
             if number in conflicts:
                 result["duplicate_rows"] += 1
                 continue
             previous = result["records"].get(number)
             if previous:
                 result["duplicate_rows"] += 1
+                result["issues"].append(issue(number, "duplicate", "機器番号が重複しています。二重計上しません。", "エラー", row_index))
                 if previous["values"] != values:
                     result["records"].pop(number)
                     conflicts.add(number)
-                    result["errors"].append(
-                        dict(
-                            row=row[1].row,
-                            number=number,
-                            message="同じ機器番号に異なる実績があります。照合せず除外しました。",
-                            kind="duplicate",
-                        )
-                    )
+                    result["errors"].append(dict(row=row_index, number=number,
+                        message="同じ機器番号に異なる実績があります。照合せず除外しました。", kind="duplicate"))
                 continue
             result["records"][number] = record
-        if not result["records"] and not result["errors"]:
-            raise AppError(
-                "正規の機器番号を持つ実績行がありません。検索条件等は実績として扱いません。"
-            )
+        if not result["records"] and not result["issues"]:
+            raise AppError("正規の機器番号を持つ実績行がありません。検索条件等は実績として扱いません。")
         return validate_snapshot(result)
     finally:
         workbook.close()
@@ -251,24 +257,22 @@ def apply_snapshot(machines, snapshot):
         ensure_references(machines)
     for machine in machines:
         record = records.get(machine.number)
-        machine.analysis = (
-            (
-                dict(
-                    values=deepcopy(record["values"]),
-                    file_name=snapshot["file_name"],
-                    loaded_at=snapshot["loaded_at"],
-                )
-            )
-            if record
-            else None
-        )
+        machine.analysis = dict(values=deepcopy(record["values"]) if record else {k: None for k in METRICS},
+            machine_name=record.get("machine_name", "") if record else "",
+            file_name=snapshot["file_name"], loaded_at=snapshot["loaded_at"],
+            period_start=snapshot.get("period_start"), period_end=snapshot.get("period_end"),
+            extracted_at=snapshot.get("extracted_at")) if snapshot["file_name"] else None
 
 
 def import_summary(machines, snapshot):
     numbers = {m.number for m in machines if m.number}
     matched = set(snapshot["records"]) & numbers
     unmatched = sorted(set(snapshot["records"]) - numbers)
+    issues = reconcile(machines, snapshot)
     return dict(
+        issues=issues, errors=sum(i["severity"] == "エラー" for i in issues),
+        warnings=sum(i["severity"] == "警告" for i in issues),
+        missing=sorted(numbers - set(snapshot["records"])),
         read=len(snapshot["records"]),
         matched=len(matched),
         unmatched=unmatched,

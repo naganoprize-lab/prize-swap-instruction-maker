@@ -476,7 +476,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
     def state(self):
         return dict(
-            version=1,
+            version=2,
             sales_analysis=deepcopy(self.analysis_state),
             initialized=self.initialized,
             source=self.source,
@@ -496,7 +496,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         )
 
     def restore(self, state, keep_history=False):
-        validate_state(state)
+        state = validate_state(state)
         from .sales_analysis import validate_snapshot
 
         self.analysis_state = deepcopy(validate_snapshot(state.get("sales_analysis")))

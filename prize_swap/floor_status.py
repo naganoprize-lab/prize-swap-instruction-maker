@@ -82,8 +82,8 @@ def percent(value, number_format="General"):
 
 def effective_stat(machine, key):
     overlay = getattr(machine, "analysis", None)
-    if overlay and overlay.get("values", {}).get(key) is not None:
-        return overlay["values"][key]
+    if overlay:
+        return overlay.get("values", {}).get(key)
     return getattr(machine, key, None)
 
 
