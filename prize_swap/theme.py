@@ -111,7 +111,10 @@ class ThemeManager(QObject):
         roles={'Window':'background','WindowText':'text','Base':'card','AlternateBase':'alternate','Text':'text','Button':'card','ButtonText':'text','ToolTipBase':'card','ToolTipText':'text','Highlight':'selection','HighlightedText':'text','Link':'accent','PlaceholderText':'muted','Light':'border','Mid':'border','Dark':'sidebar'}
         for role,key in roles.items():p.setColor(getattr(QPalette.ColorRole,role),QColor(t[key]))
         for role in (QPalette.ColorRole.Text,QPalette.ColorRole.WindowText,QPalette.ColorRole.ButtonText):p.setColor(QPalette.ColorGroup.Disabled,role,QColor(t['muted']))
-        self.app.setPalette(p);self.app.setStyleSheet(stylesheet(t));self.changed.emit('dark' if self.dark else 'light')
+        effective='dark' if self.dark else 'light'
+        if getattr(self,'_applied_theme',None)!=effective:
+            self.app.setPalette(p);self.app.setStyleSheet(stylesheet(t));self._applied_theme=effective
+        self.changed.emit(effective)
 
 
 def manager():

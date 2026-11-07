@@ -70,7 +70,7 @@ class SalesAnalysisMixin:
         self.print_options.analysis_settings = deepcopy(self.analysis_settings)
         self.performance_history = history
         self.analysis_state = snapshot
-        self.rebuild()
+        self.sync()
         self.record(before, "売上分析Excel読込")
         self.schedule_save()
         return import_summary(self.machines, snapshot)

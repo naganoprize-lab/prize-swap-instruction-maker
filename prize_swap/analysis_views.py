@@ -96,7 +96,9 @@ def show_candidates(owner):
                 (percent_text(effective_stat(m, "cost_rate")), effective_stat(m, "cost_rate")),
                 (percent_text(a["trend"]), a["trend"]),
                 " / ".join(a["reasons"]),
-                (m.analysis or {}).get("loaded_at", "—"),
+                (m.analysis or {}).get("loaded_at") or m.layout_loaded_at or "—",
+                __import__("prize_swap.machine_matching",fromlist=["MATCH_LABELS"]).MATCH_LABELS[m.match_method],
+                __import__("prize_swap.machine_matching",fromlist=["value_source"]).value_source(m,"ratio"),
             ]
         )
     table = make_table(
@@ -112,6 +114,7 @@ def show_candidates(owner):
             "売上前回比",
             "判定理由",
             "データ更新日時",
+            "照合方法", "アベ比の取得元",
         ],
         rows,
     )

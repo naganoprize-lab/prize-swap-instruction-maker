@@ -114,6 +114,7 @@ def resolve_matches(machines,records):
             else:problem=''
         else:
             if m.number and getattr(m,'number_origin','direct')=='direct' and not direct:problem='機械番号が不正、または左右が不明です。'
+            if getattr(m,'direct_number_raw','') and not normalize_number(m.direct_number_raw):problem='レイアウトの機械番号が不正、または左右が不明です。'
             if direct and ref and direct!=ref:problem='直接の機械番号と管理ナンバー参考表の対応が異なります。'
             if len(keys.get(normalize_reference(m.source_key),[]))>1:problem='同じ管理ナンバーのマシン枠が複数あります。'
         if problem:
@@ -138,3 +139,11 @@ def value_source(machine,key):
         from .floor_status import effective_stat
         return '景品運営分析表' if effective_stat(machine,key) is not None else '景品運営分析表：未取得'
     return 'レイアウト由来' if getattr(machine,key,None) is not None else 'データなし'
+
+
+def metric_info(machine,key):
+    from .floor_status import ratio,effective_stat
+    value=ratio(machine) if key=="ratio" else effective_stat(machine,key)
+    source=value_source(machine,key)
+    updated=(machine.analysis or {}).get("loaded_at","") if source.startswith("景品運営分析表") else machine.layout_loaded_at
+    return dict(value=value,source=source,updated_at=updated,match_method=machine.match_method)

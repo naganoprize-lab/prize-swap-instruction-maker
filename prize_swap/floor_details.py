@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from .core import AppError, LIMITS, METHODS, quantity
 from .floor_data import validate_machines
-from .machine_matching import display_identity,machine_key,MATCH_LABELS,value_source
+from .machine_matching import display_identity,machine_key,MATCH_LABELS,value_source,metric_info
 from .floor_status import money, ratio_text, days_text, effective_stat, reference_average
 from .methods import editor_state, set_allocations, format_counts, plans
 from .methods_editor import MethodsCombo
@@ -155,6 +155,7 @@ class MachineDetailDialog(QDialog):
         for key, label, value in (
             ("number", "マシン番号", display_identity(machine)),
             ("source_key", "管理ナンバー", machine.source_key),
+            ("direct_number_raw", "機械番号（レイアウト原文）", machine.direct_number_raw or machine.number),
             ("resolved_number", "照合先の機械番号", machine.resolved_number),
             ("match_method", "照合方法", MATCH_LABELS[machine.match_method]),
             ("match_message", "照合の確認事項", machine.match_message),
@@ -183,7 +184,7 @@ class MachineDetailDialog(QDialog):
             )
             self.values[key] = widget
             widget.setWordWrap(True)
-            if key in ("sales","average","ratio","po_rate"):widget.setToolTip(value_source(machine,key))
+            if key in ("sales","average","ratio","po_rate"):widget.setToolTip(value_source(machine,key)+" / 更新（読込） "+(metric_info(machine,key)["updated_at"] or "不明"))
             form.addRow(label, widget)
         for key, label in (
             ("operating_days", "稼働日数（売上集計期間）"),
@@ -301,6 +302,8 @@ class MachineDetailDialog(QDialog):
 
     def accept(self):
         try:
+            if self.updated.number!=self.original.number:
+                self.updated.resolved_number="";self.updated.manual_number=None;self.updated.number_origin="direct";self.updated.direct_number_raw=self.updated.number
             self.updated.product = self.name.toPlainText().strip()
             self.updated.maker = self.maker.text().strip()
             self.updated.units = quantity(self.units.text())
@@ -315,8 +318,8 @@ class MachineDetailDialog(QDialog):
             )
             for panel in self.products:
                 panel.validate()
-            if self.updated.number != self.original.number and self.owner.related(
-                {self.original.number}
+            if machine_key(self.updated) != machine_key(self.original) and self.owner.related(
+                {machine_key(self.original)}
             ):
                 QMessageBox.warning(
                     self,

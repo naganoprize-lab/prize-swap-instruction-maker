@@ -55,7 +55,16 @@ class ProductFilter(QSortFilterProxyModel):
         return (not self.query or self.query in text) and (self.mode != 1 or p.included) and (self.mode != 2 or p.priority)
 
     def lessThan(self, left, right):
-        return int(left.data()) < int(right.data())
+        column=left.column()
+        if column in (1,4,5):
+            def numeric_key(index):
+                value=index.data(Qt.ItemDataRole.EditRole)
+                return (value in (None,""),float(value) if value not in (None,"") else 0)
+            return numeric_key(left)<numeric_key(right)
+        if column in (0,8):
+            attr="included" if column==0 else "priority"
+            return getattr(self.sourceModel().products[left.row()],attr)<getattr(self.sourceModel().products[right.row()],attr)
+        return str(left.data() or "").casefold()<str(right.data() or "").casefold()
 
 
 class Window(QMainWindow):
@@ -175,6 +184,8 @@ class Window(QMainWindow):
         self.filter_choice.currentIndexChanged.connect(self.filter_changed)
         self.table = QTableView()
         self.table.setModel(self.proxy)
+        self.table.setSortingEnabled(True)
+        self.table.sortByColumn(1,Qt.SortOrder.AscendingOrder)
         self.table.selectionModel().selectionChanged.connect(self.update_allocation_notice)
         self.delegate = ProductDelegate(self.table)
         self.delegate.machine_options = lambda: sorted(machine_key(m) for m in self.floor.machines if machine_key(m))

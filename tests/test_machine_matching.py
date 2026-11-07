@@ -99,3 +99,51 @@ def test_reference_excel_headers_unicode_and_source_unchanged(tmp_path):
     assert len(machines)==1 and rows==[dict(source_key='L_66',number='２０１１１－０２')]
     apply_snapshot(machines,snapshot(tmp_path));assert machines[0].match_method=='reference' and ratio(machines[0])==85 # Stored layout ratio is identified as layout-derived; no new baseline is invented.
     assert hashlib.sha256(p.read_bytes()).hexdigest()==digest
+
+
+@pytest.mark.parametrize('direct,method',[('２０１１１－０２','direct'),('20111','review'),('20088左','review')])
+def test_explicit_layout_number_not_product_name_controls_matching(tmp_path,direct,method):
+    p=tmp_path/'layout.xlsx';book=Workbook();s=book.active;s.title='投入中レイアウト'
+    s['B3']='L_66';s['C3']='20111右' # A product name that resembles a number must not create another card.
+    s['B4']='機械番号';s['C4']=direct
+    refs=book.create_sheet('管理番号参考値');refs.append(['L_66','20111右']);book.save(p);book.close()
+    machines,_=import_layout(p);assert len(machines)==1
+    apply_snapshot(machines,snapshot(tmp_path));assert machines[0].match_method==method
+    if method=='review':assert machines[0].analysis is None
+    assert machines[0].product=='20111右'
+
+
+def test_manual_match_shared_by_details_dashboard_methods_candidates_and_json(tmp_path):
+    from prize_swap.floor_details import MachineDetailDialog
+    from prize_swap.method_analysis import totals
+    from prize_swap.replacement import assess
+    from prize_swap.core import Product
+    product=Product(DAY,'入替予定',machines=['20111右'])
+    w=FloorWidget(lambda:[product],lambda:DAY,tmp_path/'auto.json')
+    try:
+        w.machines=[Machine(source_key='L_66',product='現商品',operation_method='リング',ratio=85,average=4250,installed_on='2026-10-01')];w.rebuild();w.apply_matching([dict(source_key='L_66',number='20111右')],{})
+        w.import_analysis_path(report_file(tmp_path/'分析.xlsx',[data_row('20111-02',average=6000,sales=18000)]))
+        m=w.machines[0];detail=MachineDetailDialog(w,m)
+        assert detail.values['sales'].text()=='18,000' and detail.values['ratio'].text()=='120.0%'
+        assert detail.values['match_method'].text()=='管理ナンバーから一致' and len(detail.products)==1;detail.close()
+        assert w.dashboard.metrics['planned']==1 and w.dashboard.groups['100〜200%未満']['count']==1
+        assert totals(w.machines)[0]['sales']==18000
+        assert assess(m,DAY)['machine_id']=='20111右'
+        assert w.state()['number_references']==[dict(source_key='L_66',number='20111右')]
+    finally:w.timer.stop();w.day_timer.stop();w.close()
+
+
+def test_analysis_refresh_retains_nodes_selection_zoom_and_metric_provenance(tmp_path):
+    from prize_swap.machine_matching import metric_info
+    w=FloorWidget(lambda:[],lambda:DAY,tmp_path/'auto.json')
+    try:
+        w.machines=[Machine(number='20111右',source_key='R_66',ratio=85,average=4250,x=123,y=456,layout_loaded_at='2026-11-01T10:00:00+09:00')];w.rebuild()
+        uid=w.machines[0].uid;node=w.nodes[uid];node.setSelected(True);w.set_zoom(125)
+        w.import_analysis_path(report_file(tmp_path/'分析.xlsx',[data_row('20111-02',average=6000,sales=18000)]))
+        assert w.nodes[uid] is node and node.isSelected() and w._zoom==125
+        info=metric_info(w.machines[0],'ratio');assert info['value']==120 and info['source'].startswith('景品運営分析表')
+        w.import_analysis_path(report_file(tmp_path/'別機械.xlsx',[data_row('20088-01')]))
+        info=metric_info(w.machines[0],'ratio')
+        assert info['value']==85 and info['source']=='レイアウト由来' and info['updated_at']=='2026-11-01T10:00:00+09:00'
+        assert w.nodes[uid] is node and node.isSelected() and w._zoom==125
+    finally:w.timer.stop();w.day_timer.stop();w.close()

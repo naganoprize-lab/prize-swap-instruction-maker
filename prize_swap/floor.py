@@ -105,12 +105,15 @@ class ResizeHandle(QGraphicsRectItem):
         )
 
     def mousePressEvent(self, event):
+        self._resizing=True
         self.before = self.node.owner.state()
         m = self.node.machine
         self.initial = QRectF(m.x, m.y, m.width, m.height)
         event.accept()
 
     def mouseMoveEvent(self, event):
+        if not getattr(self,"_resizing",False):
+            event.accept();return
         point = event.scenePos()
         if self.node.owner.snap.isChecked():
             point = QPointF(round(point.x() / GRID) * GRID, round(point.y() / GRID) * GRID)
@@ -127,6 +130,7 @@ class ResizeHandle(QGraphicsRectItem):
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        self._resizing=False
         self.node.owner.record(self.before, "マシンのサイズ変更")
         event.accept()
 
@@ -949,6 +953,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
     def add_machine(self, machine):
         validate_machines([asdict(m) for m in self.machines] + [asdict(machine)])
+        if machine_key(machine) and any(machine_key(m)==machine_key(machine) for m in self.machines):raise AppError("同じマシン番号が登録済みです。")
         before = self.state()
         self.initialized = True
         self.machines.append(machine)
@@ -965,7 +970,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         number = QLineEdit()
         side = QComboBox()
         side.addItems(["指定なし", "左", "右"])
-        match = re.fullmatch(r"(\d+)([左右]?)", machine.number)
+        initial_number=machine_key(machine)
+        match = re.fullmatch(r"(\d+)([左右]?)", initial_number)
         if match:
             number.setText(match[1])
             side.setCurrentText(match[2] or "指定なし")
@@ -1004,7 +1010,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             try:
                 if not value or machine_numbers(value) != [value]:
                     raise AppError("番号を入力してください。")
-                if any(m.uid != machine.uid and m.number == value for m in self.machines):
+                if any(m.uid != machine.uid and machine_key(m) == value for m in self.machines):
                     raise AppError("同じマシン番号が登録済みです。左右指定も確認してください。")
                 values = []
                 for label, control in (
@@ -1021,13 +1027,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 installation = parse_date(installed.text())
                 if installed.text().strip() and installation is None:
                     raise AppError("設置日を日付形式で入力してください。")
-                if machine.number!=value:
-                    machine.number_origin="direct";machine.manual_number=None
-                machine.number, machine.kind, machine.product = (
-                    value,
-                    kind.currentText(),
-                    product.text(),
-                )
+                if initial_number!=value:
+                    machine.number=value;machine.number_origin="direct";machine.manual_number=None;machine.resolved_number="";machine.direct_number_raw=value
+                machine.kind, machine.product = kind.currentText(),product.text()
                 machine.sales, machine.average, machine.ratio = values
                 machine.ratio_from_excel = bool(ratio_input.text().strip())
                 machine.installed_on = installation.isoformat() if installation else None
@@ -1052,7 +1054,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         updated = deepcopy(old)
         if not self.machine_dialog(updated, "マシン編集"):
             return
-        if old.number and old.number != updated.number and self.related({old.number}):
+        if updated.number!=old.number:
+            updated.resolved_number="";updated.manual_number=None;updated.number_origin="direct";updated.direct_number_raw=updated.number
+        if machine_key(old) and machine_key(old) != machine_key(updated) and self.related({machine_key(old)}):
             QMessageBox.warning(
                 self,
                 "入替予定との整合性",
@@ -1190,7 +1194,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                         "limit",
                         "operation_method",
                         "reference_average",
-                        "reference_number", "reference_warning", "number_origin", "layout_loaded_at",
+                        "reference_number", "reference_warning", "number_origin", "layout_loaded_at", "direct_number_raw",
                     ):
                         setattr(m, field, getattr(fresh, field))
         self.rebuild()

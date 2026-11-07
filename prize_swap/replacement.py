@@ -56,7 +56,9 @@ def assess(machine, reference, settings=None, history=()):
     overlay = machine.analysis or {}
     context = overlay.get("product_context")
     changed = context is not None and context != episode(machine)
-    if overlay.get("quality_issues"):
+    if machine.match_method=="review":
+        reasons.append("機械番号の照合要確認のため判定保留")
+    elif overlay.get("quality_issues"):
         reasons.append("実績の重大な異常を確認するまで判定保留")
     elif overlay and overlay.get("period_source") not in ("excel", "manual"):
         reasons.append("対象期間が未確定のため判定保留（期間の確認・手動設定が必要）")
@@ -75,6 +77,7 @@ def assess(machine, reference, settings=None, history=()):
         reasons.append(f"アベ比{value:.1f}%で好調")
     else:
         reasons.append("投入日数が判定条件に達していません。")
+    if not machine.analysis:reasons.append("実績データの取得元：レイアウト由来")
     po, cost = effective_stat(machine, "po_rate"), effective_stat(machine, "cost_rate")
     if po is not None and po > s["po_high"]:
         reasons.append(f"PO率{po:.1%}：設定上限を超過（要確認）")

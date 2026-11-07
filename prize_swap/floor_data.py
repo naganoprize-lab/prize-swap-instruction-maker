@@ -55,6 +55,7 @@ class Machine:
     match_method: str = "layout"
     match_message: str = ""
     layout_loaded_at: str = ""
+    direct_number_raw: str = ""
 
     def __post_init__(self):
         if isinstance(self.installed_on, (date, datetime)):
@@ -79,7 +80,7 @@ def validate_machines(records):
                     "maker",
                     "limit",
                     "operation_method",
-                    "reference_number", "reference_warning", "number_origin", "resolved_number", "match_method", "match_message", "layout_loaded_at",
+                    "reference_number", "reference_warning", "number_origin", "resolved_number", "match_method", "match_message", "layout_loaded_at", "direct_number_raw",
                 )
             ):
                 raise ValueError("文字列項目が不正")
@@ -333,7 +334,11 @@ def import_layout(path, with_references=False):
         references=read_reference_rows(wb)
         mapping, problems=reference_index(references)
         warnings=[f"{key}：{message}" for key,message in problems.items()]
-        cells = [c for row in ws for c in row if normalize_reference(c.value) is not None or normalize_number(c.value) is not None]
+        reference_cells=[c for row in ws for c in row if normalize_reference(c.value) is not None]
+        def in_reference_card(cell):
+            return any(c.row<=cell.row<=c.row+4 and c.column<=cell.column<=c.column+2 for c in reference_cells)
+        direct_cells=[c for row in ws for c in row if isinstance(c.value,str) and normalize_number(c.value) is not None and not in_reference_card(c)]
+        cells=sorted(reference_cells+direct_cells,key=lambda c:(c.row,c.column))
         if not cells:
             raise AppError("レイアウトに L_番号 / R_番号 のマシン枠が見つかりません。")
         if len(cells) > 5000:
@@ -359,8 +364,14 @@ def import_layout(path, with_references=False):
         machines, seen = [], set()
         for cell in cells:
             key = normalize_reference(cell.value) or ""
-            direct=normalize_number(cell.value)
-            number = direct or mapping.get(key, "")
+            direct_raw=str(cell.value) if not key else ""
+            if key:
+                for r in range(cell.row+1,min(ws.max_row,cell.row+4)+1):
+                    label=unicodedata.normalize("NFKC",str(ws.cell(r,cell.column).value or "")).replace(" ","")
+                    if label in ("機械番号","機器番号","マシン番号"):
+                        direct_raw=str(ws.cell(r,cell.column+1).value or "");break
+            direct=normalize_number(direct_raw)
+            number = (direct or "") if direct_raw else mapping.get(key, "")
             if number in seen:
                 warnings.append(
                     f"{cell.coordinate}：管理番号 {number} が重複するため未設定にしました。"
@@ -374,7 +385,8 @@ def import_layout(path, with_references=False):
                     number=number,
                     product=str(product) if product is not None else "",
                     source_key=key,
-                    number_origin="direct" if direct else "reference",
+                    number_origin="direct" if direct_raw else "reference",
+                    direct_number_raw=direct_raw,
                     reference_number=mapping.get(key, ""),
                     reference_warning=problems.get(key, ""),
                     layout_loaded_at=datetime.now().astimezone().isoformat(timespec="seconds"),

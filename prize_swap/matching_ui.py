@@ -16,7 +16,7 @@ def show_matching(owner):
     from .theme import style_table
     table=QTableWidget(len(owner.machines),6);style_table(table);table.setHorizontalHeaderLabels(['管理ナンバー','機械番号（レイアウト）','照合先','照合方法','状態・理由','手動設定'])
     for i,m in enumerate(owner.machines):
-        values=[m.source_key or '—',m.number or '—',m.resolved_number or '—',MATCH_LABELS[m.match_method],m.match_message,'自動' if m.manual_number is None else m.manual_number or '照合しない']
+        values=[m.source_key or '—',m.direct_number_raw or m.number or '—',m.resolved_number or '—',MATCH_LABELS[m.match_method],m.match_message,'自動' if m.manual_number is None else m.manual_number or '照合しない']
         for j,text in enumerate(values):
             item=QTableWidgetItem(text)
             if j!=5:item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)

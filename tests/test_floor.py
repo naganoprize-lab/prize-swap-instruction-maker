@@ -130,6 +130,10 @@ def test_actual_drag_multiple_selection_resize_and_undo(floor):
     node = floor.nodes[a.uid]
     floor.scene.clearSelection()
     node.setSelected(True)
+    # Keep the resize target inside the resized modern viewport, excluding
+    # QGraphicsView edge autoscroll from this fixed-distance resize assertion.
+    floor.view.ensureVisible(node.mapRectToScene(node.boundingRect()).adjusted(0, 0, 80, 80), 20, 20)
+    QApplication.processEvents()
     corner = floor.view.mapFromScene(node.mapToScene(QPointF(node.machine.width, node.machine.height)))
     target = corner + floor.view.mapFromScene(QPointF(40,40)) - floor.view.mapFromScene(QPointF(0,0))
     old_width, old_height = node.machine.width, node.machine.height
