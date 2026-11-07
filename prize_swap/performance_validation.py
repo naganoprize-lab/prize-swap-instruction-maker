@@ -152,15 +152,25 @@ def record_issues(number, values, row, tolerance):
 
 
 def reconcile(machines, snapshot, previous=None):
-    dynamic={"unmatched","absent","machine_name","product_name","matching"}
+    dynamic = {"unmatched", "absent", "machine_name", "product_name", "matching"}
     issues = [i for i in snapshot.get("issues", []) if i["kind"] not in dynamic]
     records = snapshot["records"]
     from .machine_matching import resolve_matches
-    matches=resolve_matches(machines,records)
-    known={r.number:m for m in machines if (r:=matches[m.uid]).number}
+
+    matches = resolve_matches(machines, records)
+    known = {r.number: m for m in machines if (r := matches[m.uid]).number}
     for m in machines:
-        r=matches[m.uid]
-        if r.method=="review":issues.append(issue(m.source_key or m.number,"matching",r.message,"警告",remedy="管理ナンバー照合画面で対応を確認・修正してください。"))
+        r = matches[m.uid]
+        if r.method == "review":
+            issues.append(
+                issue(
+                    m.source_key or m.number,
+                    "matching",
+                    r.message,
+                    "警告",
+                    remedy="管理ナンバー照合画面で対応を確認・修正してください。",
+                )
+            )
     for number, record in records.items():
         m = known.get(number)
         if m is None:

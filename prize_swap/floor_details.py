@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from .core import AppError, LIMITS, METHODS, quantity
 from .floor_data import validate_machines
-from .machine_matching import display_identity,machine_key,MATCH_LABELS,value_source,metric_info
+from .machine_matching import display_identity, machine_key, MATCH_LABELS, value_source, metric_info
 from .floor_status import money, ratio_text, days_text, effective_stat, reference_average
 from .methods import editor_state, set_allocations, format_counts, plans
 from .methods_editor import MethodsCombo
@@ -155,13 +155,25 @@ class MachineDetailDialog(QDialog):
         for key, label, value in (
             ("number", "マシン番号", display_identity(machine)),
             ("source_key", "管理ナンバー", machine.source_key),
-            ("direct_number_raw", "機械番号（レイアウト原文）", machine.direct_number_raw or machine.number),
+            (
+                "direct_number_raw",
+                "機械番号（レイアウト原文）",
+                machine.direct_number_raw or machine.number,
+            ),
             ("resolved_number", "照合先の機械番号", machine.resolved_number),
             ("match_method", "照合方法", MATCH_LABELS[machine.match_method]),
             ("match_message", "照合の確認事項", machine.match_message),
-            ("provenance", "実績データの取得元", "景品運営分析表" if machine.analysis else "レイアウト由来"),
-            ("ratio_source", "アベ比の取得元", value_source(machine,"ratio")),
-            ("updated_at", "データ更新日時", (machine.analysis or {}).get("loaded_at") or machine.layout_loaded_at),
+            (
+                "provenance",
+                "実績データの取得元",
+                "景品運営分析表" if machine.analysis else "レイアウト由来",
+            ),
+            ("ratio_source", "アベ比の取得元", value_source(machine, "ratio")),
+            (
+                "updated_at",
+                "データ更新日時",
+                (machine.analysis or {}).get("loaded_at") or machine.layout_loaded_at,
+            ),
             ("sales", "売上金額", money(effective_stat(machine, "sales"))),
             ("average", "平均売上", money(effective_stat(machine, "average"))),
             ("ratio", "アベ比", ratio_text(machine)),
@@ -184,7 +196,12 @@ class MachineDetailDialog(QDialog):
             )
             self.values[key] = widget
             widget.setWordWrap(True)
-            if key in ("sales","average","ratio","po_rate"):widget.setToolTip(value_source(machine,key)+" / 更新（読込） "+(metric_info(machine,key)["updated_at"] or "不明"))
+            if key in ("sales", "average", "ratio", "po_rate"):
+                widget.setToolTip(
+                    value_source(machine, key)
+                    + " / 更新（読込） "
+                    + (metric_info(machine, key)["updated_at"] or "不明")
+                )
             form.addRow(label, widget)
         for key, label in (
             ("operating_days", "稼働日数（売上集計期間）"),
@@ -302,8 +319,11 @@ class MachineDetailDialog(QDialog):
 
     def accept(self):
         try:
-            if self.updated.number!=self.original.number:
-                self.updated.resolved_number="";self.updated.manual_number=None;self.updated.number_origin="direct";self.updated.direct_number_raw=self.updated.number
+            if self.updated.number != self.original.number:
+                self.updated.resolved_number = ""
+                self.updated.manual_number = None
+                self.updated.number_origin = "direct"
+                self.updated.direct_number_raw = self.updated.number
             self.updated.product = self.name.toPlainText().strip()
             self.updated.maker = self.maker.text().strip()
             self.updated.units = quantity(self.units.text())

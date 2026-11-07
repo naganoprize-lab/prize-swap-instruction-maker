@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtPrintSupport import QPrintDialog
 
+from .theme import manager as theme_manager, tokens as theme_tokens
 from .core import AppError, machine_numbers
 from .machine_matching import machine_key, display_identity
 from .floor_data import Machine, import_layout, save_layout, validate_machines, validate_state
@@ -105,15 +106,16 @@ class ResizeHandle(QGraphicsRectItem):
         )
 
     def mousePressEvent(self, event):
-        self._resizing=True
+        self._resizing = True
         self.before = self.node.owner.state()
         m = self.node.machine
         self.initial = QRectF(m.x, m.y, m.width, m.height)
         event.accept()
 
     def mouseMoveEvent(self, event):
-        if not getattr(self,"_resizing",False):
-            event.accept();return
+        if not getattr(self, "_resizing", False):
+            event.accept()
+            return
         point = event.scenePos()
         if self.node.owner.snap.isChecked():
             point = QPointF(round(point.x() / GRID) * GRID, round(point.y() / GRID) * GRID)
@@ -130,7 +132,7 @@ class ResizeHandle(QGraphicsRectItem):
         event.accept()
 
     def mouseReleaseEvent(self, event):
-        self._resizing=False
+        self._resizing = False
         self.node.owner.record(self.before, "マシンのサイズ変更")
         event.accept()
 
@@ -205,9 +207,12 @@ class MachineNode(QGraphicsObject):
             search_match=getattr(self, "search_match", False)
             or self.machine.uid in getattr(self.owner, "_highlight_uids", set()),
         )
-        if (self.machine.analysis or {}).get("quality_issues") or self.machine.match_method=="review":
+        if (self.machine.analysis or {}).get(
+            "quality_issues"
+        ) or self.machine.match_method == "review":
             painter.save()
             from .theme import tokens
+
             painter.setPen(QPen(QColor(tokens()["danger"]), 2))
             painter.drawText(
                 self.boundingRect().adjusted(0, 12, -6, 0),
@@ -279,6 +284,7 @@ class FloorView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
         from .theme import tokens
+
         self.setBackgroundBrush(QColor(tokens()["canvas"]))
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
@@ -347,7 +353,9 @@ class FloorView(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if getattr(self.owner, "_fullscreen_transition", False) or getattr(self.owner,"_theme_transition",False):
+        if getattr(self.owner, "_fullscreen_transition", False) or getattr(
+            self.owner, "_theme_transition", False
+        ):
             return
         if self.owner.presentation["mode"] == "list" and hasattr(self.owner, "nodes"):
             self.owner.apply_presentation()
@@ -370,7 +378,7 @@ class FloorView(QGraphicsView):
         super().drawBackground(painter, rect)
         if self.transform().m11() < 0.3:
             return
-        painter.setPen(QPen(QColor(__import__("prize_swap.theme",fromlist=["tokens"]).tokens()["grid"]), 0))
+        painter.setPen(QPen(QColor(theme_tokens()["grid"]), 0))
         step = GRID
         left, top = int(rect.left()) // step * step, int(rect.top()) // step * step
         # Limit visible-grid work; normal viewports require only a few thousand dots.
@@ -451,6 +459,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         layout.addWidget(self.view, 1)
         self.nodes = {}
         from .theme import manager
+
         manager().about_to_change.connect(self.theme_changing)
         manager().changed.connect(self.theme_changed)
         for key, callback in [
@@ -480,17 +489,24 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 self.info.setText(f"自動保存を復元できません：{exc}")
 
     def theme_changing(self):
-        if hasattr(self,"view"):
-            self._theme_camera=(self.view.transform(),self.view.mapToScene(self.view.viewport().rect().center()))
-            self._theme_transition=True
+        if hasattr(self, "view"):
+            self._theme_camera = (
+                self.view.transform(),
+                self.view.mapToScene(self.view.viewport().rect().center()),
+            )
+            self._theme_transition = True
 
-    def theme_changed(self,*_):
+    def theme_changed(self, *_):
         from .theme import tokens
+
         self.view.setBackgroundBrush(QColor(tokens()["canvas"]))
-        for node in self.nodes.values():node.update()
-        if hasattr(self,"_theme_camera"):
-            transform,center=self._theme_camera;self.view.setTransform(transform);self.view.centerOn(center)
-        self._theme_transition=False
+        for node in self.nodes.values():
+            node.update()
+        if hasattr(self, "_theme_camera"):
+            transform, center = self._theme_camera
+            self.view.setTransform(transform)
+            self.view.centerOn(center)
+        self._theme_transition = False
         self.view.viewport().update()
         self.timer.start(800)
 
@@ -512,7 +528,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         from .sales_analysis import apply_snapshot
 
         from .machine_matching import prepare_references
-        if self.number_references:prepare_references(self.machines,self.number_references)
+
+        if self.number_references:
+            prepare_references(self.machines, self.number_references)
         apply_snapshot(self.machines, self.analysis_state)
         result = {}
         for p in self.products():
@@ -527,7 +545,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def state(self):
         return dict(
             version=3,
-            theme_mode=__import__("prize_swap.theme",fromlist=["manager"]).manager().mode,
+            theme_mode=theme_manager().mode,
             number_references=deepcopy(self.number_references),
             performance_history=deepcopy(self.performance_history),
             analysis_settings=deepcopy(self.analysis_settings),
@@ -554,8 +572,10 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         from .sales_analysis import validate_snapshot
 
         from .theme import manager
-        if "theme_mode" in state and not keep_history:manager().set_mode(state["theme_mode"],persist=False)
-        self.number_references=deepcopy(state.get("number_references", []))
+
+        if "theme_mode" in state and not keep_history:
+            manager().set_mode(state["theme_mode"], persist=False)
+        self.number_references = deepcopy(state.get("number_references", []))
         self.analysis_state = deepcopy(validate_snapshot(state.get("sales_analysis")))
         from .performance_history import validate_history
 
@@ -808,7 +828,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         if m.uid in self.overlaps:
             status += " / 重なり"
         methods = (
-            "／".join(dict.fromkeys(p.machine_methods.get(machine_key(m)) or "未設定" for p in plans))
+            "／".join(
+                dict.fromkeys(p.machine_methods.get(machine_key(m)) or "未設定" for p in plans)
+            )
             if self.show_methods.isChecked()
             else ""
         )
@@ -953,7 +975,10 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
     def add_machine(self, machine):
         validate_machines([asdict(m) for m in self.machines] + [asdict(machine)])
-        if machine_key(machine) and any(machine_key(m)==machine_key(machine) for m in self.machines):raise AppError("同じマシン番号が登録済みです。")
+        if machine_key(machine) and any(
+            machine_key(m) == machine_key(machine) for m in self.machines
+        ):
+            raise AppError("同じマシン番号が登録済みです。")
         before = self.state()
         self.initialized = True
         self.machines.append(machine)
@@ -970,7 +995,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         number = QLineEdit()
         side = QComboBox()
         side.addItems(["指定なし", "左", "右"])
-        initial_number=machine_key(machine)
+        initial_number = machine_key(machine)
         match = re.fullmatch(r"(\d+)([左右]?)", initial_number)
         if match:
             number.setText(match[1])
@@ -1027,9 +1052,13 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 installation = parse_date(installed.text())
                 if installed.text().strip() and installation is None:
                     raise AppError("設置日を日付形式で入力してください。")
-                if initial_number!=value:
-                    machine.number=value;machine.number_origin="direct";machine.manual_number=None;machine.resolved_number="";machine.direct_number_raw=value
-                machine.kind, machine.product = kind.currentText(),product.text()
+                if initial_number != value:
+                    machine.number = value
+                    machine.number_origin = "direct"
+                    machine.manual_number = None
+                    machine.resolved_number = ""
+                    machine.direct_number_raw = value
+                machine.kind, machine.product = kind.currentText(), product.text()
                 machine.sales, machine.average, machine.ratio = values
                 machine.ratio_from_excel = bool(ratio_input.text().strip())
                 machine.installed_on = installation.isoformat() if installation else None
@@ -1054,9 +1083,16 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         updated = deepcopy(old)
         if not self.machine_dialog(updated, "マシン編集"):
             return
-        if updated.number!=old.number:
-            updated.resolved_number="";updated.manual_number=None;updated.number_origin="direct";updated.direct_number_raw=updated.number
-        if machine_key(old) and machine_key(old) != machine_key(updated) and self.related({machine_key(old)}):
+        if updated.number != old.number:
+            updated.resolved_number = ""
+            updated.manual_number = None
+            updated.number_origin = "direct"
+            updated.direct_number_raw = updated.number
+        if (
+            machine_key(old)
+            and machine_key(old) != machine_key(updated)
+            and self.related({machine_key(old)})
+        ):
             QMessageBox.warning(
                 self,
                 "入替予定との整合性",
@@ -1154,9 +1190,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.record(before, "マシン整列")
 
     def import_path(self, path, preserve=False):
-        machines, warnings, references = import_layout(path,with_references=True)
+        machines, warnings, references = import_layout(path, with_references=True)
         before = self.state()
-        self.number_references=references
+        self.number_references = references
         self.initialized = True
         self.source = str(path)
         self.loaded_at = datetime.now().astimezone().isoformat(timespec="minutes")
@@ -1194,7 +1230,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                         "limit",
                         "operation_method",
                         "reference_average",
-                        "reference_number", "reference_warning", "number_origin", "layout_loaded_at", "direct_number_raw",
+                        "reference_number",
+                        "reference_warning",
+                        "number_origin",
+                        "layout_loaded_at",
+                        "direct_number_raw",
                     ):
                         setattr(m, field, getattr(fresh, field))
         self.rebuild()

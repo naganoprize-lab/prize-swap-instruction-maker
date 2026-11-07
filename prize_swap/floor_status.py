@@ -243,7 +243,7 @@ def ratio(machine):
         reference = reference_average(machine)
         if average is None or reference is None:
             # Preserve a valid stored layout ratio; do not invent a new baseline.
-            return machine.ratio if machine.ratio is not None and machine.ratio>=0 else None
+            return machine.ratio if machine.ratio is not None and machine.ratio >= 0 else None
         value = average / reference * 100
         return value if math.isfinite(value) else None
     if machine.ratio is not None or machine.ratio_from_excel:

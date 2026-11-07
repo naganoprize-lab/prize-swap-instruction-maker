@@ -176,9 +176,11 @@ class MethodsCombo(QComboBox):
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setMinimumWidth(66)
             label.setWordWrap(True)
-            label.setProperty("metricRole",field)
+            label.setProperty("metricRole", field)
             if bold:
-                font=label.font();font.setBold(True);label.setFont(font)
+                font = label.font()
+                font.setBold(True)
+                label.setFont(font)
             self.grid.addWidget(label, row, column)
             result[field] = label
         return result
@@ -286,7 +288,8 @@ class MethodsCombo(QComboBox):
         status = allocation_status(product)
         self.status.setText(status.message)
         from .theme import tone
-        tone(self.status,"danger" if status.excess else "normal")
+
+        tone(self.status, "danger" if status.excess else "normal")
         totals = {r.method: r for r in booth_totals(product)}
         for name, (check, spin) in self.rows.items():
             row = totals.get(name)

@@ -3,26 +3,66 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QEvent, QItemSelectionModel, QSortFilterProxyModel, Qt, QStandardPaths
+from PySide6.QtCore import (
+    QDate,
+    QEvent,
+    QItemSelectionModel,
+    QSortFilterProxyModel,
+    Qt,
+    QStandardPaths,
+)
 from PySide6.QtGui import QColor, QTextCharFormat
-from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrintPreviewDialog, QPrintPreviewWidget, QPrinter
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEdit,
-    QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSpinBox, QTableView, QTabWidget, QTableWidget, QTableWidgetItem, QToolButton,
-    QVBoxLayout, QWidget)
+from PySide6.QtPrintSupport import (
+    QAbstractPrintDialog,
+    QPrintDialog,
+    QPrintPreviewDialog,
+    QPrintPreviewWidget,
+    QPrinter,
+)
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QComboBox,
+    QDateEdit,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QTableView,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .core import AppError, METHODS, for_day, load_session, read_products, save_session
 from .exporter import export_excel
 from .printing import configured_printer, plan_pages, render_document, save_pdf
 from .table import COLUMNS, ProductDelegate, ProductModel
-from .methods import allocation_status, format_allocations, aggregate_booths, total_booths, booth_value, BoothTotal
+from .methods import (
+    allocation_status,
+    format_allocations,
+    aggregate_booths,
+    total_booths,
+    booth_value,
+    BoothTotal,
+)
 from .booth_style import METRIC_COLORS
 from .floor import FloorWidget
 from .floor_data import validate_state
 from .machine_matching import machine_key
 from .labels_data import LabelStore
 from .labels_ui import LabelsWidget
-
 
 
 def button(text, callback, primary=False):
@@ -52,19 +92,27 @@ class ProductFilter(QSortFilterProxyModel):
     def filterAcceptsRow(self, row, parent):
         p = self.sourceModel().products[row]
         text = " ".join([p.name, p.maker, *p.machines, format_allocations(p)]).casefold()
-        return (not self.query or self.query in text) and (self.mode != 1 or p.included) and (self.mode != 2 or p.priority)
+        return (
+            (not self.query or self.query in text)
+            and (self.mode != 1 or p.included)
+            and (self.mode != 2 or p.priority)
+        )
 
     def lessThan(self, left, right):
-        column=left.column()
-        if column in (1,4,5):
+        column = left.column()
+        if column in (1, 4, 5):
+
             def numeric_key(index):
-                value=index.data(Qt.ItemDataRole.EditRole)
-                return (value in (None,""),float(value) if value not in (None,"") else 0)
-            return numeric_key(left)<numeric_key(right)
-        if column in (0,8):
-            attr="included" if column==0 else "priority"
-            return getattr(self.sourceModel().products[left.row()],attr)<getattr(self.sourceModel().products[right.row()],attr)
-        return str(left.data() or "").casefold()<str(right.data() or "").casefold()
+                value = index.data(Qt.ItemDataRole.EditRole)
+                return (value in (None, ""), float(value) if value not in (None, "") else 0)
+
+            return numeric_key(left) < numeric_key(right)
+        if column in (0, 8):
+            attr = "included" if column == 0 else "priority"
+            return getattr(self.sourceModel().products[left.row()], attr) < getattr(
+                self.sourceModel().products[right.row()], attr
+            )
+        return str(left.data() or "").casefold() < str(right.data() or "").casefold()
 
 
 class Window(QMainWindow):
@@ -74,8 +122,19 @@ class Window(QMainWindow):
         self.setMinimumSize(1100, 700)
         self.resize(1500, 900)
         from .theme import manager
-        self.themes=manager()
-        self.appearance_path = (Path(layout_storage).parent / "appearance.json") if layout_storage else Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)) / "PrizeSwapInstructionMaker" / "appearance.json"
+
+        self.themes = manager()
+        self.appearance_path = (
+            (Path(layout_storage).parent / "appearance.json")
+            if layout_storage
+            else Path(
+                QStandardPaths.writableLocation(
+                    QStandardPaths.StandardLocation.AppLocalDataLocation
+                )
+            )
+            / "PrizeSwapInstructionMaker"
+            / "appearance.json"
+        )
         self.themes.load(self.appearance_path)
         self.products, self.visible = [], []
         self.source = ""
@@ -93,14 +152,27 @@ class Window(QMainWindow):
         title.setObjectName("title")
         title_row.addWidget(title)
         title_row.addStretch()
-        self.print_buttons=[]
-        for label,callback,primary in (("印刷プレビュー",self.preview,False),("直接印刷",self.print_direct,True),("PDF保存",self.export_pdf,False)):
-            b=button(label,callback,primary);title_row.addWidget(b);self.print_buttons.append(b)
+        self.print_buttons = []
+        for label, callback, primary in (
+            ("印刷プレビュー", self.preview, False),
+            ("直接印刷", self.print_direct, True),
+            ("PDF保存", self.export_pdf, False),
+        ):
+            b = button(label, callback, primary)
+            title_row.addWidget(b)
+            self.print_buttons.append(b)
         from .theme import ThemeMenu
-        self.theme_button=QToolButton();self.theme_button.setFixedWidth(150);self.theme_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.theme_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);self.theme_button.setMenu(ThemeMenu(self.theme_button))
+
+        self.theme_button = QToolButton()
+        self.theme_button.setFixedWidth(150)
+        self.theme_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.theme_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.theme_button.setMenu(ThemeMenu(self.theme_button))
         title_row.addWidget(self.theme_button)
-        self.settings_button=QToolButton();self.settings_button.setText("設定");self.settings_button.clicked.connect(self.show_settings);title_row.addWidget(self.settings_button)
+        self.settings_button = QToolButton()
+        self.settings_button.setText("設定")
+        self.settings_button.clicked.connect(self.show_settings)
+        title_row.addWidget(self.settings_button)
         self.themes.changed.connect(self.theme_changed)
         head.addLayout(title_row)
         top = QHBoxLayout()
@@ -142,7 +214,9 @@ class Window(QMainWindow):
         self.floor.product_edited.connect(self.mark_dirty)
         self.floor.message.connect(lambda message: self.statusBar().showMessage(message, 15000))
         self.tabs.addTab(self.floor, "売り場レイアウト")
-        self.labels = LabelsWidget(lambda: self.products, self.selected_day, lambda: [self.source, self.floor.source], self)
+        self.labels = LabelsWidget(
+            lambda: self.products, self.selected_day, lambda: [self.source, self.floor.source], self
+        )
         self.labels.day_requested.connect(self.day.setDate)
         self.labels.edited.connect(self.mark_dirty)
         self.labels.message.connect(lambda text: self.statusBar().showMessage(text, 10000))
@@ -175,7 +249,9 @@ class Window(QMainWindow):
         self.model.edited.connect(self.floor.sync)
         self.model.edited.connect(self.labels.sync)
         self.model.edited.connect(self.update_allocation_notice)
-        self.model.allocation_warning.connect(lambda text: self.statusBar().showMessage(text, 15000))
+        self.model.allocation_warning.connect(
+            lambda text: self.statusBar().showMessage(text, 15000)
+        )
         self.model.invalid.connect(lambda message: self.statusBar().showMessage(message, 10000))
         self.proxy = ProductFilter(self)
         self.proxy.setSourceModel(self.model)
@@ -185,14 +261,21 @@ class Window(QMainWindow):
         self.table = QTableView()
         self.table.setModel(self.proxy)
         self.table.setSortingEnabled(True)
-        self.table.sortByColumn(1,Qt.SortOrder.AscendingOrder)
+        self.table.sortByColumn(1, Qt.SortOrder.AscendingOrder)
         self.table.selectionModel().selectionChanged.connect(self.update_allocation_notice)
         self.delegate = ProductDelegate(self.table)
-        self.delegate.machine_options = lambda: sorted(machine_key(m) for m in self.floor.machines if machine_key(m))
+        self.delegate.machine_options = lambda: sorted(
+            machine_key(m) for m in self.floor.machines if machine_key(m)
+        )
         self.table.setItemDelegate(self.delegate)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.CurrentChanged | QAbstractItemView.EditTrigger.SelectedClicked | QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.CurrentChanged
+            | QAbstractItemView.EditTrigger.SelectedClicked
+            | QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+        )
         self.table.setMouseTracking(True)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(False)
@@ -205,28 +288,32 @@ class Window(QMainWindow):
             self.table.setColumnWidth(i, width)
         self.table.viewport().installEventFilter(self)
         center.addWidget(self.table, 1)
-        hint = QLabel("セルで直接編集 / マシン番号は複数可 / 印刷は検索に関係なく選択日の出力対象すべて")
+        hint = QLabel(
+            "セルで直接編集 / マシン番号は複数可 / 印刷は検索に関係なく選択日の出力対象すべて"
+        )
         self.allocation_notice = hint
         self.default_table_hint = hint.text()
         hint.setObjectName("muted")
         hint.setWordWrap(True)
-        hint_row=QHBoxLayout()
-        hint_row.addWidget(hint,1)
-        self.summary_toggle=QToolButton()
+        hint_row = QHBoxLayout()
+        hint_row.addWidget(hint, 1)
+        self.summary_toggle = QToolButton()
         self.summary_toggle.setText("ブース予定集計 ▾")
         self.summary_toggle.setCheckable(True)
         self.summary_toggle.setMaximumHeight(22)
         hint_row.addWidget(self.summary_toggle)
         center.addLayout(hint_row)
-        self.booth_summary=QWidget()
-        summary_layout=QVBoxLayout(self.booth_summary)
-        summary_layout.setContentsMargins(0,0,0,0)
-        self.summary_scope=QComboBox()
+        self.booth_summary = QWidget()
+        summary_layout = QVBoxLayout(self.booth_summary)
+        summary_layout.setContentsMargins(0, 0, 0, 0)
+        self.summary_scope = QComboBox()
         self.summary_scope.addItems(["選択日の出力対象全商品", "選択商品"])
         self.summary_scope.currentIndexChanged.connect(self.update_booth_summary)
         summary_layout.addWidget(self.summary_scope)
-        self.summary_table=QTableWidget(0,5)
-        self.summary_table.setHorizontalHeaderLabels(["運営方法","予定数","割当済み","未割当","超過"])
+        self.summary_table = QTableWidget(0, 5)
+        self.summary_table.setHorizontalHeaderLabels(
+            ["運営方法", "予定数", "割当済み", "未割当", "超過"]
+        )
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.summary_table.setMaximumHeight(170)
@@ -252,8 +339,8 @@ class Window(QMainWindow):
         self.layout_choice.currentIndexChanged.connect(self.mark_dirty)
         instruction_layout.addWidget(self.layout_choice)
         self.print_mode = QComboBox()
-        for label,key in (("自動最適化","auto"),("標準","standard"),("コンパクト","compact")):
-            self.print_mode.addItem(label,key)
+        for label, key in (("自動最適化", "auto"), ("標準", "standard"), ("コンパクト", "compact")):
+            self.print_mode.addItem(label, key)
         self.print_mode.currentIndexChanged.connect(self.mark_dirty)
         instruction_layout.addWidget(self.print_mode)
         instruction_layout.addWidget(QLabel("片側上限"))
@@ -261,71 +348,135 @@ class Window(QMainWindow):
         self.page_rows.setRange(1, 50)
         self.page_rows.setValue(20)
         self.page_rows.setSuffix(" 商品")
-        self.page_rows.setToolTip("PDF・直接印刷：片側の最大商品数。Excel出力：従来のマシン行数の目安。")
+        self.page_rows.setToolTip(
+            "PDF・直接印刷：片側の最大商品数。Excel出力：従来のマシン行数の目安。"
+        )
         self.page_rows.valueChanged.connect(self.mark_dirty)
         instruction_layout.addWidget(self.page_rows)
         bottom.addWidget(self.instruction_settings)
-        self.tabs.currentChanged.connect(lambda *_: self.instruction_settings.setVisible(self.tabs.currentIndex() == 0))
+        self.tabs.currentChanged.connect(
+            lambda *_: self.instruction_settings.setVisible(self.tabs.currentIndex() == 0)
+        )
         bottom_layout.addLayout(bottom)
         self.statusBar().showMessage("準備完了 — Excelを読み込んでください。")
         from .modern_ui import build_shell
-        build_shell(self,outer,header,footer)
+
+        build_shell(self, outer, header, footer)
         self.themes.load(self.appearance_path)
         self.theme_changed()
 
     def show_settings(self):
-        if hasattr(self,"settings_page"):self.tabs.setCurrentWidget(self.settings_page)
+        if hasattr(self, "settings_page"):
+            self.tabs.setCurrentWidget(self.settings_page)
         else:
             from .theme import appearance_dialog
+
             appearance_dialog(self)
 
-    def theme_changed(self,*_):
-        from .theme import MODES,line_icon
-        self.theme_button.setText("テーマ："+MODES[self.themes.mode])
-        self.theme_button.setIcon(line_icon({"system":"monitor","light":"sun","dark":"moon"}[self.themes.mode]))
-        if hasattr(self,"model"):
+    def theme_changed(self, *_):
+        from .theme import MODES, line_icon
+
+        self.theme_button.setText("テーマ：" + MODES[self.themes.mode])
+        self.theme_button.setIcon(
+            line_icon({"system": "monitor", "light": "sun", "dark": "moon"}[self.themes.mode])
+        )
+        if hasattr(self, "model"):
             from PySide6.QtCore import QModelIndex
-            if self.model.rowCount():self.model.dataChanged.emit(self.model.index(0,0),self.model.index(self.model.rowCount()-1,self.model.columnCount()-1),[])
-        if hasattr(self,"summary_table"):self.update_booth_summary()
-        if hasattr(self,"labels"):self.labels.table.viewport().update() if hasattr(self.labels,"table") else self.labels.update()
 
-    def page_changed(self,*_):
-        if not hasattr(self,"pages"):return
-        key=next((name for name,page in self.pages.items() if page is self.tabs.currentWidget()),None)
-        if key is None:return
+            if self.model.rowCount():
+                self.model.dataChanged.emit(
+                    self.model.index(0, 0),
+                    self.model.index(self.model.rowCount() - 1, self.model.columnCount() - 1),
+                    [],
+                )
+        if hasattr(self, "summary_table"):
+            self.update_booth_summary()
+        if hasattr(self, "labels"):
+            (
+                self.labels.table.viewport().update()
+                if hasattr(self.labels, "table")
+                else self.labels.update()
+            )
+
+    def page_changed(self, *_):
+        if not hasattr(self, "pages"):
+            return
+        key = next(
+            (name for name, page in self.pages.items() if page is self.tabs.currentWidget()), None
+        )
+        if key is None:
+            return
         self.navigation.select(key)
-        self.notice.setVisible(key=="instructions")
-        if key=="floor":self.floor.dashboard.dates.hide()
-        self.page_title.setText({"instructions":"入替指示書","floor":"売り場レイアウト","labels":"入荷ラベル","dashboard":"ダッシュボード","settings":"設定"}[key])
-        self.page_search.setVisible(key in ("instructions","floor","dashboard"))
+        self.notice.setVisible(key == "instructions")
+        if key == "floor":
+            self.floor.dashboard.dates.hide()
+        self.page_title.setText(
+            {
+                "instructions": "入替指示書",
+                "floor": "売り場レイアウト",
+                "labels": "入荷ラベル",
+                "dashboard": "ダッシュボード",
+                "settings": "設定",
+            }[key]
+        )
+        self.page_search.setVisible(key in ("instructions", "floor", "dashboard"))
         self.sync_page_search()
-        for b in self.print_buttons:b.setEnabled(key in ("instructions","floor","labels"))
+        for b in self.print_buttons:
+            b.setEnabled(key in ("instructions", "floor", "labels"))
         self.refresh_page_metadata()
-        if key=="dashboard":self.dashboard_page.refresh()
+        if key == "dashboard":
+            self.dashboard_page.refresh()
 
-    def search_page(self,text):
-        if self.tabs.currentWidget() is self.instruction_page:self.search.setText(text)
-        elif self.tabs.currentWidget() is self.floor:self.floor.floor_search.setText(text)
+    def search_page(self, text):
+        if self.tabs.currentWidget() is self.instruction_page:
+            self.search.setText(text)
+        elif self.tabs.currentWidget() is self.floor:
+            self.floor.floor_search.setText(text)
         elif self.tabs.currentWidget() is self.dashboard_page:
-            self.tabs.setCurrentWidget(self.floor);self.floor.floor_search.setText(text)
+            self.tabs.setCurrentWidget(self.floor)
+            self.floor.floor_search.setText(text)
 
-    def sync_page_search(self,*_):
-        if not hasattr(self,"page_search"):return
-        widget=self.tabs.currentWidget()
-        text=self.search.text() if widget is self.instruction_page else self.floor.floor_search.text() if widget is self.floor else ""
-        self.page_search.blockSignals(True);self.page_search.setText(text);self.page_search.blockSignals(False)
+    def sync_page_search(self, *_):
+        if not hasattr(self, "page_search"):
+            return
+        widget = self.tabs.currentWidget()
+        text = (
+            self.search.text()
+            if widget is self.instruction_page
+            else self.floor.floor_search.text() if widget is self.floor else ""
+        )
+        self.page_search.blockSignals(True)
+        self.page_search.setText(text)
+        self.page_search.blockSignals(False)
 
-    def refresh_page_metadata(self,*_):
-        if not hasattr(self,"page_metadata"):return
+    def refresh_page_metadata(self, *_):
+        if not hasattr(self, "page_metadata"):
+            return
         from .performance_validation import period_text
-        data=self.floor.analysis_state
-        self.page_metadata.setText(period_text(data)+"\n更新："+(data["loaded_at"].replace("T"," ")[:16] or "未読込"))
-        self.page_metadata.setToolTip(self.floor.analysis_summary_text())
-        if self.tabs.currentWidget() is self.dashboard_page:self.dashboard_page.refresh()
 
-    def resizeEvent(self,event):
+        data = self.floor.analysis_state
+        self.page_metadata.setText(
+            period_text(data) + "\n更新：" + (data["loaded_at"].replace("T", " ")[:16] or "未読込")
+        )
+        self.page_metadata.setToolTip(self.floor.analysis_summary_text())
+        if self.tabs.currentWidget() is self.dashboard_page:
+            self.dashboard_page.refresh()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # On high-DPI Windows desktops the available logical height may be
+        # smaller than 700px. Keep the action/footer area inside that work area.
+        if QApplication.platformName() == "windows":
+            available = self.screen().availableGeometry()
+            width = max(900, available.width() - 20)
+            height = max(560, available.height() - 50)
+            self.setMinimumSize(min(1100, width), min(700, height))
+            self.resize(min(self.width(), width), min(self.height(), height))
+
+    def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self,"navigation") and not self.navigation.manual:self.navigation.set_compact(self.width()<1280)
+        if hasattr(self, "navigation") and not self.navigation.manual:
+            self.navigation.set_compact(self.width() < 1280)
 
     def eventFilter(self, obj, event):
         if obj is self.table.viewport() and event.type() == QEvent.Type.MouseButtonRelease:
@@ -351,9 +502,13 @@ class Window(QMainWindow):
         self.update_allocation_notice()
 
     def update_count(self):
-        self.count.setText(f"{len(self.visible)}件 ／ 出力 {sum(p.included for p in self.visible)}件")
+        self.count.setText(
+            f"{len(self.visible)}件 ／ 出力 {sum(p.included for p in self.visible)}件"
+        )
         if hasattr(self, "proxy"):
-            self.statusBar().showMessage(f"表示 {self.proxy.rowCount()}件 / 選択日 {len(self.visible)}件　印刷は出力チェックのある商品が対象です。")
+            self.statusBar().showMessage(
+                f"表示 {self.proxy.rowCount()}件 / 選択日 {len(self.visible)}件　印刷は出力チェックのある商品が対象です。"
+            )
 
     def update_allocation_notice(self, *_):
         if not hasattr(self, "allocation_notice"):
@@ -371,45 +526,73 @@ class Window(QMainWindow):
             text = self.default_table_hint
         self.allocation_notice.setText(text)
         from .theme import tone
-        tone(self.allocation_notice,"danger" if excess else "muted")
+
+        tone(self.allocation_notice, "danger" if excess else "muted")
         self.update_booth_summary()
 
     def update_booth_summary(self, *_):
-        if not hasattr(self,"summary_table"):
+        if not hasattr(self, "summary_table"):
             return
-        products=self.selected_products() if self.summary_scope.currentIndex() else self.visible
-        active=aggregate_booths(products)
-        mapping={r.method:r for r in active}
-        totals=[mapping.get(name,BoothTotal(name,0,0,0,0)) for name in dict.fromkeys([*METHODS,*mapping])]
+        products = self.selected_products() if self.summary_scope.currentIndex() else self.visible
+        active = aggregate_booths(products)
+        mapping = {r.method: r for r in active}
+        totals = [
+            mapping.get(name, BoothTotal(name, 0, 0, 0, 0))
+            for name in dict.fromkeys([*METHODS, *mapping])
+        ]
         totals.append(total_booths(active))
         self.summary_table.setRowCount(len(totals))
-        for row,total in enumerate(totals):
-            for col,field in enumerate(["method","planned","assigned","unassigned","excess"]):
-                value=total.method if col==0 else booth_value(total,field)
-                item=QTableWidgetItem(value)
+        for row, total in enumerate(totals):
+            for col, field in enumerate(["method", "planned", "assigned", "unassigned", "excess"]):
+                value = total.method if col == 0 else booth_value(total, field)
+                item = QTableWidgetItem(value)
                 if field in METRIC_COLORS:
                     from .theme import metric_colors
-                    background,foreground=metric_colors(field)
+
+                    background, foreground = metric_colors(field)
                     item.setBackground(QColor(background))
                     item.setForeground(QColor(foreground))
-                if total.method=="合計":
-                    font=item.font();font.setBold(True);item.setFont(font)
+                if total.method == "合計":
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
                 if total.unknown:
-                    item.setToolTip(f"予定未設定の方法が{total.unknown}件あります。既知の予定数の差分だけを集計します。")
-                self.summary_table.setItem(row,col,item)
+                    item.setToolTip(
+                        f"予定未設定の方法が{total.unknown}件あります。既知の予定数の差分だけを集計します。"
+                    )
+                self.summary_table.setItem(row, col, item)
 
     def confirm_method_allocations(self):
-        problems = [f"{p.name}：{allocation_status(p).message}" for p in self.visible if p.included and allocation_status(p).excess]
+        problems = [
+            f"{p.name}：{allocation_status(p).message}"
+            for p in self.visible
+            if p.included and allocation_status(p).excess
+        ]
         if not problems:
             return True
-        return QMessageBox.question(self, "運営方法の台数を確認", "予定ブース数を超える実際の割当があります。\n" + "\n".join(problems) + "\n設定を保持したまま出力を続けますか？") == QMessageBox.StandardButton.Yes
+        return (
+            QMessageBox.question(
+                self,
+                "運営方法の台数を確認",
+                "予定ブース数を超える実際の割当があります。\n"
+                + "\n".join(problems)
+                + "\n設定を保持したまま出力を続けますか？",
+            )
+            == QMessageBox.StandardButton.Yes
+        )
 
     def selected_products(self):
-        return [self.model.products[self.proxy.mapToSource(index).row()] for index in self.table.selectionModel().selectedRows()]
+        return [
+            self.model.products[self.proxy.mapToSource(index).row()]
+            for index in self.table.selectionModel().selectedRows()
+        ]
 
     def set_all(self, included):
         # Snapshot indexes first: changing inclusion may immediately filter rows.
-        products = [self.model.products[self.proxy.mapToSource(self.proxy.index(r, 0)).row()] for r in range(self.proxy.rowCount())]
+        products = [
+            self.model.products[self.proxy.mapToSource(self.proxy.index(r, 0)).row()]
+            for r in range(self.proxy.rowCount())
+        ]
         for p in products:
             p.included = included
         if products:
@@ -418,7 +601,9 @@ class Window(QMainWindow):
 
     def move_products(self, direction):
         if self.search.text() or self.filter_choice.currentIndex():
-            self.statusBar().showMessage("並び順変更は検索・絞り込みを解除して行ってください。", 5000)
+            self.statusBar().showMessage(
+                "並び順変更は検索・絞り込みを解除して行ってください。", 5000
+            )
             return
         self.reorder_for_labels(self.selected_products(), direction)
 
@@ -439,7 +624,11 @@ class Window(QMainWindow):
         for row, p in enumerate(self.model.products):
             if id(p) in selected:
                 index = self.proxy.mapFromSource(self.model.index(row, 0))
-                self.table.selectionModel().select(index, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+                self.table.selectionModel().select(
+                    index,
+                    QItemSelectionModel.SelectionFlag.Select
+                    | QItemSelectionModel.SelectionFlag.Rows,
+                )
 
     def print_products(self):
         self.table.setFocus()
@@ -449,16 +638,31 @@ class Window(QMainWindow):
             raise AppError("運営方法の台数を確認してから再実行してください。")
         if self.floor.initialized:
             registered = {machine_key(m) for m in self.floor.machines if machine_key(m)}
-            missing = sorted({n for p in self.visible if p.included for n in p.machines if n not in registered})
+            missing = sorted(
+                {n for p in self.visible if p.included for n in p.machines if n not in registered}
+            )
             if missing:
-                answer = QMessageBox.question(self, "入替予定のマシン番号を確認", "配置にないマシン番号が入替予定に残っています：\n" + "、".join(missing) + "\n印刷・保存を続けますか？")
+                answer = QMessageBox.question(
+                    self,
+                    "入替予定のマシン番号を確認",
+                    "配置にないマシン番号が入替予定に残っています：\n"
+                    + "、".join(missing)
+                    + "\n印刷・保存を続けますか？",
+                )
                 if answer != QMessageBox.StandardButton.Yes:
                     raise AppError("マシン番号を確認してから再実行してください。")
         return list(self.visible)
 
     def paint_printer(self, printer):
         try:
-            plan = render_document(printer, list(self.visible), self.selected_day(), self.page_rows.value(), self.layout_name(), self.print_mode.currentData())
+            plan = render_document(
+                printer,
+                list(self.visible),
+                self.selected_day(),
+                self.page_rows.value(),
+                self.layout_name(),
+                self.print_mode.currentData(),
+            )
             self.statusBar().showMessage(plan.reason, 15000)
             return plan
         except Exception as exc:
@@ -475,22 +679,32 @@ class Window(QMainWindow):
             dialog = QPrintPreviewDialog(printer, self)
             dialog.setWindowTitle("印刷プレビュー — A4横向き")
             dialog.resize(1300, 850)
-            controls=QWidget(dialog)
-            controls_layout=QHBoxLayout(controls)
+            controls = QWidget(dialog)
+            controls_layout = QHBoxLayout(controls)
             controls_layout.addWidget(QLabel("印刷レイアウト"))
-            mode=QComboBox(controls)
-            for label,key in (("自動最適化","auto"),("標準（読みやすさ優先）","standard"),("コンパクト（用紙節約）","compact")):
-                mode.addItem(label,key)
+            mode = QComboBox(controls)
+            for label, key in (
+                ("自動最適化", "auto"),
+                ("標準（読みやすさ優先）", "standard"),
+                ("コンパクト（用紙節約）", "compact"),
+            ):
+                mode.addItem(label, key)
             mode.setCurrentIndex(self.print_mode.currentIndex())
             controls_layout.addWidget(mode)
-            info=QLabel();info.setWordWrap(True);controls_layout.addWidget(info,1)
-            dialog.layout().insertWidget(0,controls)
+            info = QLabel()
+            info.setWordWrap(True)
+            controls_layout.addWidget(info, 1)
+            dialog.layout().insertWidget(0, controls)
+
             def paint(target):
-                plan=self.paint_printer(target)
-                if plan:info.setText(plan.reason)
+                plan = self.paint_printer(target)
+                if plan:
+                    info.setText(plan.reason)
+
             def change(index):
                 self.print_mode.setCurrentIndex(index)
                 dialog.findChild(QPrintPreviewWidget).updatePreview()
+
             mode.currentIndexChanged.connect(change)
             dialog.paintRequested.connect(paint)
             dialog.exec()
@@ -506,13 +720,23 @@ class Window(QMainWindow):
             self.print_products()
             printer = configured_printer()
             area = printer.pageRect(QPrinter.Unit.Point)
-            plan = plan_pages(self.visible, area.width(), area.height(), self.page_rows.value(), self.layout_name(), self.print_mode.currentData())
+            plan = plan_pages(
+                self.visible,
+                area.width(),
+                area.height(),
+                self.page_rows.value(),
+                self.layout_name(),
+                self.print_mode.currentData(),
+            )
             dialog = QPrintDialog(printer, self)
             dialog.setMinMax(1, len(plan.pages))
             dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, True)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 if self.paint_printer(printer):
-                    self.statusBar().showMessage("印刷ジョブを送信しました。実際の出力はプリンターで確認してください。", 10000)
+                    self.statusBar().showMessage(
+                        "印刷ジョブを送信しました。実際の出力はプリンターで確認してください。",
+                        10000,
+                    )
         except Exception as exc:
             self.error(exc)
 
@@ -525,10 +749,19 @@ class Window(QMainWindow):
             products = self.print_products()
             path = self.save_path("PDF保存", "PDF (*.pdf)", ".pdf")
             if path:
-                plan = save_pdf(path, products, self.selected_day(), self.page_rows.value(), self.layout_name(), self.source, self.print_mode.currentData())
+                plan = save_pdf(
+                    path,
+                    products,
+                    self.selected_day(),
+                    self.page_rows.value(),
+                    self.layout_name(),
+                    self.source,
+                    self.print_mode.currentData(),
+                )
                 self.statusBar().showMessage(f"PDFを保存しました：{path} {plan.reason}", 15000)
         except Exception as exc:
             self.error(exc)
+
     def mark_dirty(self, *_):
         self.dirty = True
 
@@ -536,7 +769,13 @@ class Window(QMainWindow):
         QMessageBox.warning(self, "処理できませんでした", str(exc))
 
     def confirm_discard(self):
-        return not self.dirty or QMessageBox.question(self, "編集中の内容", "未保存の編集内容があります。破棄して続けますか？") == QMessageBox.StandardButton.Yes
+        return (
+            not self.dirty
+            or QMessageBox.question(
+                self, "編集中の内容", "未保存の編集内容があります。破棄して続けますか？"
+            )
+            == QMessageBox.StandardButton.Yes
+        )
 
     def closeEvent(self, event):
         if self.confirm_discard():
@@ -556,9 +795,11 @@ class Window(QMainWindow):
     def update_dates(self):
         self.dates.clear()
         fmt = QTextCharFormat()
-        from .theme import analysis_color,contrast_text
-        calendar_bg=analysis_color("#DBEAFE")
-        fmt.setBackground(QColor(calendar_bg));fmt.setForeground(QColor(contrast_text(calendar_bg)))
+        from .theme import analysis_color, contrast_text
+
+        calendar_bg = analysis_color("#DBEAFE")
+        fmt.setBackground(QColor(calendar_bg))
+        fmt.setForeground(QColor(contrast_text(calendar_bg)))
         self.day.calendarWidget().setDateTextFormat(QDate(), QTextCharFormat())
         for day in sorted({p.day for p in self.products}):
             self.dates.addItem(day.isoformat())
@@ -584,11 +825,15 @@ class Window(QMainWindow):
                 self.day.setDate(QDate(first.year, first.month, first.day))
             self.refresh()
             self.dirty = False
-            self.notice.setText(f"読込 {len(products)}件 ／ 警告 {len(warnings)}件。重複行は保持します。")
+            self.notice.setText(
+                f"読込 {len(products)}件 ／ 警告 {len(warnings)}件。重複行は保持します。"
+            )
             if warnings:
                 dlg = QMessageBox(self)
                 dlg.setWindowTitle("読込時の確認事項")
-                dlg.setText(f"{len(warnings)}件の確認事項があります。「詳細を表示」で内容を確認できます。")
+                dlg.setText(
+                    f"{len(warnings)}件の確認事項があります。「詳細を表示」で内容を確認できます。"
+                )
                 dlg.setDetailedText("\n".join(warnings))
                 dlg.exec()
         except Exception as exc:
@@ -596,10 +841,16 @@ class Window(QMainWindow):
 
     def save_path(self, title, filter_, suffix):
         # QFileDialog performs the overwrite confirmation for the selected path.
-        path, _ = QFileDialog.getSaveFileName(self, title, f"入替指示書_{self.selected_day().isoformat()}{suffix}", filter_)
+        path, _ = QFileDialog.getSaveFileName(
+            self, title, f"入替指示書_{self.selected_day().isoformat()}{suffix}", filter_
+        )
         if path and not path.lower().endswith(suffix):
             path += suffix
-            if Path(path).exists() and QMessageBox.question(self, "上書き確認", f"{path}\nを上書きしますか？") != QMessageBox.StandardButton.Yes:
+            if (
+                Path(path).exists()
+                and QMessageBox.question(self, "上書き確認", f"{path}\nを上書きしますか？")
+                != QMessageBox.StandardButton.Yes
+            ):
                 return ""
         return path
 
@@ -607,7 +858,17 @@ class Window(QMainWindow):
         path = self.save_path("作業を一時保存", "JSON (*.json)", ".json")
         if path:
             try:
-                save_session(path, self.products, self.selected_day(), self.source, self.layout_name(), self.page_rows.value(), floor_layout=self.floor.state(), label_state=self.labels.state(), print_mode=self.print_mode.currentData())
+                save_session(
+                    path,
+                    self.products,
+                    self.selected_day(),
+                    self.source,
+                    self.layout_name(),
+                    self.page_rows.value(),
+                    floor_layout=self.floor.state(),
+                    label_state=self.labels.state(),
+                    print_mode=self.print_mode.currentData(),
+                )
                 self.dirty = False
                 self.statusBar().showMessage("一時保存しました。", 5000)
             except Exception as exc:
@@ -631,7 +892,9 @@ class Window(QMainWindow):
                 self.day.setDate(QDate(day.year, day.month, day.day))
                 self.layout_choice.setCurrentIndex(1 if data.get("layout") == "row" else 0)
                 self.page_rows.setValue(data.get("rows_per_page", 20))
-                self.print_mode.setCurrentIndex(self.print_mode.findData(data.get("print_mode","auto")))
+                self.print_mode.setCurrentIndex(
+                    self.print_mode.findData(data.get("print_mode", "auto"))
+                )
                 if "floor_layout" in data:
                     self.floor.restore(data["floor_layout"])
                     self.floor.schedule_save()
@@ -652,8 +915,17 @@ class Window(QMainWindow):
             try:
                 if self.floor.source and Path(path).resolve() == Path(self.floor.source).resolve():
                     raise AppError("元のレイアウトExcelには上書きできません。")
-                pages = export_excel(path, self.visible, self.selected_day(), self.source, self.page_rows.value(), self.layout_name())
-                QMessageBox.information(self, "出力完了", f"{pages}ページ分を出力しました。\n{path}")
+                pages = export_excel(
+                    path,
+                    self.visible,
+                    self.selected_day(),
+                    self.source,
+                    self.page_rows.value(),
+                    self.layout_name(),
+                )
+                QMessageBox.information(
+                    self, "出力完了", f"{pages}ページ分を出力しました。\n{path}"
+                )
             except Exception as exc:
                 self.error(exc)
 
@@ -661,6 +933,7 @@ class Window(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     from .fonts import initialize_fonts
+
     initialize_fonts()
     app.setApplicationName("PrizeSwapInstructionMaker")
     app.setStyle("Fusion")

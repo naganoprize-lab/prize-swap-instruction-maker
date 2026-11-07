@@ -4,7 +4,7 @@ import math
 import re
 import unicodedata
 from .analysis_settings import machine_type
-from .machine_matching import machine_key,display_identity
+from .machine_matching import machine_key, display_identity
 from PySide6.QtCore import QRectF
 from .core import AppError
 from .floor_status import ratio, days, COLOR_FILTERS
@@ -107,7 +107,8 @@ def matching_machines(machines, assignments, settings, reference, analysis_setti
                     machine_type(m, analysis_settings),
                     m.operation_method,
                     " ".join(
-                        p.machine_methods.get(machine_key(m), "") for p in assignments.get(machine_key(m), [])
+                        p.machine_methods.get(machine_key(m), "")
+                        for p in assignments.get(machine_key(m), [])
                     ),
                 )
             )

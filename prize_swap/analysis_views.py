@@ -19,7 +19,13 @@ from PySide6.QtWidgets import (
     QWidget,
     QComboBox,
 )
-from .machine_matching import machine_key,display_identity,normalize_number
+from .machine_matching import (
+    machine_key,
+    display_identity,
+    normalize_number,
+    MATCH_LABELS,
+    value_source,
+)
 from .floor_status import ratio_text, days_text, effective_stat, money, ratio, days
 
 
@@ -28,7 +34,8 @@ class ValueItem(QTableWidgetItem):
         super().__init__(str(text))
         self.sort_value = value if value is not None else str(text).casefold()
         self.setToolTip(str(text))
-        if type(self.sort_value) in (int,float) or str(text).endswith('%'):self.setTextAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
+        if type(self.sort_value) in (int, float) or str(text).endswith("%"):
+            self.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
     def __lt__(self, other):
         a, b = self.sort_value, getattr(other, "sort_value", other.text())
@@ -40,6 +47,7 @@ class ValueItem(QTableWidgetItem):
 def make_table(headers, rows):
     t = QTableWidget(len(rows), len(headers))
     from .theme import style_table
+
     style_table(t)
     t.setHorizontalHeaderLabels(headers)
     t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -97,8 +105,8 @@ def show_candidates(owner):
                 (percent_text(a["trend"]), a["trend"]),
                 " / ".join(a["reasons"]),
                 (m.analysis or {}).get("loaded_at") or m.layout_loaded_at or "—",
-                __import__("prize_swap.machine_matching",fromlist=["MATCH_LABELS"]).MATCH_LABELS[m.match_method],
-                __import__("prize_swap.machine_matching",fromlist=["value_source"]).value_source(m,"ratio"),
+                MATCH_LABELS[m.match_method],
+                value_source(m, "ratio"),
             ]
         )
     table = make_table(
@@ -114,7 +122,8 @@ def show_candidates(owner):
             "売上前回比",
             "判定理由",
             "データ更新日時",
-            "照合方法", "アベ比の取得元",
+            "照合方法",
+            "アベ比の取得元",
         ],
         rows,
     )
@@ -167,7 +176,11 @@ def show_candidates(owner):
 
 
 def propose_assignments(owner, numbers, parent=None):
-    numbers = [normalize_number(n,allow_bare=True) for n in numbers if normalize_number(n,allow_bare=True)]
+    numbers = [
+        normalize_number(n, allow_bare=True)
+        for n in numbers
+        if normalize_number(n, allow_bare=True)
+    ]
     products = [p for p in owner.products() if p.day == owner.selected_day()]
     if not numbers or not products:
         owner.message.emit("機器と選択日の入替先商品を用意してください。")
@@ -212,7 +225,8 @@ class MethodBars(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        from .theme import tokens,analysis_color
+        from .theme import tokens, analysis_color
+
         painter.fillRect(self.rect(), QColor(tokens()["card"]))
         records = self.records
         if not records:

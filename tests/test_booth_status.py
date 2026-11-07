@@ -157,9 +157,13 @@ def test_inline_and_global_numeric_tables_update_immediately_and_use_metric_colo
         ("excess", editor.total_metrics),
     ):
         from PySide6.QtGui import QPalette
+
         labels[field].ensurePolished()
         assert labels[field].property("metricRole") == field
-        assert labels[field].palette().color(QPalette.ColorRole.Window).name() == METRIC_COLORS[field][0].lower()
+        assert (
+            labels[field].palette().color(QPalette.ColorRole.Window).name()
+            == METRIC_COLORS[field][0].lower()
+        )
     for r in range(window.summary_table.rowCount()):
         for c, field in ((2, "assigned"), (3, "unassigned"), (4, "excess")):
             item = window.summary_table.item(r, c)

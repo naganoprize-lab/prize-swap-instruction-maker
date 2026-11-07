@@ -295,25 +295,36 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         self.view.ensureVisible(node, 40, 40)
 
     def apply_matching(self, rows, overrides):
-        from .machine_matching import validate_references,prepare_references,normalize_number
+        from .machine_matching import validate_references, prepare_references, normalize_number
         from .floor_data import validate_machines
         from dataclasses import asdict
+
         validate_references(rows)
-        updated=deepcopy(self.machines)
+        updated = deepcopy(self.machines)
         for m in updated:
             if m.uid in overrides:
-                value=overrides[m.uid]
-                if value is not None and value and normalize_number(value)!=value:raise ValueError("手動の機械番号が不正です。")
-                m.manual_number=value
-        prepare_references(updated,rows);validate_machines([asdict(m) for m in updated])
-        before=self.state();self.number_references=deepcopy(rows);self.machines=updated
-        by_uid={m.uid:m for m in self.machines}
-        for uid,node in self.nodes.items():node.machine=by_uid[uid]
-        self.refresh_assignments();self.record(before,"管理ナンバー照合の修正");self.sync()
+                value = overrides[m.uid]
+                if value is not None and value:
+                    value = normalize_number(value)
+                    if not value:
+                        raise ValueError("手動の機械番号が不正です。")
+                m.manual_number = value
+        prepare_references(updated, rows)
+        validate_machines([asdict(m) for m in updated])
+        before = self.state()
+        self.number_references = deepcopy(rows)
+        self.machines = updated
+        by_uid = {m.uid: m for m in self.machines}
+        for uid, node in self.nodes.items():
+            node.machine = by_uid[uid]
+        self.refresh_assignments()
+        self.record(before, "管理ナンバー照合の修正")
+        self.sync()
         self.update_info()
 
     def show_matching(self):
         from .matching_ui import show_matching
+
         show_matching(self)
 
     def show_history(self):
@@ -372,6 +383,24 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         for c in (self.display_mode, self.show_methods, self.snap):
             c.setParent(self)
             c.hide()
+
+    def sort_menu(self):
+        from PySide6.QtGui import QCursor
+
+        menu = QMenu(self)
+        for i in range(self.sort_by.count()):
+            action = menu.addAction(self.sort_by.itemText(i))
+            action.setCheckable(True)
+            action.setChecked(i == self.sort_by.currentIndex())
+            action.triggered.connect(
+                lambda checked=False, index=i: self.sort_by.setCurrentIndex(index)
+            )
+        menu.addSeparator()
+        desc = menu.addAction("降順")
+        desc.setCheckable(True)
+        desc.setChecked(self.descending.isChecked())
+        desc.triggered.connect(self.descending.setChecked)
+        menu.exec(QCursor.pos())
 
     def presentation_settings(self):
         dialog = QDialog(self)
@@ -451,6 +480,9 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
             ("直接印刷", self.print_floor),
         ):
             menu.addAction(label, callback)
+        from .theme import ThemeMenu
+
+        menu.addMenu(ThemeMenu(menu))
         menu.exec(self.view.viewport().mapToGlobal(point))
 
     def toggle_fullscreen(self):

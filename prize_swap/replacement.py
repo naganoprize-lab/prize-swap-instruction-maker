@@ -16,7 +16,16 @@ def comparable_trend(machine, history):
     current = overlay.get("values", {}).get("average")
     start, end = overlay.get("period_start"), overlay.get("period_end")
     context = overlay.get("product_context")
-    if (current is None or not start or not end or not context or not context.get("product") or not context.get("installed_on") or overlay.get("period_source") not in ("excel","manual") or context != episode(machine)):
+    if (
+        current is None
+        or not start
+        or not end
+        or not context
+        or not context.get("product")
+        or not context.get("installed_on")
+        or overlay.get("period_source") not in ("excel", "manual")
+        or context != episode(machine)
+    ):
         return None, []
     candidates = []
     for entry in history:
@@ -56,7 +65,7 @@ def assess(machine, reference, settings=None, history=()):
     overlay = machine.analysis or {}
     context = overlay.get("product_context")
     changed = context is not None and context != episode(machine)
-    if machine.match_method=="review":
+    if machine.match_method == "review":
         reasons.append("機械番号の照合要確認のため判定保留")
     elif overlay.get("quality_issues"):
         reasons.append("実績の重大な異常を確認するまで判定保留")
@@ -77,7 +86,8 @@ def assess(machine, reference, settings=None, history=()):
         reasons.append(f"アベ比{value:.1f}%で好調")
     else:
         reasons.append("投入日数が判定条件に達していません。")
-    if not machine.analysis:reasons.append("実績データの取得元：レイアウト由来")
+    if not machine.analysis:
+        reasons.append("実績データの取得元：レイアウト由来")
     po, cost = effective_stat(machine, "po_rate"), effective_stat(machine, "cost_rate")
     if po is not None and po > s["po_high"]:
         reasons.append(f"PO率{po:.1%}：設定上限を超過（要確認）")

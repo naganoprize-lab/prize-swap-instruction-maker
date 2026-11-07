@@ -1,16 +1,55 @@
 """Product table model and in-cell editors (no modal product editor)."""
+
 from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QDoubleValidator, QIntValidator
-from PySide6.QtWidgets import QComboBox, QLineEdit, QPlainTextEdit, QStyledItemDelegate, QStyle, QStyleOptionComboBox, QToolButton, QMenu
+from PySide6.QtWidgets import (
+    QComboBox,
+    QLineEdit,
+    QPlainTextEdit,
+    QStyledItemDelegate,
+    QStyle,
+    QStyleOptionComboBox,
+    QToolButton,
+    QMenu,
+)
 
 from .core import AppError, LIMITS, machine_numbers, quantity, split_values
-from .methods import allocation_status, format_allocations, format_cell_status, set_allocations, editor_state, sync_machine_methods
+from .methods import (
+    allocation_status,
+    format_allocations,
+    format_cell_status,
+    set_allocations,
+    editor_state,
+    sync_machine_methods,
+)
 from .booth_style import METRIC_COLORS
-from .theme import metric_colors,analysis_color
+from .theme import metric_colors, analysis_color
 from .methods_editor import MethodsCombo
 
-COLUMNS = ["出力", "順序", "メーカー", "商品名", "入数", "CS数", "マシン番号", "運営方法", "優先", "獲得個数制限"]
-ATTRS = ["included", "order", "maker", "name", "units", "cases", "machines", "methods", "priority", "limit"]
+COLUMNS = [
+    "出力",
+    "順序",
+    "メーカー",
+    "商品名",
+    "入数",
+    "CS数",
+    "マシン番号",
+    "運営方法",
+    "優先",
+    "獲得個数制限",
+]
+ATTRS = [
+    "included",
+    "order",
+    "maker",
+    "name",
+    "units",
+    "cases",
+    "machines",
+    "methods",
+    "priority",
+    "limit",
+]
 
 
 class ProductModel(QAbstractTableModel):
@@ -42,30 +81,54 @@ class ProductModel(QAbstractTableModel):
             return None
         p, col = self.products[index.row()], index.column()
         value = getattr(p, ATTRS[col])
-        if role == Qt.ItemDataRole.TextAlignmentRole and col in (1,4,5):
-            return Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter
-        if role == Qt.ItemDataRole.DisplayRole and col in (4,5) and isinstance(value,(int,float)):
-            return f"{value:,}" if abs(value)>=1000 else value
+        if role == Qt.ItemDataRole.TextAlignmentRole and col in (1, 4, 5):
+            return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        if (
+            role == Qt.ItemDataRole.DisplayRole
+            and col in (4, 5)
+            and isinstance(value, (int, float))
+        ):
+            return f"{value:,}" if abs(value) >= 1000 else value
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             if col in (0, 8):
                 return None
             if col == 7:
                 # QVariantMap sorts keys in the proxy. Pairs retain method order.
-                return editor_state(p) if role == Qt.ItemDataRole.EditRole else format_cell_status(p)
+                return (
+                    editor_state(p) if role == Qt.ItemDataRole.EditRole else format_cell_status(p)
+                )
             return ", ".join(value) if col == 6 else value
         if role == Qt.ItemDataRole.CheckStateRole and col in (0, 8):
             return Qt.CheckState.Checked if value else Qt.CheckState.Unchecked
         if role == Qt.ItemDataRole.BackgroundRole:
             if col == 7:
                 status = allocation_status(p)
-                if status.excess: return QColor(metric_colors("excess")[0])
-                if status.unknown or status.unassigned or status.unmapped: return QColor(metric_colors("unassigned")[0])
-                if status.assigned: return QColor(metric_colors("assigned")[0])
-            if p.priority: return QColor(analysis_color("#FCE4EC"))
+                if status.excess:
+                    return QColor(metric_colors("excess")[0])
+                if status.unknown or status.unassigned or status.unmapped:
+                    return QColor(metric_colors("unassigned")[0])
+                if status.assigned:
+                    return QColor(metric_colors("assigned")[0])
+            if p.priority:
+                return QColor(analysis_color("#FCE4EC"))
         if role == Qt.ItemDataRole.ForegroundRole and col == 7:
             status = allocation_status(p)
-            field = "excess" if status.excess else "unassigned" if status.unknown or status.unassigned or status.unmapped else "assigned"
-            if status.assigned or status.unknown or status.unassigned or status.unmapped or status.excess:
+            field = (
+                "excess"
+                if status.excess
+                else (
+                    "unassigned"
+                    if status.unknown or status.unassigned or status.unmapped
+                    else "assigned"
+                )
+            )
+            if (
+                status.assigned
+                or status.unknown
+                or status.unassigned
+                or status.unmapped
+                or status.excess
+            ):
                 return QColor(metric_colors(field)[1])
         if role == Qt.ItemDataRole.ToolTipRole:
             if col == 7:
@@ -103,17 +166,23 @@ class ProductModel(QAbstractTableModel):
             elif col == 9 and value not in LIMITS:
                 raise AppError("個数制限を選択してください。")
             setattr(p, ATTRS[col], value)
-            if col == 6: sync_machine_methods(p)
-            self.dataChanged.emit(self.index(index.row(), 0), self.index(index.row(), len(COLUMNS) - 1))
+            if col == 6:
+                sync_machine_methods(p)
+            self.dataChanged.emit(
+                self.index(index.row(), 0), self.index(index.row(), len(COLUMNS) - 1)
+            )
             self.edited.emit()
-            if col in (6, 7) and (allocation_status(p).excess or allocation_status(p).planned > allocation_status(p).registered):
+            if col in (6, 7) and (
+                allocation_status(p).excess
+                or allocation_status(p).planned > allocation_status(p).registered
+            ):
                 self.allocation_warning.emit(f"{p.name}：{allocation_status(p).message}")
             return True
         except (ValueError, TypeError) as exc:
-            self.invalid.emit(str(exc) if isinstance(exc, AppError) else "順序は整数で入力してください。")
+            self.invalid.emit(
+                str(exc) if isinstance(exc, AppError) else "順序は整数で入力してください。"
+            )
             return False
-
-
 
 
 class MachineEditor(QPlainTextEdit):
@@ -138,6 +207,7 @@ class MachineEditor(QPlainTextEdit):
             action = menu.addAction(number)
             action.setCheckable(True)
             action.setChecked(number in values)
+
             def toggle(checked, n=number):
                 current = split_values(self.toPlainText())
                 if checked and n not in current:
@@ -145,6 +215,7 @@ class MachineEditor(QPlainTextEdit):
                 elif not checked and n in current:
                     current.remove(n)
                 self.setPlainText("\n".join(current))
+
             action.toggled.connect(toggle)
         if menu.isEmpty():
             menu.addAction("売り場レイアウトで番号を登録してください").setEnabled(False)
@@ -219,4 +290,6 @@ class ProductDelegate(QStyledItemDelegate):
             combo.rect = option.rect.adjusted(option.rect.width() - 18, 0, 0, 0)
             combo.state = option.state
             combo.subControls = QStyle.SubControl.SC_ComboBoxArrow
-            option.widget.style().drawComplexControl(QStyle.ComplexControl.CC_ComboBox, combo, painter, option.widget)
+            option.widget.style().drawComplexControl(
+                QStyle.ComplexControl.CC_ComboBox, combo, painter, option.widget
+            )

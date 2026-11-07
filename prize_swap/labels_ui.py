@@ -1,20 +1,49 @@
 """Arrival-booth labels: live source products with independent print overrides."""
+
 from pathlib import Path
 import math
 
 from PySide6.QtCore import QAbstractTableModel, QDate, QModelIndex, Qt, Signal, QItemSelectionModel
 from PySide6.QtGui import QColor
 from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrintPreviewDialog, QPrinter
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDateEdit, QDialog, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QMessageBox,
-    QPushButton, QSizePolicy, QSpinBox, QSplitter, QStyledItemDelegate, QTableView, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QDateEdit,
+    QDialog,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QSplitter,
+    QStyledItemDelegate,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
+)
 
+from .theme import analysis_color
 from .core import AppError
 from .methods import allocation_status
 from .labels_data import LabelOptions, LabelStore
 from .labels_printing import label_printer, plan_labels, render_labels, save_labels_pdf
 
-HEADERS = ["印刷", "商品名（ラベル表示名）", "投入予定マシン番号", "マシン数", "自動枚数", "手動枚数", "印刷枚数"]
+HEADERS = [
+    "印刷",
+    "商品名（ラベル表示名）",
+    "投入予定マシン番号",
+    "マシン数",
+    "自動枚数",
+    "手動枚数",
+    "印刷枚数",
+]
 
 
 class LabelModel(QAbstractTableModel):
@@ -56,12 +85,25 @@ class LabelModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.CheckStateRole and col == 0:
             return Qt.CheckState.Checked if e.included else Qt.CheckState.Unchecked
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
-            values = [None, e.name, ", ".join(e.machines) or "未設定", len(e.machines), e.automatic_copies,
-                      (e.manual_copies or 0) if role == Qt.ItemDataRole.EditRole else (e.manual_copies or "自動"), e.copies]
+            values = [
+                None,
+                e.name,
+                ", ".join(e.machines) or "未設定",
+                len(e.machines),
+                e.automatic_copies,
+                (
+                    (e.manual_copies or 0)
+                    if role == Qt.ItemDataRole.EditRole
+                    else (e.manual_copies or "自動")
+                ),
+                e.copies,
+            ]
             return values[col]
         if role == Qt.ItemDataRole.ToolTipRole:
             if not e.product.included:
-                return "入替指示書の出力対象外です。指示書側の出力チェックを有効にすると印刷できます。"
+                return (
+                    "入替指示書の出力対象外です。指示書側の出力チェックを有効にすると印刷できます。"
+                )
             if col in (2, 3, 4) and not e.machines:
                 return "マシン番号未設定のため、自動計算は1枚です。"
             if col == 1:
@@ -70,9 +112,9 @@ class LabelModel(QAbstractTableModel):
                 return "0（自動）でマシン数に戻ります。対象外にする場合は印刷チェックを外してください。"
         if role == Qt.ItemDataRole.BackgroundRole:
             if not e.product.included:
-                return QColor(__import__("prize_swap.theme",fromlist=["analysis_color"]).analysis_color("#EDF0EE"))
+                return QColor(analysis_color("#EDF0EE"))
             if not e.machines and col in (2, 3, 4):
-                return QColor(__import__("prize_swap.theme",fromlist=["analysis_color"]).analysis_color("#FFF4BF"))
+                return QColor(analysis_color("#FFF4BF"))
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         if not index.isValid():
@@ -140,14 +182,18 @@ class LabelsWidget(QWidget):
         center = QVBoxLayout(table_panel)
         center.setContentsMargins(0, 0, 8, 0)
         tools = QHBoxLayout()
+
         def tool(text, callback):
             b = QPushButton(text)
             b.clicked.connect(callback)
             tools.addWidget(b)
             return b
+
         tool("全選択", lambda: self.select_all(True))
         tool("全解除", lambda: self.select_all(False))
-        tool("自動枚数に戻す", self.reset_copies).setToolTip("選択行、未選択なら表示中の全商品を自動計算に戻す")
+        tool("自動枚数に戻す", self.reset_copies).setToolTip(
+            "選択行、未選択なら表示中の全商品を自動計算に戻す"
+        )
         tool("元の商品名に戻す", self.reset_names)
         tool("↑", lambda: self.move(-1))
         tool("↓", lambda: self.move(1))
@@ -162,14 +208,20 @@ class LabelsWidget(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed | QAbstractItemView.EditTrigger.SelectedClicked)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.SelectedClicked
+        )
         self.table.verticalHeader().setDefaultSectionSize(34)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         for col, width in enumerate([48, 340, 220, 72, 76, 96, 76]):
             self.table.setColumnWidth(col, width)
         center.addWidget(self.table, 1)
-        note = QLabel("黄色：マシン未設定（自動1枚） / 表示名は元商品を変更しません。\n↑↓の並び替えは入替指示書と共通です。同じ商品のラベルは連続して印刷します。")
+        note = QLabel(
+            "黄色：マシン未設定（自動1枚） / 表示名は元商品を変更しません。\n↑↓の並び替えは入替指示書と共通です。同じ商品のラベルは連続して印刷します。"
+        )
         note.setWordWrap(True)
         center.addWidget(note)
         split.addWidget(table_panel)
@@ -194,13 +246,22 @@ class LabelsWidget(QWidget):
         self.alignment = QComboBox()
         self.alignment.addItems(["中央", "左揃え"])
         self.border = QDoubleSpinBox()
-        self.border.setRange(.5, 4)
-        self.border.setSingleStep(.1)
+        self.border.setRange(0.5, 4)
+        self.border.setSingleStep(0.1)
         self.border.setSuffix(" pt")
-        for text, control in [("1ページ", self.per_page), ("文字サイズ", self.mode), ("手動サイズ", self.font_size), ("太さ", self.weight), ("配置", self.alignment), ("枠線", self.border)]:
+        for text, control in [
+            ("1ページ", self.per_page),
+            ("文字サイズ", self.mode),
+            ("手動サイズ", self.font_size),
+            ("太さ", self.weight),
+            ("配置", self.alignment),
+            ("枠線", self.border),
+        ]:
             form.addRow(text, control)
         side.addLayout(form)
-        hint = QLabel("初期設定：7枚 / 太字 / 中央\n文字幅と行高を実測して折り返し、枠内に収まる最大の整数ptを選びます。長すぎる商品名は警告します。")
+        hint = QLabel(
+            "初期設定：7枚 / 太字 / 中央\n文字幅と行高を実測して折り返し、枠内に収まる最大の整数ptを選びます。長すぎる商品名は警告します。"
+        )
         hint.setWordWrap(True)
         side.addWidget(hint)
         side.addStretch()
@@ -211,52 +272,94 @@ class LabelsWidget(QWidget):
         bottom = QHBoxLayout()
         self.status = QLabel("商品一覧は入替指示書と自動連携します。")
         bottom.addWidget(self.status, 1)
-        for text, callback in [("印刷プレビュー", self.preview), ("PDF保存", self.export_pdf), ("直接印刷", self.print_direct)]:
+        for text, callback in [
+            ("印刷プレビュー", self.preview),
+            ("PDF保存", self.export_pdf),
+            ("直接印刷", self.print_direct),
+        ]:
             b = QPushButton(text)
-            if text == "直接印刷": b.setObjectName("primary")
+            if text == "直接印刷":
+                b.setObjectName("primary")
             b.clicked.connect(callback)
             bottom.addWidget(b)
         outer.addLayout(bottom)
         self.apply_options()
-        for control in (self.per_page, self.mode, self.font_size, self.weight, self.alignment, self.border):
-            signal = control.currentIndexChanged if isinstance(control, QComboBox) else control.valueChanged
+        for control in (
+            self.per_page,
+            self.mode,
+            self.font_size,
+            self.weight,
+            self.alignment,
+            self.border,
+        ):
+            signal = (
+                control.currentIndexChanged
+                if isinstance(control, QComboBox)
+                else control.valueChanged
+            )
             signal.connect(self.options_changed)
 
     def apply_options(self):
         o = self.store.options
-        values = [(self.per_page, o.per_page), (self.mode, int(o.mode == "manual")), (self.font_size, o.font_size),
-                  (self.weight, int(o.weight == "black")), (self.alignment, int(o.alignment == "left")), (self.border, o.border)]
+        values = [
+            (self.per_page, o.per_page),
+            (self.mode, int(o.mode == "manual")),
+            (self.font_size, o.font_size),
+            (self.weight, int(o.weight == "black")),
+            (self.alignment, int(o.alignment == "left")),
+            (self.border, o.border),
+        ]
         for widget, value in values:
             widget.blockSignals(True)
-            widget.setCurrentIndex(value) if isinstance(widget, QComboBox) else widget.setValue(value)
+            (
+                widget.setCurrentIndex(value)
+                if isinstance(widget, QComboBox)
+                else widget.setValue(value)
+            )
             widget.blockSignals(False)
         self.font_size.setEnabled(o.mode == "manual")
 
     def options_changed(self, *_):
-        self.store.options = LabelOptions(self.per_page.value(), "manual" if self.mode.currentIndex() else "auto",
-            self.font_size.value(), "black" if self.weight.currentIndex() else "bold", "left" if self.alignment.currentIndex() else "center", self.border.value())
+        self.store.options = LabelOptions(
+            self.per_page.value(),
+            "manual" if self.mode.currentIndex() else "auto",
+            self.font_size.value(),
+            "black" if self.weight.currentIndex() else "bold",
+            "left" if self.alignment.currentIndex() else "center",
+            self.border.value(),
+        )
         self.font_size.setEnabled(self.mode.currentIndex() == 1)
         self.edited.emit()
         self.update_count()
 
     def selected_entries(self):
-        return [self.model.entries[index.row()] for index in self.table.selectionModel().selectedRows()]
+        return [
+            self.model.entries[index.row()] for index in self.table.selectionModel().selectedRows()
+        ]
 
     def sync(self, *_):
         selected = {id(e.product) for e in self.selected_entries()}
         entries = self.store.for_day(self.products(), self.selected_day())
         self.model.replace(entries)
         self.day.blockSignals(True)
-        self.day.setDate(QDate(self.selected_day().year, self.selected_day().month, self.selected_day().day))
+        self.day.setDate(
+            QDate(self.selected_day().year, self.selected_day().month, self.selected_day().day)
+        )
         self.day.blockSignals(False)
         for row, entry in enumerate(entries):
             if id(entry.product) in selected:
-                self.table.selectionModel().select(self.model.index(row, 0), QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+                self.table.selectionModel().select(
+                    self.model.index(row, 0),
+                    QItemSelectionModel.SelectionFlag.Select
+                    | QItemSelectionModel.SelectionFlag.Rows,
+                )
         self.update_count()
 
     def update_count(self):
         total = sum(e.copies for e in self.model.entries if e.included)
-        self.count.setText(f"{len(self.model.entries)}商品 / 印刷 {total}枚 / {math.ceil(total/self.store.options.per_page)}ページ")
+        self.count.setText(
+            f"{len(self.model.entries)}商品 / 印刷 {total}枚 / {math.ceil(total/self.store.options.per_page)}ページ"
+        )
 
     def select_all(self, included):
         for e in self.model.entries:
@@ -293,10 +396,19 @@ class LabelsWidget(QWidget):
         area = printer.pageRect(QPrinter.Unit.Point)
         entries, options = list(self.model.entries), self.store.options
         plan = plan_labels(entries, area.width(), area.height(), options)
-        mismatches=[f"{e.product.name}：{allocation_status(e.product).message}" for e in entries
-                    if e.included and (allocation_status(e.product).unassigned or allocation_status(e.product).excess)]
+        mismatches = [
+            f"{e.product.name}：{allocation_status(e.product).message}"
+            for e in entries
+            if e.included
+            and (allocation_status(e.product).unassigned or allocation_status(e.product).excess)
+        ]
         if mismatches:
-            QMessageBox.warning(self,"予定ブース数と割当の差分", "ラベル枚数は予定数ではなく登録マシン数（または手動枚数）を使用します。\n"+"\n".join(mismatches))
+            QMessageBox.warning(
+                self,
+                "予定ブース数と割当の差分",
+                "ラベル枚数は予定数ではなく登録マシン数（または手動枚数）を使用します。\n"
+                + "\n".join(mismatches),
+            )
         if plan.warnings:
             QMessageBox.warning(self, "長い商品名の確認", "\n".join(plan.warnings))
         return entries, options
@@ -311,21 +423,32 @@ class LabelsWidget(QWidget):
             dialog = QPrintPreviewDialog(printer, self)
             dialog.setWindowTitle("入荷ブース用ラベル — A4縦")
             dialog.resize(950, 850)
+
             def paint(target):
                 try:
                     render_labels(target, entries, options)
                 except Exception as exc:
                     self.error(exc)
+
             dialog.paintRequested.connect(paint)
             dialog.exec()
         except Exception as exc:
             self.error(exc)
 
     def save_path(self):
-        path, _ = QFileDialog.getSaveFileName(self, "入荷ブース用ラベルをPDF保存", f"入荷ブース用ラベル_{self.selected_day().isoformat()}.pdf", "PDF (*.pdf)")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "入荷ブース用ラベルをPDF保存",
+            f"入荷ブース用ラベル_{self.selected_day().isoformat()}.pdf",
+            "PDF (*.pdf)",
+        )
         if path and not path.lower().endswith(".pdf"):
             path += ".pdf"
-            if Path(path).exists() and QMessageBox.question(self, "上書き確認", "既存PDFを上書きしますか？") != QMessageBox.StandardButton.Yes:
+            if (
+                Path(path).exists()
+                and QMessageBox.question(self, "上書き確認", "既存PDFを上書きしますか？")
+                != QMessageBox.StandardButton.Yes
+            ):
                 return ""
         return path
 
@@ -351,6 +474,8 @@ class LabelsWidget(QWidget):
             dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, True)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 render_labels(printer, entries, options)
-                self.status.setText("印刷ジョブを送信しました。用紙の出力はプリンターで確認してください。")
+                self.status.setText(
+                    "印刷ジョブを送信しました。用紙の出力はプリンターで確認してください。"
+                )
         except Exception as exc:
             self.error(exc)

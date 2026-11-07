@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QPageLayout, QPageSize, QPen
 from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
 from .core import AppError
-from .machine_matching import machine_key,display_identity
+from .machine_matching import machine_key, display_identity
 from .floor_render import CardRenderer, FIELDS, SUMMARY_FIELDS, draw_card
 from .floor_presentation import ordered_machines
 from .floor_status import ratio_text, days_text, metric_text
@@ -296,7 +296,9 @@ def plan_floor(
             metrics_settings,
         )
         methods = (
-            "／".join(dict.fromkeys(p.machine_methods.get(machine_key(m)) or "未設定" for p in plans))
+            "／".join(
+                dict.fromkeys(p.machine_methods.get(machine_key(m)) or "未設定" for p in plans)
+            )
             if options.show_methods
             else ""
         )

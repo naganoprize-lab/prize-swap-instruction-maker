@@ -10,7 +10,7 @@ import sys
 import traceback
 
 
-def inspect_card(floor, uid, expected):
+def inspect_card(floor, uid, expected, foreground=None):
     from PySide6.QtGui import QColor
     from PySide6.QtWidgets import QApplication
 
@@ -27,6 +27,7 @@ def inspect_card(floor, uid, expected):
     )
     assert floor.isVisible() and floor.view.isVisible() and rect.width() > 40 and rect.height() > 30
     expected = QColor(expected)
+    foreground = QColor(foreground) if foreground else None
     background = ink = 0
     # Check pixels from the actual viewport, not scene.render(): scene.render()
     # succeeds even when the containing widget is explicitly hidden.
@@ -35,7 +36,10 @@ def inspect_card(floor, uid, expected):
             c = image.pixelColor(x, y)
             if max(abs(a - b) for a, b in zip(c.getRgb()[:3], expected.getRgb()[:3])) <= 3:
                 background += 1
-            if max(c.red(), c.green(), c.blue()) < 120:
+            if (
+                foreground
+                and max(abs(a - b) for a, b in zip(c.getRgb()[:3], foreground.getRgb()[:3])) < 35
+            ) or (foreground is None and max(c.red(), c.green(), c.blue()) < 120):
                 ink += 1
     assert background > 100, f"Card background absent: {background}"
     assert ink > 15, f"Card text absent: {ink}"
@@ -70,7 +74,7 @@ def run(output):
         report["scale_requested"] = os.environ.get("QT_SCALE_FACTOR", "1")
         day = date(2026, 11, 7)
         window = Window(layout_storage=output / "unused-autosave.json")
-        window.themes.set_mode("light",persist=False)
+        window.themes.set_mode("light", persist=False)
         floor = window.floor
         window.products = [Product(day, "入替予定商品", machines=["20000右"])]
         window.day.setDate(QDate(day))

@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
@@ -9,7 +10,13 @@ from PySide6.QtWidgets import QApplication
 def qt_app():
     app = QApplication.instance() or QApplication([])
     from prize_swap.fonts import initialize_fonts
+
     initialize_fonts()
+    from prize_swap.theme import manager
+
+    manager().set_mode(
+        "light", persist=False
+    )  # Deterministic colours; native probes also test system mode.
     yield app
 
 
@@ -17,9 +24,11 @@ def qt_app():
 def dispose_closed_test_windows(qt_app):
     """Release closed Qt windows so global theme repaint work stays bounded."""
     yield
-    from PySide6.QtCore import QCoreApplication,QEvent
+    from PySide6.QtCore import QCoreApplication, QEvent
     import gc
+
     for widget in QApplication.topLevelWidgets():
-        if not widget.isVisible():widget.deleteLater()
-    QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+        if not widget.isVisible():
+            widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     gc.collect()

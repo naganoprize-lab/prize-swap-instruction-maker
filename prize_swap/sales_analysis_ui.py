@@ -40,8 +40,9 @@ class SalesAnalysisMixin:
                 {k: existing[k] for k in ("period_start", "period_end", "period_source")}
             )
         from .machine_matching import resolve_matches
-        matches=resolve_matches(self.machines,snapshot["records"])
-        by_number={matches[m.uid].number:m for m in self.machines if matches[m.uid].matched}
+
+        matches = resolve_matches(self.machines, snapshot["records"])
+        by_number = {matches[m.uid].number: m for m in self.machines if matches[m.uid].matched}
         for number, record in snapshot["records"].items():
             if existing:
                 record["product_context"] = deepcopy(
@@ -136,13 +137,16 @@ class SalesAnalysisMixin:
         def table(headers, rows):
             widget = QTableWidget(len(rows), len(headers))
             from .theme import style_table
+
             style_table(widget)
             widget.setHorizontalHeaderLabels(headers)
             widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
             for i, row in enumerate(rows):
                 for j, value in enumerate(row):
                     from .analysis_views import ValueItem
-                    item=ValueItem(value);widget.setItem(i,j,item)
+
+                    item = ValueItem(value)
+                    widget.setItem(i, j, item)
             widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             widget.setSortingEnabled(True)
 

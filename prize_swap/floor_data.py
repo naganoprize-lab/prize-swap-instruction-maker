@@ -80,13 +80,27 @@ def validate_machines(records):
                     "maker",
                     "limit",
                     "operation_method",
-                    "reference_number", "reference_warning", "number_origin", "resolved_number", "match_method", "match_message", "layout_loaded_at", "direct_number_raw",
+                    "reference_number",
+                    "reference_warning",
+                    "number_origin",
+                    "resolved_number",
+                    "match_method",
+                    "match_message",
+                    "layout_loaded_at",
+                    "direct_number_raw",
                 )
             ):
                 raise ValueError("文字列項目が不正")
             from .machine_matching import normalize_number, MATCH_LABELS
-            if m.number_origin not in ("direct", "reference") or m.match_method not in MATCH_LABELS:raise ValueError("照合状態が不正")
-            if m.manual_number is not None and (not isinstance(m.manual_number,str) or m.manual_number and normalize_number(m.manual_number)!=m.manual_number):raise ValueError("手動照合先が不正")
+
+            if m.number_origin not in ("direct", "reference") or m.match_method not in MATCH_LABELS:
+                raise ValueError("照合状態が不正")
+            if m.manual_number is not None and (
+                not isinstance(m.manual_number, str)
+                or m.manual_number
+                and normalize_number(m.manual_number) != m.manual_number
+            ):
+                raise ValueError("手動照合先が不正")
             if not m.uid or m.uid in ids:
                 raise ValueError("マシンIDが重複")
             ids.add(m.uid)
@@ -164,7 +178,9 @@ def validate_state(state):
     ):
         raise AppError("配置JSONの形式が不正です。")
     from .theme import MODES
-    if state.get("theme_mode", "system") not in MODES:raise AppError("テーマ設定が不正です。")
+
+    if state.get("theme_mode", "system") not in MODES:
+        raise AppError("テーマ設定が不正です。")
     state = deepcopy(state)
     if state["version"] == 1:
         for record in [*state.get("machines", []), *state.get("original", [])]:
@@ -173,6 +189,7 @@ def validate_state(state):
                     record[key] /= 100
         state["version"] = 2
     from .machine_matching import validate_references
+
     validate_references(state.get("number_references", []))
     validate_machines(state.get("machines"))
     validate_machines(state.get("original", []))
@@ -330,15 +347,33 @@ def import_layout(path, with_references=False):
         if "投入中レイアウト" not in wb.sheetnames:
             raise AppError("「投入中レイアウト」シートがありません。")
         ws = wb["投入中レイアウト"]
-        from .machine_matching import read_reference_rows, reference_index, normalize_reference, normalize_number
-        references=read_reference_rows(wb)
-        mapping, problems=reference_index(references)
-        warnings=[f"{key}：{message}" for key,message in problems.items()]
-        reference_cells=[c for row in ws for c in row if normalize_reference(c.value) is not None]
+        from .machine_matching import (
+            read_reference_rows,
+            reference_index,
+            normalize_reference,
+            normalize_number,
+        )
+
+        references = read_reference_rows(wb)
+        mapping, problems = reference_index(references)
+        warnings = [f"{key}：{message}" for key, message in problems.items()]
+        reference_cells = [c for row in ws for c in row if normalize_reference(c.value) is not None]
+
         def in_reference_card(cell):
-            return any(c.row<=cell.row<=c.row+4 and c.column<=cell.column<=c.column+2 for c in reference_cells)
-        direct_cells=[c for row in ws for c in row if isinstance(c.value,str) and normalize_number(c.value) is not None and not in_reference_card(c)]
-        cells=sorted(reference_cells+direct_cells,key=lambda c:(c.row,c.column))
+            return any(
+                c.row <= cell.row <= c.row + 4 and c.column <= cell.column <= c.column + 2
+                for c in reference_cells
+            )
+
+        direct_cells = [
+            c
+            for row in ws
+            for c in row
+            if isinstance(c.value, str)
+            and normalize_number(c.value) is not None
+            and not in_reference_card(c)
+        ]
+        cells = sorted(reference_cells + direct_cells, key=lambda c: (c.row, c.column))
         if not cells:
             raise AppError("レイアウトに L_番号 / R_番号 のマシン枠が見つかりません。")
         if len(cells) > 5000:
@@ -364,13 +399,16 @@ def import_layout(path, with_references=False):
         machines, seen = [], set()
         for cell in cells:
             key = normalize_reference(cell.value) or ""
-            direct_raw=str(cell.value) if not key else ""
+            direct_raw = str(cell.value) if not key else ""
             if key:
-                for r in range(cell.row+1,min(ws.max_row,cell.row+4)+1):
-                    label=unicodedata.normalize("NFKC",str(ws.cell(r,cell.column).value or "")).replace(" ","")
-                    if label in ("機械番号","機器番号","マシン番号"):
-                        direct_raw=str(ws.cell(r,cell.column+1).value or "");break
-            direct=normalize_number(direct_raw)
+                for r in range(cell.row + 1, min(ws.max_row, cell.row + 4) + 1):
+                    label = unicodedata.normalize(
+                        "NFKC", str(ws.cell(r, cell.column).value or "")
+                    ).replace(" ", "")
+                    if label in ("機械番号", "機器番号", "マシン番号"):
+                        direct_raw = str(ws.cell(r, cell.column + 1).value or "")
+                        break
+            direct = normalize_number(direct_raw)
             number = (direct or "") if direct_raw else mapping.get(key, "")
             if number in seen:
                 warnings.append(

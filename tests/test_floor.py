@@ -87,9 +87,11 @@ def test_add_duplicate_delete_warning_undo_redo(floor, monkeypatch):
     for node in floor.nodes.values():
         node.setSelected(True)
     messages = []
+
     def reject(*args):
         messages.append(args[2])
         return QMessageBox.StandardButton.No
+
     monkeypatch.setattr(QMessageBox, "question", reject)
     floor.delete_selected()
     assert len(floor.machines) == 2
@@ -116,9 +118,11 @@ def test_actual_drag_multiple_selection_resize_and_undo(floor):
     start = floor.view.mapFromScene(QPointF(150, 145))
     second = floor.view.mapFromScene(QPointF(410, 145))
     QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=start)
-    QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ControlModifier, pos=second)
+    QTest.mouseClick(
+        viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ControlModifier, pos=second
+    )
     assert len(floor.selected()) == 2
-    end = start + floor.view.mapFromScene(QPointF(60,40)) - floor.view.mapFromScene(QPointF(0,0))
+    end = start + floor.view.mapFromScene(QPointF(60, 40)) - floor.view.mapFromScene(QPointF(0, 0))
     QTest.mousePress(viewport, Qt.MouseButton.LeftButton, pos=start)
     QTest.mouseMove(viewport, end, 30)
     QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=end)
@@ -132,10 +136,16 @@ def test_actual_drag_multiple_selection_resize_and_undo(floor):
     node.setSelected(True)
     # Keep the resize target inside the resized modern viewport, excluding
     # QGraphicsView edge autoscroll from this fixed-distance resize assertion.
-    floor.view.ensureVisible(node.mapRectToScene(node.boundingRect()).adjusted(0, 0, 80, 80), 20, 20)
+    floor.view.ensureVisible(
+        node.mapRectToScene(node.boundingRect()).adjusted(0, 0, 80, 80), 20, 20
+    )
     QApplication.processEvents()
-    corner = floor.view.mapFromScene(node.mapToScene(QPointF(node.machine.width, node.machine.height)))
-    target = corner + floor.view.mapFromScene(QPointF(40,40)) - floor.view.mapFromScene(QPointF(0,0))
+    corner = floor.view.mapFromScene(
+        node.mapToScene(QPointF(node.machine.width, node.machine.height))
+    )
+    target = (
+        corner + floor.view.mapFromScene(QPointF(40, 40)) - floor.view.mapFromScene(QPointF(0, 0))
+    )
     old_width, old_height = node.machine.width, node.machine.height
     QTest.mousePress(viewport, Qt.MouseButton.LeftButton, pos=corner)
     QTest.mouseMove(viewport, target, 30)
@@ -148,15 +158,17 @@ def test_actual_drag_multiple_selection_resize_and_undo(floor):
 
 def test_alignment_and_equal_gaps(floor):
     for i in range(3):
-        floor.add_machine(Machine(number=str(i+1), x=i*300, y=i*100, width=100+i*20))
-    for node in floor.nodes.values(): node.setSelected(True)
+        floor.add_machine(Machine(number=str(i + 1), x=i * 300, y=i * 100, width=100 + i * 20))
+    for node in floor.nodes.values():
+        node.setSelected(True)
     floor.align_selected(2)
     assert len({m.y for m in floor.machines}) == 1
-    for node in floor.nodes.values(): node.setSelected(True)
+    for node in floor.nodes.values():
+        node.setSelected(True)
     floor.align_selected(3)
-    ordered = sorted(floor.machines, key=lambda m:m.x)
-    gaps = [b.x - a.x - a.width for a,b in zip(ordered,ordered[1:])]
-    assert abs(gaps[0] - gaps[1]) < .001
+    ordered = sorted(floor.machines, key=lambda m: m.x)
+    gaps = [b.x - a.x - a.width for a, b in zip(ordered, ordered[1:])]
+    assert abs(gaps[0] - gaps[1]) < 0.001
 
 
 def test_autosave_manual_session_restore_and_reset(floor, layout_excel, tmp_path, monkeypatch):
@@ -165,7 +177,7 @@ def test_autosave_manual_session_restore_and_reset(floor, layout_excel, tmp_path
     floor.add_machine(Machine(number="999右", x=500, y=500))
     edited = floor.state()
     floor.autosave()
-    restored = FloorWidget(lambda: [], lambda:DAY, floor.storage)
+    restored = FloorWidget(lambda: [], lambda: DAY, floor.storage)
     assert restored.state() == edited
     restored.timer.stop()
     restored.close()
@@ -187,16 +199,18 @@ def test_autosave_manual_session_restore_and_reset(floor, layout_excel, tmp_path
 
 def test_floor_colors_and_pdf(floor, tmp_path):
     floor.set_color_filter("planned")
-    m = Machine(number="20111左", x=0,y=0, product="現在の商品")
+    m = Machine(number="20111左", x=0, y=0, product="現在の商品")
     floor.add_machine(m)
     floor.scene.clearSelection()
+
     def pixel():
-        image = QImage(180,120,QImage.Format.Format_ARGB32)
+        image = QImage(180, 120, QImage.Format.Format_ARGB32)
         image.fill(Qt.GlobalColor.white)
         painter = QPainter(image)
-        floor.scene.render(painter,QRectF(0,0,180,120),QRectF(0,0,180,120))
+        floor.scene.render(painter, QRectF(0, 0, 180, 120), QRectF(0, 0, 180, 120))
         painter.end()
-        return image.pixelColor(170,110).name()
+        return image.pixelColor(170, 110).name()
+
     assert pixel() == "#a9d7ff"
     floor.products()[0].priority = True
     floor.sync()
@@ -217,8 +231,10 @@ def test_floor_colors_and_pdf(floor, tmp_path):
 def test_invalid_floor_json(floor):
     state = floor.state()
     state["machines"] = [asdict(Machine(number="1", x=float("inf")))]
-    with pytest.raises(AppError): validate_state(state)
-    with pytest.raises(AppError): validate_state({"version":1})
+    with pytest.raises(AppError):
+        validate_state(state)
+    with pytest.raises(AppError):
+        validate_state({"version": 1})
 
 
 def test_keyboard_duplicate_delete_and_automatic_save(floor, monkeypatch):
@@ -244,9 +260,11 @@ def test_number_change_warns_and_retains_plan_for_review(floor, monkeypatch):
     machine = Machine(number="20111左")
     floor.add_machine(machine)
     warnings = []
+
     def edit(updated, title):
         updated.number = "30000右"
         return True
+
     monkeypatch.setattr(floor, "machine_dialog", edit)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
     floor.edit_machine(machine.uid)

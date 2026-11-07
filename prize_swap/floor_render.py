@@ -67,9 +67,7 @@ class CardRenderer:
         gap = max(1, base * 0.12)
         records = []
         if "number" in fields:
-            records.append(
-                (display_identity(machine), base * 1.35, True)
-            )
+            records.append((display_identity(machine), base * 1.35, True))
         if "product" in fields:
             records.append((machine.product or "商品未設定", base * 1.18, True))
         important = []
@@ -260,8 +258,10 @@ def draw_card(
     search_match=False,
     screen=False,
 ):
-    from .theme import analysis_color,contrast_text,tokens
-    if screen:background=analysis_color(background)
+    from .theme import analysis_color, contrast_text, tokens
+
+    if screen:
+        background = analysis_color(background)
     painter.save()
     painter.setRenderHint(painter.RenderHint.Antialiasing)
     border = (
@@ -274,8 +274,10 @@ def draw_card(
         )
     )
     if screen:
-        if selected:border=tokens()["accent"]
-        elif priority:border="#FDE68A" if tokens()["background"]=="#111827" else border
+        if selected:
+            border = tokens()["accent"]
+        elif priority:
+            border = "#FDE68A" if tokens()["background"] == "#111827" else border
     painter.setPen(
         QPen(
             QColor(border),

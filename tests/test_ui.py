@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from datetime import date
 
@@ -30,14 +31,14 @@ def window(tmp_path):
     app.processEvents()
 
 
-@pytest.mark.parametrize("size", [(1100,700),(1500,900),(1920,1080)])
+@pytest.mark.parametrize("size", [(1100, 700), (1500, 900), (1920, 1080)])
 def test_table_fills_center_without_top_gap(window, size):
     window.resize(*size)
     QApplication.processEvents()
     table_top = window.table.mapTo(window.centralWidget(), window.table.rect().topLeft()).y()
     assert table_top < 260
-    assert window.table.height() > size[1] * .5
-    assert window.table.width() > (size[0] - window.navigation.width() - 32) * .93
+    assert window.table.height() > size[1] * 0.5
+    assert window.table.width() > (size[0] - window.navigation.width() - 32) * 0.93
     assert window.table.verticalHeader().defaultSectionSize() == 34
     assert not hasattr(window, "apply_details")
 
@@ -86,9 +87,17 @@ def test_real_delegates_inline_edit_and_dropdown(window):
     assert window.products[0].machines == ["20085右", "20098左"]
 
     window.table.scrollTo(proxy.index(0, 9))
-    QTest.mouseClick(window.table.viewport(), Qt.MouseButton.LeftButton, pos=window.table.visualRect(proxy.index(0, 9)).center())
+    QTest.mouseClick(
+        window.table.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=window.table.visualRect(proxy.index(0, 9)).center(),
+    )
     QApplication.processEvents()
-    limit_editor = next(e for e in window.table.viewport().findChildren(QComboBox) if not isinstance(e, MethodsCombo))
+    limit_editor = next(
+        e
+        for e in window.table.viewport().findChildren(QComboBox)
+        if not isinstance(e, MethodsCombo)
+    )
     assert limit_editor.view().isVisible()  # opens with the first click
     limit_editor.setCurrentText("各②")
     limit_editor.activated.emit(limit_editor.currentIndex())
@@ -106,7 +115,7 @@ def test_real_delegates_inline_edit_and_dropdown(window):
     QApplication.processEvents()
     for name in ("橋渡し", "リング"):
         check, spin = methods.rows[name]
-        QTest.mouseClick(check, Qt.MouseButton.LeftButton, pos=QPoint(8,check.height()//2))
+        QTest.mouseClick(check, Qt.MouseButton.LeftButton, pos=QPoint(8, check.height() // 2))
         QApplication.processEvents()
         assert methods.popup.isVisible()
         assert spin.value() == 1
@@ -142,6 +151,7 @@ def test_search_selection_and_order(window):
 def test_ui_export_preview_pdf_and_session(window, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog, QMessageBox
     from openpyxl import load_workbook
+
     monkeypatch.setattr(QMessageBox, "information", lambda *a: None)
     output = tmp_path / "UI出力.xlsx"
     monkeypatch.setattr(window, "save_path", lambda *a: str(output))
@@ -169,6 +179,7 @@ def test_ui_export_preview_pdf_and_session(window, tmp_path, monkeypatch):
     # Exercise the real modal preview and its paintRequested rendering, closing
     # via a timer rather than replacing exec() with a no-op.
     observed = []
+
     def inspect_and_close():
         dialog = window.findChild(QPrintPreviewDialog)
         if dialog and dialog.isVisible():
@@ -177,6 +188,7 @@ def test_ui_export_preview_pdf_and_session(window, tmp_path, monkeypatch):
             dialog.accept()
         else:
             QTimer.singleShot(20, inspect_and_close)
+
     QTimer.singleShot(100, inspect_and_close)
     window.preview()
     assert observed and observed[0] >= 1
@@ -187,17 +199,20 @@ def test_registered_floor_machine_is_available_in_cell(window, monkeypatch):
     from prize_swap.table import MachineEditor
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QMenu, QMessageBox
+
     window.floor.add_machine(Machine(number="20085右", product="新規マシン"))
-    window.table.setCurrentIndex(window.proxy.index(0,6))
+    window.table.setCurrentIndex(window.proxy.index(0, 6))
     QApplication.processEvents()
     editor = window.table.viewport().findChild(MachineEditor)
     assert editor is not None
     assert "20085右" in editor.options()
+
     def select():
         menu = editor.findChild(QMenu)
         action = next(a for a in menu.actions() if a.text() == "20085右")
         action.setChecked(True)
         menu.close()
+
     QTimer.singleShot(20, select)
     editor.select_registered()
     window.search.setFocus()
@@ -208,9 +223,11 @@ def test_registered_floor_machine_is_available_in_cell(window, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes)
     window.floor.delete_selected()
     warnings = []
+
     def capture(*args):
         warnings.append(args[2])
         return QMessageBox.StandardButton.Yes
+
     monkeypatch.setattr(QMessageBox, "question", capture)
     window.print_products()
     assert warnings and "20085右" in warnings[0]
@@ -218,6 +235,7 @@ def test_registered_floor_machine_is_available_in_cell(window, monkeypatch):
 
 def test_excel_export_cannot_overwrite_floor_source(window, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
+
     source = tmp_path / "元レイアウト.xlsx"
     source.write_bytes(b"original")
     window.floor.source = str(source)

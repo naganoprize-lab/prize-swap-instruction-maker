@@ -95,7 +95,7 @@ def floor(tmp_path):
             sales=7500,
             average=2500,
             ratio=50,
-            po_rate=.20,
+            po_rate=0.20,
             x=60,
             y=80,
             width=260,
@@ -145,7 +145,7 @@ def test_read_valid_rows_rates_and_ignore_metadata_and_category(tmp_path):
     assert set(snapshot["records"]) == {"20088左", "20088右"}
     values = snapshot["records"]["20088左"]["values"]
     assert values["sales"] == 30000 and values["average"] == 10000 and values["operating_days"] == 3
-    assert values["po_rate"] == .08 and values["cost_rate"] == pytest.approx(.3333)
+    assert values["po_rate"] == 0.08 and values["cost_rate"] == pytest.approx(0.3333)
     assert (
         values["gross_profit"] == 20000 and values["dispensed"] == 20 and values["per_item"] == 1500
     )
@@ -181,7 +181,7 @@ def test_latest_values_protected_fields_reference_and_calendar_age(floor, tmp_pa
     assert (
         effective_stat(m, "sales") == 30000
         and effective_stat(m, "average") == 10000
-        and effective_stat(m, "po_rate") == .08
+        and effective_stat(m, "po_rate") == 0.08
     )
     assert m.sales == 7500 and m.average == 2500  # Layer 2 remains available as a fallback.
     assert (
@@ -216,7 +216,9 @@ def test_optional_fallback_zero_unknown_reference_and_new_snapshot(floor, tmp_pa
     assert effective_stat(m, "average") == 0 and effective_stat(m, "sales") == 0 and ratio(m) == 0
     assert effective_stat(m, "po_rate") is None  # Latest missing data stays unknown.
     floor.import_analysis_path(report_file(tmp_path / "別マシン.xlsx", [data_row("29999-01")]))
-    assert effective_stat(m, "sales") == 7500 and ratio(m) == 50  # Unmatched: use identified layout values.
+    assert (
+        effective_stat(m, "sales") == 7500 and ratio(m) == 50
+    )  # Unmatched: use identified layout values.
     floor.add_machine(Machine(number="29999左", product="追加商品"))
     fresh = floor.machines[-1]
     assert effective_stat(fresh, "sales") == 30000 and fresh.product == "追加商品"
@@ -275,7 +277,9 @@ def test_invalid_header_preserves_current_import_and_result_dialog(
 
     def observe(dialog):
         tabs = dialog.findChild(QTabWidget)
-        observed.append([(tabs.widget(i).columnCount(), tabs.widget(i).rowCount()) for i in range(tabs.count())])
+        observed.append(
+            [(tabs.widget(i).columnCount(), tabs.widget(i).rowCount()) for i in range(tabs.count())]
+        )
         return QDialog.DialogCode.Rejected
 
     monkeypatch.setattr(QDialog, "exec", observe)

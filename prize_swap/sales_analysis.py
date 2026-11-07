@@ -56,7 +56,8 @@ HEADERS = {
 
 def normalize_number(value):
     from .machine_matching import normalize_number as normalize
-    return normalize(value) if isinstance(value,str) else None
+
+    return normalize(value) if isinstance(value, str) else None
 
 
 def empty_snapshot():
@@ -379,12 +380,13 @@ def apply_snapshot(machines, snapshot):
     if records:
         ensure_references(machines)
     from .machine_matching import resolve_matches
-    matches=resolve_matches(machines,records)
+
+    matches = resolve_matches(machines, records)
     for machine in machines:
-        match=matches[machine.uid]
-        machine.resolved_number=match.number
-        machine.match_method=match.method
-        machine.match_message=match.message
+        match = matches[machine.uid]
+        machine.resolved_number = match.number
+        machine.match_method = match.method
+        machine.match_message = match.message
         record = records.get(match.number) if match.matched else None
         machine.analysis = (
             dict(
@@ -393,7 +395,7 @@ def apply_snapshot(machines, snapshot):
                 file_name=snapshot["file_name"],
                 loaded_at=snapshot["loaded_at"],
                 period_source=snapshot.get("period_source", "unknown"),
-            period_start=snapshot.get("period_start"),
+                period_start=snapshot.get("period_start"),
                 period_end=snapshot.get("period_end"),
                 extracted_at=snapshot.get("extracted_at"),
                 fingerprint=snapshot.get("fingerprint", ""),
@@ -411,10 +413,11 @@ def apply_snapshot(machines, snapshot):
 
 def import_summary(machines, snapshot):
     from .machine_matching import resolve_matches
-    matches=resolve_matches(machines,snapshot["records"])
-    numbers={r.number for r in matches.values() if r.number}
-    matched={r.number for r in matches.values() if r.matched}
-    unmatched=sorted(set(snapshot["records"])-matched)
+
+    matches = resolve_matches(machines, snapshot["records"])
+    numbers = {r.number for r in matches.values() if r.number}
+    matched = {r.number for r in matches.values() if r.matched}
+    unmatched = sorted(set(snapshot["records"]) - matched)
     issues = reconcile(machines, snapshot)
     return dict(
         issues=issues,

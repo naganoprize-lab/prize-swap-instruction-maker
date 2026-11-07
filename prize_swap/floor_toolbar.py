@@ -116,10 +116,12 @@ def build_toolbar(owner, layout):
         ("商品名順", "product"),
     ):
         owner.sort_by.addItem(label, key)
-    top.addWidget(owner.sort_by)
+    owner.sort_by.setParent(owner)
+    owner.sort_by.hide()
     owner.sort_by.currentIndexChanged.connect(owner.presentation_changed)
     owner.descending = QCheckBox("降順")
-    top.addWidget(owner.descending)
+    owner.descending.setParent(owner)
+    owner.descending.hide()
     owner.descending.toggled.connect(owner.presentation_changed)
     top.addWidget(QLabel("基準日"))
     owner.reference_date = QDateEdit(QDate.currentDate())
@@ -200,6 +202,7 @@ def build_toolbar(owner, layout):
             ("分析・判定・色・照合の設定", owner.analysis_settings_dialog),
             ("カード・文字サイズ", owner.card_settings),
             ("表示カードのプリセット", owner.presentation_settings),
+            ("一覧の並び順", owner.sort_menu),
             ("プリセット保存", owner.save_card_preset),
             ("プリセット適用", owner.load_card_preset),
             ("詳細表示項目（従来設定）", owner.display_settings),
