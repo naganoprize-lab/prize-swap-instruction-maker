@@ -139,9 +139,8 @@ class MachineDetailDialog(QDialog):
         self.updated = deepcopy(machine)
         self.setWindowTitle(f"マシン詳細 — {display_identity(machine)}")
         available = self.screen().availableGeometry()
-        self.resize(
-            min(820, max(360, available.width() - 30)), min(800, max(300, available.height() - 50))
-        )
+        size = owner.analytics_ui["detail_size"]
+        self.resize(min(size[0], max(360, available.width()-30)), min(size[1], max(300, available.height()-50)))
         outer = QVBoxLayout(self)
         tabs = QTabWidget()
         outer.addWidget(tabs, 1)
@@ -302,6 +301,24 @@ class MachineDetailDialog(QDialog):
         outer.addWidget(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        from .detail_widgets import build_overview
+
+        build_overview(self, tabs, scroll, panel)
+
+    def refresh_overview(self, *_):
+        from .detail_widgets import refresh_overview
+
+        refresh_overview(self)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "splitter"):
+            self.splitter.setOrientation(Qt.Orientation.Vertical if self.width()<960 else Qt.Orientation.Horizontal)
+
+    def done(self, result):
+        self.owner.analytics_ui["detail_size"] = [max(300,self.width()), max(300,self.height())]
+        self.owner.schedule_save()
+        super().done(result)
 
     def edit_metrics(self):
         draft = deepcopy(self.updated)
@@ -316,6 +333,7 @@ class MachineDetailDialog(QDialog):
                 ("days", days_text(draft, self.owner.reference_day())),
             ):
                 self.values[key].setText(missing(value))
+            self.refresh_overview()
 
     def accept(self):
         try:

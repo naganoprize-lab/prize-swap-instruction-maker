@@ -388,6 +388,7 @@ class FloorView(QGraphicsView):
 
 
 class FloorWidget(FloorWorkspaceMixin, QWidget):
+    analytics_requested = Signal(str, str)
     product_edited = Signal()
     changed = Signal()
     message = Signal(str)
