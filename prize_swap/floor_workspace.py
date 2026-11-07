@@ -338,6 +338,9 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         manual_period(self)
 
     def show_method_analysis(self):
+        if getattr(self,"analysis_page",None) is not None:
+            self.analytics_requested.emit("","all")
+            return
         from .analysis_views import show_method_analysis
 
         show_method_analysis(self)

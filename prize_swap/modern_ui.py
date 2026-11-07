@@ -264,7 +264,7 @@ class Navigation(QWidget):
             b.setProperty("nav", True)
             b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            b.setCheckable(key in ("dashboard", "floor", "instructions", "labels", "settings"))
+            b.setCheckable(key in ("dashboard", "floor", "instructions", "labels", "settings", "analysis"))
             b.clicked.connect(lambda checked=False, k=key: self.activate(k))
             b.setProperty("iconName", icon)
             layout.addWidget(b)
@@ -306,7 +306,9 @@ class Navigation(QWidget):
 
     def activate(self, key):
         w = self.window
-        if key in w.pages:
+        if key == "analysis":
+            w.floor.show_method_analysis()
+        elif key in w.pages:
             w.tabs.setCurrentWidget(w.pages[key])
             self.select(key)
         elif key == "candidates":
@@ -328,12 +330,18 @@ def build_shell(window, outer, header, footer):
     window.settings_page = SettingsPage(window)
     window.tabs.addTab(window.dashboard_page, "ダッシュボード")
     window.tabs.addTab(window.settings_page, "設定")
+    from .analytics_page import SalesPage
+
+    window.analysis_page = SalesPage(window)
+    window.floor.analysis_page = window.analysis_page
+    window.tabs.addTab(window.analysis_page, "売上分析")
     window.pages = {
         "instructions": window.instruction_page,
         "floor": window.floor,
         "labels": window.labels,
         "dashboard": window.dashboard_page,
         "settings": window.settings_page,
+        "analysis": window.analysis_page,
     }
     window.tabs.tabBar().hide()
     body = QWidget()
@@ -376,5 +384,7 @@ def build_shell(window, outer, header, footer):
     window.page_search.textChanged.connect(window.search_page)
     window.floor.floor_search.textChanged.connect(window.sync_page_search)
     window.search.textChanged.connect(window.sync_page_search)
+    window.analysis_page.search.textChanged.connect(window.sync_page_search)
+    window.floor.analytics_requested.connect(window.show_sales_analysis)
     window.floor.changed.connect(window.refresh_page_metadata)
     window.page_changed()

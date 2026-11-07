@@ -252,105 +252,120 @@ class MethodBars(QWidget):
         painter.end()
 
 
-def show_method_analysis(owner):
-    from .method_analysis import totals
-    from .analysis_settings import machine_type
-    from .performance_validation import period_text
-    from PySide6.QtWidgets import QScrollArea
+class MethodAnalysisPanel(QWidget):
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+        self.build(owner)
 
+    def build(self, owner):
+        from .method_analysis import totals
+        from .analysis_settings import machine_type
+        from .performance_validation import period_text
+        from PySide6.QtWidgets import QScrollArea
+    
+        layout = QVBoxLayout(self)
+        row = QHBoxLayout()
+        layout.addLayout(row)
+        kinds = QComboBox()
+        kinds.addItem("全機種", "")
+        for name in sorted(set(machine_type(m, owner.analysis_settings) for m in owner.machines)):
+            kinds.addItem(name, name)
+        methods = QComboBox()
+        methods.addItem("全運営方法", "")
+        for name in sorted(set(m.operation_method.strip() or "未設定" for m in owner.machines)):
+            methods.addItem(name, name)
+        row.addWidget(kinds)
+        row.addWidget(methods)
+        note = QLabel(
+            "平均売上・アベ比は有効値の単純平均。PO率は売上加重を優先し、原価率は同じ有効対象の合計原価÷合計売上を優先します。欠損値は0で埋めません。異なる期間・期間不明の別ファイルは合算しません。"
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        container = QVBoxLayout()
+        layout.addLayout(container, 1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        bars = MethodBars()
+        scroll.setWidget(bars)
+        layout.addWidget(scroll, 1)
+        table = None
+    
+        def refresh():
+            nonlocal table
+            records = totals(
+                owner.machines, owner.analysis_settings, kinds.currentData(), methods.currentData()
+            )
+            rows = []
+            for r in records:
+                start, end, _ = r["period"]
+                period = f"{start} ～ {end}" if start and end else "対象期間不明（比較不可）"
+                coverage = " / ".join(f'{k}:{v}/{r["count"]}台' for k, v in r["coverage"].items())
+                rows.append(
+                    [
+                        r["method"],
+                        (r["count"], r["count"]),
+                        (money(r["average_sales"]), r["average_sales"]),
+                        (money(r["sales"]), r["sales"]),
+                        percent_text(r["po_rate"]),
+                        percent_text(r["po_arithmetic"]),
+                        r["po_mode"],
+                        percent_text(r["cost_rate"]),
+                        percent_text(r["cost_arithmetic"]),
+                        r["cost_mode"],
+                        "—" if r["ratio"] is None else f'{r["ratio"]:.1f}%',
+                        money(r["gross_profit"]),
+                        period,
+                        f'{len(r["products"])}商品：' + "、".join(r["products"]),
+                        coverage,
+                    ]
+                )
+            if table:
+                container.removeWidget(table)
+                table.deleteLater()
+            table = make_table(
+                [
+                    "運営方法",
+                    "ブース数",
+                    "平均売上",
+                    "総売上",
+                    "PO率（優先方式）",
+                    "PO率単純平均",
+                    "PO率計算方式",
+                    "原価率（優先方式）",
+                    "原価率単純平均",
+                    "原価率計算方式",
+                    "平均アベ比",
+                    "粗利益",
+                    "集計期間",
+                    "商品構成",
+                    "有効値件数",
+                ],
+                rows,
+            )
+            container.addWidget(table)
+            # Each bar remains a separate period; its full label makes comparison caveats explicit.
+            bars.records = [
+                dict(r, method=r["method"] + " " + (r["period"][0] or "期間不明")) for r in records
+            ]
+            bars.setMinimumHeight(max(180, len(records) * 32))
+            bars.update()
+    
+        kinds.currentIndexChanged.connect(refresh)
+        methods.currentIndexChanged.connect(refresh)
+        refresh()
+        self.refresh = refresh
+        self.kinds = kinds
+        self.methods = methods
+
+
+def show_method_analysis(owner):
+    """Legacy standalone entry; the main window embeds the same panel."""
     dialog = QDialog(owner)
     dialog.setWindowTitle("運営方法別の成績分析")
-    dialog.resize(1200, 760)
+    dialog.resize(1200,760)
     layout = QVBoxLayout(dialog)
-    row = QHBoxLayout()
-    layout.addLayout(row)
-    kinds = QComboBox()
-    kinds.addItem("全機種", "")
-    for name in sorted(set(machine_type(m, owner.analysis_settings) for m in owner.machines)):
-        kinds.addItem(name, name)
-    methods = QComboBox()
-    methods.addItem("全運営方法", "")
-    for name in sorted(set(m.operation_method.strip() or "未設定" for m in owner.machines)):
-        methods.addItem(name, name)
-    row.addWidget(kinds)
-    row.addWidget(methods)
-    note = QLabel(
-        "平均売上・アベ比は有効値の単純平均。PO率は売上加重を優先し、原価率は同じ有効対象の合計原価÷合計売上を優先します。欠損値は0で埋めません。異なる期間・期間不明の別ファイルは合算しません。"
-    )
-    note.setWordWrap(True)
-    layout.addWidget(note)
-    container = QVBoxLayout()
-    layout.addLayout(container, 1)
-    scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
-    bars = MethodBars()
-    scroll.setWidget(bars)
-    layout.addWidget(scroll, 1)
-    table = None
-
-    def refresh():
-        nonlocal table
-        records = totals(
-            owner.machines, owner.analysis_settings, kinds.currentData(), methods.currentData()
-        )
-        rows = []
-        for r in records:
-            start, end, _ = r["period"]
-            period = f"{start} ～ {end}" if start and end else "対象期間不明（比較不可）"
-            coverage = " / ".join(f'{k}:{v}/{r["count"]}台' for k, v in r["coverage"].items())
-            rows.append(
-                [
-                    r["method"],
-                    (r["count"], r["count"]),
-                    (money(r["average_sales"]), r["average_sales"]),
-                    (money(r["sales"]), r["sales"]),
-                    percent_text(r["po_rate"]),
-                    percent_text(r["po_arithmetic"]),
-                    r["po_mode"],
-                    percent_text(r["cost_rate"]),
-                    percent_text(r["cost_arithmetic"]),
-                    r["cost_mode"],
-                    "—" if r["ratio"] is None else f'{r["ratio"]:.1f}%',
-                    money(r["gross_profit"]),
-                    period,
-                    f'{len(r["products"])}商品：' + "、".join(r["products"]),
-                    coverage,
-                ]
-            )
-        if table:
-            container.removeWidget(table)
-            table.deleteLater()
-        table = make_table(
-            [
-                "運営方法",
-                "ブース数",
-                "平均売上",
-                "総売上",
-                "PO率（優先方式）",
-                "PO率単純平均",
-                "PO率計算方式",
-                "原価率（優先方式）",
-                "原価率単純平均",
-                "原価率計算方式",
-                "平均アベ比",
-                "粗利益",
-                "集計期間",
-                "商品構成",
-                "有効値件数",
-            ],
-            rows,
-        )
-        container.addWidget(table)
-        # Each bar remains a separate period; its full label makes comparison caveats explicit.
-        bars.records = [
-            dict(r, method=r["method"] + " " + (r["period"][0] or "期間不明")) for r in records
-        ]
-        bars.setMinimumHeight(max(180, len(records) * 32))
-        bars.update()
-
-    kinds.currentIndexChanged.connect(refresh)
-    methods.currentIndexChanged.connect(refresh)
-    refresh()
+    layout.addWidget(MethodAnalysisPanel(owner),1)
     close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
     close.rejected.connect(dialog.reject)
     layout.addWidget(close)
