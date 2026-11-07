@@ -380,6 +380,17 @@ class Window(QMainWindow):
         if uid:
             self.analysis_page.focus_machine(uid,scope)
 
+    def highlight_analysis_machines(self,uids,select=False):
+        valid=set(uids)&set(self.floor.nodes)
+        if not valid:
+            self.analysis_page.notice.setText('対象マシンを特定できないため、売り場への連携を行いません。')
+            return
+        if self.floor._fullscreen_host:self.floor._fullscreen_host.close()
+        self.tabs.setCurrentWidget(self.floor)
+        self.floor.set_analysis_highlight(valid)
+        if select and len(valid)==1:
+            self.floor.nodes[next(iter(valid))].setSelected(True)
+
     def theme_changed(self, *_):
         from .theme import MODES, line_icon
 

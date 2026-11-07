@@ -81,6 +81,7 @@ class FullscreenHost(QDialog):
             ("zoom_out", "−", lambda: floor.set_zoom(floor.view.transform().m11() * 100 / 1.15)),
             ("fit", "全体", floor.fit),
             ("details", "詳細", floor.open_selected_details),
+            ("clear_analysis", "分析強調を解除", floor.clear_analysis_highlight),
         ):
             button = QToolButton()
             button.setText(label)
@@ -110,6 +111,7 @@ class FullscreenHost(QDialog):
         close.clicked.connect(self.close)
         row.addWidget(close)
         self.buttons["close"] = close
+        self.buttons["clear_analysis"].setVisible(floor.analysis_highlight_uids is not None)
         layout.addWidget(self.toolbar)
         layout.addWidget(floor, 1)
         floor.show()
@@ -241,6 +243,11 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
             or self.presentation["max_days"] is not None
         )
         matched = set(self._match_uids)
+        if self.analysis_highlight_uids is not None:
+            self.analysis_highlight_uids &= set(self.nodes)
+            if not self.analysis_highlight_uids:
+                self.analysis_highlight_uids=None
+                self.analysis_clear.hide()
         width = self.view.viewport().width()
         rects = project_machines(visible, self.presentation, self.reference_day(), width)
         self._projecting = True
@@ -251,7 +258,8 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
                     node.setSelected(False)
                 node.setVisible(visible)
                 node.search_match = active and uid in matched
-                node.setOpacity(1 if not active or uid in matched else 0.35)
+                analysis=getattr(self,'analysis_highlight_uids',None)
+                node.setOpacity(1 if (uid in analysis if analysis is not None else not active or uid in matched) else 0.35)
                 if not visible:
                     continue
                 rect = rects[uid]
@@ -278,6 +286,22 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         self._highlight_uids = set(uids)
         for node in self.nodes.values():
             node.update()
+
+    def set_analysis_highlight(self,uids):
+        valid=set(uids)&set(self.nodes)
+        if not valid:return False
+        self.analysis_highlight_uids=valid
+        self.analysis_clear.setText(f"分析強調 {len(valid)}台を解除")
+        self.analysis_clear.show()
+        if self._fullscreen_host:self._fullscreen_host.buttons['clear_analysis'].show()
+        self.apply_presentation()
+        return True
+
+    def clear_analysis_highlight(self):
+        self.analysis_highlight_uids=None
+        self.analysis_clear.hide()
+        if self._fullscreen_host:self._fullscreen_host.buttons['clear_analysis'].hide()
+        self.apply_presentation()
 
     def next_match(self, direction=1):
         ids = getattr(self, "_match_uids", [])

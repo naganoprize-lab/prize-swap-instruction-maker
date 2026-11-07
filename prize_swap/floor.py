@@ -205,7 +205,8 @@ class MachineNode(QGraphicsObject):
             self.machine.uid in self.owner.overlaps,
             screen=True,
             search_match=getattr(self, "search_match", False)
-            or self.machine.uid in getattr(self.owner, "_highlight_uids", set()),
+            or self.machine.uid in getattr(self.owner, "_highlight_uids", set())
+            or self.machine.uid in (self.owner.analysis_highlight_uids or set()),
         )
         if (self.machine.analysis or {}).get(
             "quality_issues"
@@ -447,6 +448,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self._fullscreen_transition = False
         self._detail_open = False
         self._highlight_uids = set()
+        self.analysis_highlight_uids = None
         from .analytics_data import AnalyticsService, validate_ui_state
 
         self.analytics = AnalyticsService(self)
@@ -456,6 +458,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         from .floor_dashboard import FloorDashboard
 
         self.dashboard = FloorDashboard(self)
+        self.dashboard.layout().itemAt(0).layout().addWidget(self.analysis_clear)
         layout.addWidget(self.dashboard)
         self.scene = QGraphicsScene(self)
         self.view = FloorView(self.scene, self)

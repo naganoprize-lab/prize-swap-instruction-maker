@@ -1,6 +1,6 @@
 """Sortable analysis tables; activating a record locates its existing floor item."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, QRectF
 from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
     QDialog,
@@ -44,7 +44,7 @@ class ValueItem(QTableWidgetItem):
         return str(a) < str(b)
 
 
-def make_table(headers, rows):
+def make_table(headers, rows, identities=None):
     t = QTableWidget(len(rows), len(headers))
     from .theme import style_table
 
@@ -57,6 +57,7 @@ def make_table(headers, rows):
     for i, row in enumerate(rows):
         for j, v in enumerate(row):
             item = ValueItem(v[0], v[1]) if isinstance(v, tuple) else ValueItem(v)
+            if j==0 and identities is not None:item.setData(Qt.ItemDataRole.UserRole,identities[i])
             t.setItem(i, j, item)
     t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
     t.horizontalHeader().setStretchLastSection(True)
@@ -126,6 +127,7 @@ def show_candidates(owner):
             "アベ比の取得元",
         ],
         rows,
+        [[m.uid] for m in owner.machines],
     )
     table.setColumnWidth(9, 430)
     table.sortItems(0)
@@ -145,8 +147,7 @@ def show_candidates(owner):
     search.textChanged.connect(filter_rows)
 
     def locate(row, *_):
-        number = table.item(row, 1).text()
-        ids = [m.uid for m in owner.machines if machine_key(m) == number or m.source_key == number]
+        ids = table.item(row,0).data(Qt.ItemDataRole.UserRole) or []
         owner.highlight_group(ids)
         if ids:
             owner.scene.clearSelection()
@@ -218,9 +219,11 @@ def propose_assignments(owner, numbers, parent=None):
 
 
 class MethodBars(QWidget):
+    activated=Signal(list)
     def __init__(self):
         super().__init__()
         self.records = []
+        self.hits=[]
         self.setMinimumHeight(180)
 
     def paintEvent(self, event):
@@ -229,6 +232,7 @@ class MethodBars(QWidget):
 
         painter.fillRect(self.rect(), QColor(tokens()["card"]))
         records = self.records
+        self.hits=[]
         if not records:
             painter.drawText(10, 30, "集計対象がありません。")
             return
@@ -239,7 +243,7 @@ class MethodBars(QWidget):
             y = 20 + i * height
             painter.setPen(QColor(tokens()["text"]))
             painter.drawText(4, round(y + 14), r["method"])
-            painter.fillRect(
+            if r['average_sales'] is not None:painter.fillRect(
                 140,
                 round(y),
                 round(max(0, self.width() - 300) * value / largest),
@@ -249,7 +253,13 @@ class MethodBars(QWidget):
             painter.drawText(
                 max(145, self.width() - 150), round(y + 14), money(r["average_sales"]) + "円"
             )
+            self.hits.append((QRectF(0,y,self.width(),height),r.get('uids',[])))
         painter.end()
+
+    def mousePressEvent(self,event):
+        for rect,uids in self.hits:
+            if rect.contains(event.position()) and uids:self.activated.emit(uids);return
+        super().mousePressEvent(event)
 
 
 class MethodAnalysisPanel(QWidget):
@@ -287,6 +297,10 @@ class MethodAnalysisPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         bars = MethodBars()
+        def locate(uids):
+            if getattr(owner,'analysis_page',None) is not None:owner.analysis_page.window.highlight_analysis_machines(uids)
+            else:owner.highlight_group(uids)
+        bars.activated.connect(locate)
         scroll.setWidget(bars)
         layout.addWidget(scroll, 1)
         table = None
@@ -342,7 +356,11 @@ class MethodAnalysisPanel(QWidget):
                     "有効値件数",
                 ],
                 rows,
+                [r['uids'] for r in records],
             )
+            table.setSortingEnabled(False)
+            table.cellClicked.connect(lambda row,col:locate(table.item(row,0).data(Qt.ItemDataRole.UserRole) or []))
+            table.setSortingEnabled(True)
             container.addWidget(table)
             # Each bar remains a separate period; its full label makes comparison caveats explicit.
             bars.records = [

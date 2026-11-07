@@ -41,7 +41,7 @@ def write_csv(path,headers,rows,protected=(),overwrite=False):
 
 
 def export_tables(page):
-    metric=page.metric.currentData();operation=page.operation.currentData()
+    metric=page.metric_choice.currentData();operation=page.operation.currentData()
     unit='件' if operation=='count' else '比率' if operation=='share' else NUMERIC.get(metric,('',''))[1]
     headers=['区分','第2軸','対象期間','集計値（'+unit+'）','対象台数','有効件数','計算方式']
     results=[[r['label'],r['series'],r['period_text'],r['value'],r['count'],r['valid_count'],r['mode']] for r in page.results]

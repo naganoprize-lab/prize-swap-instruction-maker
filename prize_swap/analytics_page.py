@@ -32,8 +32,8 @@ class SalesPage(QWidget):
         tools=QWidget();self.controls=QHBoxLayout(tools);self.controls.setContentsMargins(0,0,0,0)
         tool_scroll=QScrollArea();tool_scroll.setWidgetResizable(True);tool_scroll.setWidget(tools);tool_scroll.setFixedHeight(42);tool_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         outer.addWidget(tool_scroll)
-        self.axis=QComboBox();self.metric=QComboBox();self.operation=QComboBox();self.chart_type=QComboBox()
-        for label,control,items in (("集計軸",self.axis,AXES),("指標",self.metric,FIELDS),("計算",self.operation,AGGREGATIONS),("グラフ",self.chart_type,CHARTS)):
+        self.axis=QComboBox();self.metric_choice=QComboBox();self.operation=QComboBox();self.chart_type=QComboBox()
+        for label,control,items in (("集計軸",self.axis,AXES),("指標",self.metric_choice,FIELDS),("計算",self.operation,AGGREGATIONS),("グラフ",self.chart_type,CHARTS)):
             self.controls.addWidget(QLabel(label));self.controls.addWidget(control)
             for key,text in items.items():control.addItem(text,key)
         self.controls.addStretch()
@@ -76,18 +76,23 @@ class SalesPage(QWidget):
         self.chart_scroll=QScrollArea();self.chart_scroll.setWidgetResizable(True)
         self.canvas=ChartCanvas();self.chart_scroll.setWidget(self.canvas);self.chart_stack.addWidget(self.chart_scroll)
         from .radar import RadarChart
-        self.radar=RadarChart();self.chart_stack.addWidget(self.radar)
+        self.radar=RadarChart();self.radar_scroll=QScrollArea();self.radar_scroll.setWidgetResizable(True);self.radar_scroll.setWidget(self.radar);self.chart_stack.addWidget(self.radar_scroll)
         self.cross_table=make_table([],[]);self.chart_stack.addWidget(self.cross_table)
         self.data_tabs=QTabWidget();self.splitter.addWidget(self.data_tabs)
         self.result_table=make_table([],[]);self.detail_table=make_table([],[])
         self.data_tabs.addTab(self.result_table,'集計結果');self.data_tabs.addTab(self.detail_table,'全項目・取得元')
-        self.legacy=MethodAnalysisPanel(self.owner);self.data_tabs.addTab(self.legacy,'運営方法別（従来指標）')
+        self.legacy=MethodAnalysisPanel(self.owner);self.legacy_scroll=QScrollArea();self.legacy_scroll.setWidgetResizable(True);self.legacy_scroll.setWidget(self.legacy);self.data_tabs.addTab(self.legacy_scroll,'運営方法別（従来指標）')
         self.splitter.setSizes([380,260])
         self.timer=QTimer(self);self.timer.setSingleShot(True);self.timer.setInterval(120);self.timer.timeout.connect(self.refresh)
         self.load_state()
-        for control in (self.axis,self.metric,self.operation,self.chart_type):control.currentIndexChanged.connect(self.changed)
+        for control in (self.axis,self.metric_choice,self.operation,self.chart_type):control.currentIndexChanged.connect(self.changed)
         self.search.textChanged.connect(self.changed)
         self.owner.changed.connect(self.invalidate)
+        self.canvas.activated.connect(self.window.highlight_analysis_machines)
+        self.radar.activated.connect(lambda uids:self.window.highlight_analysis_machines(uids,True))
+        self.cross_table.cellClicked.connect(self.cross_clicked)
+        self.result_table.cellClicked.connect(self.result_clicked)
+        self.detail_table.cellClicked.connect(self.detail_clicked)
         from .theme import manager
         manager().changed.connect(self.theme_changed)
         for c in (self.stack_axis,self.x_metric,self.y_metric,self.order):c.currentIndexChanged.connect(self.changed)
@@ -96,7 +101,7 @@ class SalesPage(QWidget):
 
     def load_state(self):
         self._loading=True;s=self.owner.analytics_ui
-        for key,control in (("axis",self.axis),("metric",self.metric),("operation",self.operation),("chart",self.chart_type),("stack",self.stack_axis),("x_metric",self.x_metric),("y_metric",self.y_metric)):
+        for key,control in (("axis",self.axis),("metric",self.metric_choice),("operation",self.operation),("chart",self.chart_type),("stack",self.stack_axis),("x_metric",self.x_metric),("y_metric",self.y_metric)):
             control.setCurrentIndex(max(0,control.findData(s[key])))
         self.search.setText(s['search']);self.conditions=deepcopy(s['conditions'])
         self.legend.setChecked(s['legend']);self.order.setCurrentIndex(['descending','ascending','label'].index(s['sort']))
@@ -105,11 +110,11 @@ class SalesPage(QWidget):
 
     def changed(self,*_):
         if self._loading:return
-        metric=self.metric.currentData();op=self.operation.currentData()
+        metric=self.metric_choice.currentData();op=self.operation.currentData()
         if metric not in NUMERIC and op not in ('count','share') or metric in RATIOS and op=='sum' or op=='recalculate' and metric!='cost_rate':
             self.operation.blockSignals(True);self.operation.setCurrentIndex(self.operation.findData('count' if metric not in NUMERIC else 'mean'));self.operation.blockSignals(False)
         s=self.owner.analytics_ui
-        for key,control in (("axis",self.axis),("metric",self.metric),("operation",self.operation),("chart",self.chart_type),("stack",self.stack_axis),("x_metric",self.x_metric),("y_metric",self.y_metric)):
+        for key,control in (("axis",self.axis),("metric",self.metric_choice),("operation",self.operation),("chart",self.chart_type),("stack",self.stack_axis),("x_metric",self.x_metric),("y_metric",self.y_metric)):
             s[key]=control.currentData()
         s['search']=self.search.text();s['conditions']=deepcopy(self.conditions)
         s['legend']=self.legend.isChecked();s['descending']=self.order.currentIndex()==0
@@ -142,7 +147,7 @@ class SalesPage(QWidget):
         self.timer.stop();self.dirty=False
         self.update_condition_menu()
         try:
-            self.records,self.results=self.owner.analytics.query(self.conditions,self.search.text(),self.focus_uids,self.axis.currentData(),self.metric.currentData(),self.operation.currentData(),self.stack_axis.currentData() if self.chart_type.currentData() in ('stacked','cross') else None)
+            self.records,self.results=self.owner.analytics.query(self.conditions,self.search.text(),self.focus_uids,self.axis.currentData(),self.metric_choice.currentData(),self.operation.currentData(),self.stack_axis.currentData() if self.chart_type.currentData() in ('stacked','cross') else None)
             self.results=sorted(self.results,key=lambda r:(r['value'] is None,-r['value'] if self.order.currentIndex()==0 and r['value'] is not None else r['value'] if r['value'] is not None else 0) if self.order.currentIndex()!=2 else (r['label'],r['period_text']))
             self.notice.setText('欠損は0で補完しません。異なる期間は分離して表示します。比率の単純平均・加重平均・再計算を区別してください。')
         except Exception as exc:
@@ -150,12 +155,14 @@ class SalesPage(QWidget):
         a=self.owner.analysis_state
         self.metadata.setText(f'{period_text(a)} ｜ 更新 {a["loaded_at"] or "未読込"} ｜ 分析対象 {len(self.records)} / {len(self.owner.machines)}台')
         self.focus_note.setText('マシン指定あり' if self.focus_uids is not None else '')
-        metric=self.metric.currentData();operation=self.operation.currentData()
+        metric=self.metric_choice.currentData();operation=self.operation.currentData()
         rows=[]
         for r in self.results:
             value=formatted(metric,r['value']) if operation not in ('count','share') else formatted('po_rate' if operation=='share' else 'dispensed',r['value'])
             rows.append([r['label'],r['period_text'],(value,r['value']),r['count'],r['valid_count'],r['mode'],'、'.join(r['products'])])
         fill_table(self.result_table,['区分','集計期間','集計値','対象台数','有効値件数','計算方式','商品構成'],rows)
+        for i,r in enumerate(self.results):
+            self.result_table.item(i,0).setData(Qt.ItemDataRole.UserRole,r['uids'])
         self.result_table.setSortingEnabled(True)
         keys=list(FIELDS)
         raw=[]
@@ -164,12 +171,25 @@ class SalesPage(QWidget):
         fill_table(self.detail_table,[FIELDS[k] for k in keys]+['更新日時','実績ファイル'],raw)
         self.detail_table.setSortingEnabled(False)
         for i,r in enumerate(self.records):
+            self.detail_table.item(i,0).setData(Qt.ItemDataRole.UserRole,[r['uid']])
             for j,key in enumerate(keys):
                 if key in r['sources']:
                     info=r['sources'][key];self.detail_table.item(i,j).setToolTip(info['source']+' / 更新 '+(info['updated_at'] or '不明'))
         self.detail_table.setSortingEnabled(True)
         self.update_chart()
         self.legacy.refresh()
+
+    def cross_clicked(self,row,column):
+        item=self.cross_table.item(row,column)
+        if item and item.data(Qt.ItemDataRole.UserRole):self.window.highlight_analysis_machines(item.data(Qt.ItemDataRole.UserRole))
+
+    def result_clicked(self,row,column):
+        item=self.result_table.item(row,0)
+        if item:self.window.highlight_analysis_machines(item.data(Qt.ItemDataRole.UserRole) or [])
+
+    def detail_clicked(self,row,column):
+        item=self.detail_table.item(row,0)
+        if item:self.window.highlight_analysis_machines(item.data(Qt.ItemDataRole.UserRole) or [],True)
 
     def filter_editor_changed(self,*_):
         numeric=self.filter_field.currentData() in NUMERIC
@@ -250,7 +270,7 @@ class SalesPage(QWidget):
         for i in range(self.chart_type.count()):self.chart_type.setItemIcon(i,chart_icon(self.chart_type.itemData(i)))
 
     def update_chart(self):
-        kind=self.chart_type.currentData();metric=self.metric.currentData();operation=self.operation.currentData()
+        kind=self.chart_type.currentData();metric=self.metric_choice.currentData();operation=self.operation.currentData()
         self.timeline,self.history_omitted=history_series(self.owner,self.records,metric) if metric in NUMERIC and metric not in ('ratio','days') else ([],0)
         for i in range(self.chart_type.count()):
             key=self.chart_type.itemData(i);reason=chart_constraints(key,self.records,self.results,metric,operation,self.timeline)
@@ -273,7 +293,7 @@ class SalesPage(QWidget):
             from .radar import evaluate,score_record
             machine=next(m for m in self.owner.machines if m.uid==self.records[0]['uid'])
             peers=[score_record(m,self.owner.reference_day(),self.owner.analysis_settings) for m in self.owner.machines]
-            self.radar.set_axes(evaluate(machine,self.owner.reference_day(),self.owner.analysis_settings,peers));self.chart_stack.setCurrentWidget(self.radar)
+            self.radar.set_axes(evaluate(machine,self.owner.reference_day(),self.owner.analysis_settings,peers));self.chart_stack.setCurrentWidget(self.radar_scroll)
         elif kind=='cross':
             self.render_cross();self.chart_stack.setCurrentWidget(self.cross_table)
         self.chart_data=data
@@ -286,7 +306,7 @@ class SalesPage(QWidget):
         fill_table(self.cross_table,['区分・期間']+columns,[[label+' / '+(period[0] or '期間不明')]+['—']*len(columns) for period,label in rows])
         for r in self.results:
             i=rows.index((r['period'],r['label']));j=columns.index(r['series'])+1
-            key='dispensed' if self.operation.currentData()=='count' else 'po_rate' if self.operation.currentData()=='share' else self.metric.currentData()
+            key='dispensed' if self.operation.currentData()=='count' else 'po_rate' if self.operation.currentData()=='share' else self.metric_choice.currentData()
             item=self.cross_table.item(i,j);item.setText(formatted(key,r['value']));item.setData(Qt.ItemDataRole.UserRole,r['uids']);item.setToolTip(r['period_text']+' / '+r['mode'])
 
     def expand_chart(self,expanded):

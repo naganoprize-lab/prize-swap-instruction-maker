@@ -75,6 +75,7 @@ def totals(machines, settings=None, type_filter="", method_filter=""):
         output.append(
             dict(
                 method=method,
+                uids=[m.uid for m in group],
                 count=len(group),
                 average_sales=mean(values("average")),
                 sales=total("sales"),
