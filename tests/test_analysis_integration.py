@@ -310,3 +310,36 @@ def test_new_filters_pdf_and_direct_print_share_layout(tmp_path, monkeypatch, mo
         w.timer.stop()
         w.day_timer.stop()
         w.close()
+
+
+def test_quantile_print_subset_uses_full_floor_population(tmp_path):
+    from prize_swap.floor import FloorWidget
+    from prize_swap.floor_print import FloorPrintOptions, floor_printer
+
+    w = FloorWidget(lambda: [], date.today, tmp_path / "auto.json")
+    try:
+        w.machines = [
+            Machine(number=f"{20000+i}右", average=i * 100, product=f"商品{i}", x=i * 200)
+            for i in range(8)
+        ]
+        w.analysis_settings["sales_mode"] = "quantile"
+        w.rebuild()
+        w.set_color_filter("sales_metric")
+        w.floor_search.setText("20000右")
+        expected = w.card_context(w.machines[0])[0]
+        w.set_print_options(
+            FloorPrintOptions(
+                color_filter="sales_metric",
+                visible_only=True,
+                analysis_settings={"sales_mode": "quantile"},
+            )
+        )
+        plan = w.paint_floor(floor_printer(w.print_options, tmp_path / "subset.pdf"))
+        assert (
+            len(plan.pages[0].cards) == 1
+            and plan.pages[0].cards[0].background == expected == "#F4A6A6"
+        )
+    finally:
+        w.timer.stop()
+        w.day_timer.stop()
+        w.close()

@@ -134,3 +134,36 @@ def test_analysis_dialogs_and_settings_are_reviewable(tmp_path, monkeypatch):
         w.timer.stop()
         w.day_timer.stop()
         w.close()
+
+
+def test_history_limit_failure_is_atomic_including_type_palette(tmp_path, monkeypatch):
+    import prize_swap.performance_history as history
+    from openpyxl import load_workbook
+
+    w = FloorWidget(lambda: [], lambda: DAY, tmp_path / "auto.json")
+    try:
+        w.machines = [Machine(number="20088左")]
+        w.rebuild()
+        current = report_file(tmp_path / "old.xlsx", [data_row()])
+        w.import_analysis_path(current)
+        new = report_file(tmp_path / "new.xlsx", [data_row()])
+        book = load_workbook(new)
+        book.active["C2"] = "新しい機種"
+        book.save(new)
+        book.close()
+        before = w.state()
+        original = history.archive
+
+        def limited(entries, snapshot):
+            if snapshot["file_name"] == "new.xlsx":
+                raise AppError("履歴上限")
+            return original(entries, snapshot)
+
+        monkeypatch.setattr(history, "archive", limited)
+        with pytest.raises(AppError, match="上限"):
+            w.import_analysis_path(new)
+        assert w.state() == before
+    finally:
+        w.timer.stop()
+        w.day_timer.stop()
+        w.close()

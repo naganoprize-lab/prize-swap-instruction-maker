@@ -229,8 +229,13 @@ def plan_floor(
     selected=(),
     page_size=None,
     loaded_at="",
+    population=None,
 ):
     options.validate()
+    metrics_settings = validate_settings(options.analysis_settings)
+    metrics_settings["_sales_bounds"] = sales_boundaries(
+        list(machines) if population is None else population, metrics_settings
+    )
     renderer = renderer or CardRenderer()
     chosen = (
         [m for m in machines if m.uid in selected]
@@ -263,7 +268,17 @@ def plan_floor(
         raise AppError("用紙の印刷可能領域が小さすぎます。大きい用紙を選んでください。")
     if options.mode == "list":
         return plan_table(
-            chosen, assignments, options, reference, renderer, body, width, height, headers, footers
+            chosen,
+            assignments,
+            options,
+            reference,
+            renderer,
+            body,
+            width,
+            height,
+            headers,
+            footers,
+            metrics_settings,
         )
     cards = []
     font = {"standard": 14, "large": 18, "xlarge": 22}[options.font_size]
@@ -277,12 +292,7 @@ def plan_floor(
             reference,
             bool(plans),
             priority,
-            validate_settings(options.analysis_settings)
-            | {
-                "_sales_bounds": sales_boundaries(
-                    chosen, validate_settings(options.analysis_settings)
-                )
-            },
+            metrics_settings,
         )
         methods = (
             "／".join(dict.fromkeys(p.machine_methods.get(m.number) or "未設定" for p in plans))
@@ -358,7 +368,17 @@ def plan_floor(
 
 
 def plan_table(
-    machines, assignments, options, reference, renderer, body, width, height, headers, footers
+    machines,
+    assignments,
+    options,
+    reference,
+    renderer,
+    body,
+    width,
+    height,
+    headers,
+    footers,
+    metrics_settings,
 ):
     font_size = {"standard": 11, "large": 13, "xlarge": 15}[options.font_size]
     fields = FILTER_FIELDS[options.color_filter]
@@ -391,12 +411,7 @@ def plan_table(
             reference,
             bool(plans),
             any(p.priority for p in plans),
-            validate_settings(options.analysis_settings)
-            | {
-                "_sales_bounds": sales_boundaries(
-                    machines, validate_settings(options.analysis_settings)
-                )
-            },
+            metrics_settings,
         )
         number = (
             (m.number or m.source_key or "未設定")
@@ -520,7 +535,15 @@ def draw_floor_page(painter, plan, index):
 
 
 def render_floor(
-    printer, machines, assignments, options, reference, renderer=None, selected=(), loaded_at=""
+    printer,
+    machines,
+    assignments,
+    options,
+    reference,
+    renderer=None,
+    selected=(),
+    loaded_at="",
+    population=None,
 ):
     area = printer.pageRect(QPrinter.Unit.Point)
     plan = plan_floor(
@@ -532,6 +555,7 @@ def render_floor(
         selected,
         (area.width(), area.height()),
         loaded_at,
+        population,
     )
     render_pages(
         printer, len(plan.pages), lambda painter, index: draw_floor_page(painter, plan, index)
@@ -549,6 +573,7 @@ def save_floor_pdf(
     selected=(),
     loaded_at="",
     sources=(),
+    population=None,
 ):
     return save_rendered_pdf(
         path,
@@ -561,6 +586,7 @@ def save_floor_pdf(
             renderer,
             selected,
             loaded_at,
+            population,
         ),
         sources,
     )

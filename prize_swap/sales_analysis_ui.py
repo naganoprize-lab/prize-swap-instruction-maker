@@ -50,19 +50,22 @@ class SalesAnalysisMixin:
         snapshot["issues"] = reconcile(self.machines, snapshot, self.analysis_state)
         from .analysis_settings import normalize_type, type_style
 
+        history = archive(history, snapshot)
+        settings = deepcopy(self.analysis_settings)
         for record in snapshot["records"].values():
             name = normalize_type(record.get("machine_name", ""))
-            if name and name not in self.analysis_settings["types"]:
+            if name and name not in settings["types"]:
                 canonical_name = next(
-                    (k for k in self.analysis_settings["types"] if k.casefold() == name.casefold()),
+                    (k for k in settings["types"] if k.casefold() == name.casefold()),
                     name,
                 )
                 if canonical_name != name:
-                    self.analysis_settings["aliases"][name] = canonical_name
-                self.analysis_settings["types"].setdefault(
-                    canonical_name, type_style(canonical_name, self.analysis_settings)
-                )
-        history = archive(history, snapshot)
+                    settings["aliases"][name] = canonical_name
+                settings["types"].setdefault(canonical_name, type_style(canonical_name, settings))
+        from .analysis_settings import validate_settings
+
+        self.analysis_settings = validate_settings(settings)
+        self.print_options.analysis_settings = deepcopy(self.analysis_settings)
         self.performance_history = history
         self.analysis_state = snapshot
         self.rebuild()

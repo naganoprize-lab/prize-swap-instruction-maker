@@ -817,6 +817,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                     self.print_renderer,
                     [m.uid for m in self.selected()],
                     loaded_at=self.print_data_timestamp(),
+                    population=self.machines,
                 ).frames
             except AppError:
                 pass
@@ -1251,6 +1252,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             self.print_renderer,
             [m.uid for m in self.selected()],
             self.print_data_timestamp(),
+            population=self.machines,
         )
 
     def print_settings(self, *_):
@@ -1305,6 +1307,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             self.print_renderer,
             [m.uid for m in self.selected()],
             loaded_at=self.print_data_timestamp(),
+            population=self.machines,
         )
         if plan.warnings:
             parent = self._active_preview or self
@@ -1350,6 +1353,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 [m.uid for m in self.selected()],
                 self.print_data_timestamp(),
                 sources,
+                population=self.machines,
             )
             self.message.emit(f"売り場PDFを保存しました（{len(plan.pages)}ページ）：{path}")
         except Exception as exc:
