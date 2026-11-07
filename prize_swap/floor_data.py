@@ -251,6 +251,9 @@ def validate_state(state):
     from .analysis_settings import validate_settings
 
     validate_settings(state.get("analysis_settings"))
+    from .analytics_data import validate_ui_state
+
+    validate_ui_state(state.get("analytics_ui"))
     from .sales_analysis import validate_snapshot
 
     validate_snapshot(state.get("sales_analysis"))

@@ -48,8 +48,10 @@ class SalesAnalysisMixin:
                 record["product_context"] = deepcopy(
                     existing["records"].get(number, {}).get("product_context")
                 )
+                record["operation_context"] = existing["records"].get(number, {}).get("operation_context")
             elif number in by_number:
                 record["product_context"] = episode(by_number[number])
+                record["operation_context"] = by_number[number].operation_method
         snapshot["issues"] = reconcile(self.machines, snapshot, self.analysis_state)
         from .analysis_settings import normalize_type, type_style
 

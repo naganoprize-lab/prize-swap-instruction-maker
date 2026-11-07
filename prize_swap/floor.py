@@ -446,6 +446,10 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self._fullscreen_transition = False
         self._detail_open = False
         self._highlight_uids = set()
+        from .analytics_data import AnalyticsService, validate_ui_state
+
+        self.analytics = AnalyticsService(self)
+        self.analytics_ui = validate_ui_state()
 
         build_toolbar(self, layout)
         from .floor_dashboard import FloorDashboard
@@ -553,6 +557,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         return dict(
             version=3,
             theme_mode=theme_manager().mode,
+            analytics_ui=deepcopy(self.analytics_ui),
             number_references=deepcopy(self.number_references),
             performance_history=deepcopy(self.performance_history),
             analysis_settings=deepcopy(self.analysis_settings),
@@ -583,6 +588,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         if "theme_mode" in state and not keep_history:
             manager().set_mode(state["theme_mode"], persist=False)
         self.number_references = deepcopy(state.get("number_references", []))
+        from .analytics_data import validate_ui_state
+
+        self.analytics_ui = validate_ui_state(state.get("analytics_ui"))
         self.analysis_state = deepcopy(validate_snapshot(state.get("sales_analysis")))
         from .performance_history import validate_history
 

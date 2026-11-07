@@ -136,6 +136,8 @@ def validate_snapshot(value):
         if not isinstance(record.get("machine_name", ""), str):
             raise AppError("機器名が不正です。")
         context = record.get("product_context")
+        if record.get("operation_context") is not None and not isinstance(record["operation_context"], str):
+            raise AppError("実績読込時の運営方法が不正です。")
         if context is not None and (
             not isinstance(context, dict)
             or set(context) != {"product", "installed_on"}
@@ -400,6 +402,7 @@ def apply_snapshot(machines, snapshot):
                 extracted_at=snapshot.get("extracted_at"),
                 fingerprint=snapshot.get("fingerprint", ""),
                 product_context=deepcopy(record.get("product_context")) if record else None,
+                operation_context=record.get("operation_context") if record else None,
                 quality_issues=[
                     i
                     for i in snapshot.get("issues", [])
