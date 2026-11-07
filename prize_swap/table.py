@@ -42,6 +42,10 @@ class ProductModel(QAbstractTableModel):
             return None
         p, col = self.products[index.row()], index.column()
         value = getattr(p, ATTRS[col])
+        if role == Qt.ItemDataRole.TextAlignmentRole and col in (1,4,5):
+            return Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter
+        if role == Qt.ItemDataRole.DisplayRole and col in (4,5) and isinstance(value,(int,float)):
+            return f"{value:,}" if abs(value)>=1000 else value
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             if col in (0, 8):
                 return None

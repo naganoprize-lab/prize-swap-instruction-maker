@@ -242,6 +242,7 @@ def build_toolbar(owner, layout):
     owner.snap.toggled.connect(owner.schedule_save)
     owner.info = QLabel()
     owner.info.setWordWrap(True)
+    owner.info.setMaximumHeight(44)
     layout.addWidget(owner.info)
     owner.analysis_note = QLabel()
     owner.analysis_note.setWordWrap(True)

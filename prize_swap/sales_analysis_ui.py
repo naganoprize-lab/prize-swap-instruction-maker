@@ -135,11 +135,14 @@ class SalesAnalysisMixin:
 
         def table(headers, rows):
             widget = QTableWidget(len(rows), len(headers))
+            from .theme import style_table
+            style_table(widget)
             widget.setHorizontalHeaderLabels(headers)
             widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
             for i, row in enumerate(rows):
                 for j, value in enumerate(row):
-                    widget.setItem(i, j, QTableWidgetItem(str(value)))
+                    from .analysis_views import ValueItem
+                    item=ValueItem(value);widget.setItem(i,j,item)
             widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             widget.setSortingEnabled(True)
 

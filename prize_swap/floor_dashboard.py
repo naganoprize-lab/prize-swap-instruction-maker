@@ -69,6 +69,7 @@ class FloorDashboard(QWidget):
         self.summary = QLabel()
         row.addWidget(self.summary, 1)
         self.content = QWidget()
+        self.content.setObjectName("dashboardCard")
         body = QVBoxLayout(self.content)
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(2)
@@ -111,6 +112,7 @@ class FloorDashboard(QWidget):
             for m in o.machines
         )
         plans = sum(bool(o.assignments().get(machine_key(m))) for m in o.machines)
+        self.metrics=dict(total=len(o.machines),candidates=candidates,planned=plans,unmatched=len(data["unmatched"])+len(o.analysis_state.get("unmatched_rows",[])))
         self.summary.setText(
             f'管理 {len(o.machines)} ｜ 入替検討 {candidates} ｜ 投入予定 {plans} ｜ 未照合 {len(data["unmatched"])+len(o.analysis_state.get("unmatched_rows",[]))}'
         )
@@ -118,6 +120,7 @@ class FloorDashboard(QWidget):
             f'{period_text(o.analysis_state)} ｜ 抽出 {o.analysis_state.get("extracted_at") or "不明"} ｜ 読込 {o.analysis_state["loaded_at"] or "未読込"} ｜ {freshness(o.analysis_state,o.analysis_settings["stale_days"])}'
         )
         self.dates.setToolTip(o.analysis_state["file_name"])
+        self.dates.setVisible(bool(o._fullscreen_host) or not hasattr(o.window(),"page_metadata"))
         for key, b in self.buttons.items():
             d = self.groups[key]
             b.setText(f'{key}：{d["count"]} ({d["percentage"]:.1f}%)')

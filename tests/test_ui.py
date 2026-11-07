@@ -37,7 +37,7 @@ def test_table_fills_center_without_top_gap(window, size):
     table_top = window.table.mapTo(window.centralWidget(), window.table.rect().topLeft()).y()
     assert table_top < 260
     assert window.table.height() > size[1] * .5
-    assert window.table.width() > size[0] * .85
+    assert window.table.width() > (size[0] - window.navigation.width() - 32) * .93
     assert window.table.verticalHeader().defaultSectionSize() == 34
     assert not hasattr(window, "apply_details")
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QEvent, QItemSelectionModel, QSortFilterProxyModel, Qt
+from PySide6.QtCore import QDate, QEvent, QItemSelectionModel, QSortFilterProxyModel, Qt, QStandardPaths
 from PySide6.QtGui import QColor, QTextCharFormat
 from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrintPreviewDialog, QPrintPreviewWidget, QPrinter
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDateEdit,
@@ -66,7 +66,7 @@ class Window(QMainWindow):
         self.resize(1500, 900)
         from .theme import manager
         self.themes=manager()
-        self.appearance_path=(Path(layout_storage).parent / "appearance.json") if layout_storage else (Path(__import__("PySide6.QtCore",fromlist=["QStandardPaths"]).QStandardPaths.writableLocation(__import__("PySide6.QtCore",fromlist=["QStandardPaths"]).QStandardPaths.StandardLocation.AppLocalDataLocation)) / "PrizeSwapInstructionMaker" / "appearance.json")
+        self.appearance_path = (Path(layout_storage).parent / "appearance.json") if layout_storage else Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)) / "PrizeSwapInstructionMaker" / "appearance.json"
         self.themes.load(self.appearance_path)
         self.products, self.visible = [], []
         self.source = ""
@@ -84,11 +84,11 @@ class Window(QMainWindow):
         title.setObjectName("title")
         title_row.addWidget(title)
         title_row.addStretch()
-        title_row.addWidget(button("印刷プレビュー", self.preview))
-        title_row.addWidget(button("直接印刷", self.print_direct, True))
-        title_row.addWidget(button("PDF保存", self.export_pdf))
+        self.print_buttons=[]
+        for label,callback,primary in (("印刷プレビュー",self.preview,False),("直接印刷",self.print_direct,True),("PDF保存",self.export_pdf,False)):
+            b=button(label,callback,primary);title_row.addWidget(b);self.print_buttons.append(b)
         from .theme import ThemeMenu
-        self.theme_button=QToolButton();self.theme_button.setFixedWidth(132)
+        self.theme_button=QToolButton();self.theme_button.setFixedWidth(150);self.theme_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.theme_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);self.theme_button.setMenu(ThemeMenu(self.theme_button))
         title_row.addWidget(self.theme_button)
         self.settings_button=QToolButton();self.settings_button.setText("設定");self.settings_button.clicked.connect(self.show_settings);title_row.addWidget(self.settings_button)
@@ -182,6 +182,7 @@ class Window(QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.CurrentChanged | QAbstractItemView.EditTrigger.SelectedClicked | QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed)
+        self.table.setMouseTracking(True)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(False)
         self.table.verticalHeader().setDefaultSectionSize(34)
@@ -256,12 +257,16 @@ class Window(QMainWindow):
         self.tabs.currentChanged.connect(lambda *_: self.instruction_settings.setVisible(self.tabs.currentIndex() == 0))
         bottom_layout.addLayout(bottom)
         self.statusBar().showMessage("準備完了 — Excelを読み込んでください。")
+        from .modern_ui import build_shell
+        build_shell(self,outer,header,footer)
         self.themes.load(self.appearance_path)
         self.theme_changed()
 
     def show_settings(self):
-        from .theme import appearance_dialog
-        appearance_dialog(self)
+        if hasattr(self,"settings_page"):self.tabs.setCurrentWidget(self.settings_page)
+        else:
+            from .theme import appearance_dialog
+            appearance_dialog(self)
 
     def theme_changed(self,*_):
         from .theme import MODES,line_icon
@@ -272,6 +277,44 @@ class Window(QMainWindow):
             if self.model.rowCount():self.model.dataChanged.emit(self.model.index(0,0),self.model.index(self.model.rowCount()-1,self.model.columnCount()-1),[])
         if hasattr(self,"summary_table"):self.update_booth_summary()
         if hasattr(self,"labels"):self.labels.table.viewport().update() if hasattr(self.labels,"table") else self.labels.update()
+
+    def page_changed(self,*_):
+        if not hasattr(self,"pages"):return
+        key=next((name for name,page in self.pages.items() if page is self.tabs.currentWidget()),None)
+        if key is None:return
+        self.navigation.select(key)
+        self.notice.setVisible(key=="instructions")
+        if key=="floor":self.floor.dashboard.dates.hide()
+        self.page_title.setText({"instructions":"入替指示書","floor":"売り場レイアウト","labels":"入荷ラベル","dashboard":"ダッシュボード","settings":"設定"}[key])
+        self.page_search.setVisible(key in ("instructions","floor","dashboard"))
+        self.sync_page_search()
+        for b in self.print_buttons:b.setEnabled(key in ("instructions","floor","labels"))
+        self.refresh_page_metadata()
+        if key=="dashboard":self.dashboard_page.refresh()
+
+    def search_page(self,text):
+        if self.tabs.currentWidget() is self.instruction_page:self.search.setText(text)
+        elif self.tabs.currentWidget() is self.floor:self.floor.floor_search.setText(text)
+        elif self.tabs.currentWidget() is self.dashboard_page:
+            self.tabs.setCurrentWidget(self.floor);self.floor.floor_search.setText(text)
+
+    def sync_page_search(self,*_):
+        if not hasattr(self,"page_search"):return
+        widget=self.tabs.currentWidget()
+        text=self.search.text() if widget is self.instruction_page else self.floor.floor_search.text() if widget is self.floor else ""
+        self.page_search.blockSignals(True);self.page_search.setText(text);self.page_search.blockSignals(False)
+
+    def refresh_page_metadata(self,*_):
+        if not hasattr(self,"page_metadata"):return
+        from .performance_validation import period_text
+        data=self.floor.analysis_state
+        self.page_metadata.setText(period_text(data)+"\n更新："+(data["loaded_at"].replace("T"," ")[:16] or "未読込"))
+        self.page_metadata.setToolTip(self.floor.analysis_summary_text())
+        if self.tabs.currentWidget() is self.dashboard_page:self.dashboard_page.refresh()
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if hasattr(self,"navigation") and not self.navigation.manual:self.navigation.set_compact(self.width()<1280)
 
     def eventFilter(self, obj, event):
         if obj is self.table.viewport() and event.type() == QEvent.Type.MouseButtonRelease:

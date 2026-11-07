@@ -26,12 +26,16 @@ QLabel {{ background:transparent; border:none; }}
 QLabel#title,QLabel#pageTitle {{ font-size:17pt; font-weight:700; }}
 QLabel#section {{ font-size:11pt; font-weight:700; }}
 QLabel#muted,QLabel[tone="muted"] {{ color:{t['muted']}; }}
-QLabel#count,QLabel#statValue {{ color:{t['accent']}; font-size:12pt; font-weight:700; }}
+QLabel#count {{ color:{t['accent']}; font-size:12pt; font-weight:700; }}
+QLabel#statValue {{ color:{t['accent']}; font-weight:700; }}
+QLabel#statValue[statCompact="false"] {{ font-size:23pt; }}
+QLabel#statValue[statCompact="true"] {{ font-size:13pt; }}
 QLabel[tone="danger"] {{ color:{t['danger']}; font-weight:600; }}
 QPushButton,QToolButton {{ background:{t['card']}; border:1px solid {t['border']}; border-radius:5px; padding:4px 8px; min-height:18px; }}
 QPushButton:hover,QToolButton:hover {{ background:{t['selection']}; border-color:{t['accent']}; }}
 QPushButton:pressed,QToolButton:pressed,QToolButton:checked {{ background:{t['selection']}; }}
 QPushButton#primary {{ background:{t['accent']}; color:{t['button_text']}; border-color:{t['accent']}; font-weight:600; }}
+QPushButton#primary:disabled {{ background:{t['border']}; color:{t['muted']}; border-color:{t['border']}; }}
 QToolButton[nav="true"] {{ background:transparent; border:none; padding:7px 10px; text-align:left; }}
 QToolButton[nav="true"]:checked {{ background:{t['selection']}; color:{t['accent']}; font-weight:600; }}
 QLineEdit,QComboBox,QDateEdit,QSpinBox,QDoubleSpinBox,QPlainTextEdit,QTextEdit {{ background:{t['card']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:5px; padding:3px 5px; min-height:20px; selection-background-color:{t['selection']}; selection-color:{t['text']}; }}
@@ -100,6 +104,7 @@ class ThemeManager(QObject):
         if mode not in MODES:raise AppError('テーマはライト・ダーク・システムから選択してください。')
         if persist and self.storage:
             self.storage.parent.mkdir(parents=True,exist_ok=True);atomic_json(self.storage,dict(version=1,theme=mode))
+        if mode==self.mode:return
         self.mode=mode;self.apply()
     def apply(self):
         self.about_to_change.emit();t=self.tokens;p=QPalette()
@@ -198,3 +203,9 @@ def appearance_dialog(parent):
     note.setWordWrap(True);form.addRow(note)
     close=QDialogButtonBox(QDialogButtonBox.StandardButton.Close);close.rejected.connect(dialog.reject);form.addRow(close)
     dialog.resize(520,220);dialog.exec()
+
+
+def style_table(table):
+    table.setAlternatingRowColors(True);table.setMouseTracking(True);table.setWordWrap(False)
+    table.verticalHeader().setDefaultSectionSize(32);table.verticalHeader().setMinimumSectionSize(30)
+    table.verticalHeader().setVisible(False)

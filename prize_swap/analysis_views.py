@@ -27,6 +27,8 @@ class ValueItem(QTableWidgetItem):
     def __init__(self, text, value=None):
         super().__init__(str(text))
         self.sort_value = value if value is not None else str(text).casefold()
+        self.setToolTip(str(text))
+        if type(self.sort_value) in (int,float) or str(text).endswith('%'):self.setTextAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
 
     def __lt__(self, other):
         a, b = self.sort_value, getattr(other, "sort_value", other.text())
@@ -37,6 +39,8 @@ class ValueItem(QTableWidgetItem):
 
 def make_table(headers, rows):
     t = QTableWidget(len(rows), len(headers))
+    from .theme import style_table
+    style_table(t)
     t.setHorizontalHeaderLabels(headers)
     t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)

@@ -70,6 +70,7 @@ def run(output):
         report["scale_requested"] = os.environ.get("QT_SCALE_FACTOR", "1")
         day = date(2026, 11, 7)
         window = Window(layout_storage=output / "unused-autosave.json")
+        window.themes.set_mode("light",persist=False)
         floor = window.floor
         window.products = [Product(day, "入替予定商品", machines=["20000右"])]
         window.day.setDate(QDate(day))

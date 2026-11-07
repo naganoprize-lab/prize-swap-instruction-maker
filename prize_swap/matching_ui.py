@@ -13,7 +13,8 @@ def show_matching(owner):
     note.setWordWrap(True);outer.addWidget(note)
     search=QLineEdit();search.setPlaceholderText('管理ナンバー・機械番号・照合要確認の理由を検索');outer.addWidget(search)
     tabs=QTabWidget();outer.addWidget(tabs,1)
-    table=QTableWidget(len(owner.machines),6);table.setHorizontalHeaderLabels(['管理ナンバー','機械番号（レイアウト）','照合先','照合方法','状態・理由','手動設定'])
+    from .theme import style_table
+    table=QTableWidget(len(owner.machines),6);style_table(table);table.setHorizontalHeaderLabels(['管理ナンバー','機械番号（レイアウト）','照合先','照合方法','状態・理由','手動設定'])
     for i,m in enumerate(owner.machines):
         values=[m.source_key or '—',m.number or '—',m.resolved_number or '—',MATCH_LABELS[m.match_method],m.match_message,'自動' if m.manual_number is None else m.manual_number or '照合しない']
         for j,text in enumerate(values):
@@ -23,7 +24,7 @@ def show_matching(owner):
     table.setColumnWidth(4,360);table.setColumnWidth(3,190);table.setColumnWidth(5,150);table.setSortingEnabled(True)
     tabs.addTab(table,'マシンごとの照合')
     page=QDialog();page.setWindowFlags(Qt.WindowType.Widget);layout=QVBoxLayout(page)
-    references=QTableWidget(len(owner.number_references),2);references.setHorizontalHeaderLabels(['管理ナンバー','機械番号'])
+    references=QTableWidget(len(owner.number_references),2);style_table(references);references.setHorizontalHeaderLabels(['管理ナンバー','機械番号'])
     for i,row in enumerate(owner.number_references):
         references.setItem(i,0,QTableWidgetItem(row['source_key']));references.setItem(i,1,QTableWidgetItem(row['number']))
     references.horizontalHeader().setStretchLastSection(True);layout.addWidget(references)
