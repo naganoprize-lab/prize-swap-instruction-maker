@@ -41,3 +41,19 @@ def test_detail_to_embedded_analysis_scopes(window):
     w.floor.analytics_requested.emit(m.uid,'method');assert len(w.analysis_page.records)==150
     w.floor.analytics_requested.emit(m.uid,'machine_type');assert len(w.analysis_page.records)==300
     w.analysis_page.clear_focus();assert w.analysis_page.detail_table.rowCount()==300
+
+
+def test_graph_choices_constraints_expansion_image_and_cross(window,tmp_path):
+    from prize_swap.analytics_charts import CHARTS
+    w=window;p=w.analysis_page;w.show_sales_analysis();QApplication.processEvents()
+    assert p.chart_type.count()==11
+    assert not p.chart_type.model().item(p.chart_type.findData('line')).isEnabled()
+    assert not p.chart_type.model().item(p.chart_type.findData('pie')).isEnabled()
+    p.operation.setCurrentIndex(p.operation.findData('count'));p.refresh()
+    assert p.chart_type.model().item(p.chart_type.findData('pie')).isEnabled()
+    for kind in ('horizontal','vertical','pie','donut','stacked','histogram','scatter','cross'):
+        p.chart_type.setCurrentIndex(p.chart_type.findData(kind));p.refresh();QApplication.processEvents()
+        assert p.save_image(tmp_path/f'{kind}.png') and (tmp_path/f'{kind}.png').stat().st_size>300
+    p.expand_button.click();assert not p.data_tabs.isVisible();p.expand_button.click();assert p.data_tabs.isVisible()
+    p.focus_machine(w.floor.machines[0].uid);p.chart_type.setCurrentIndex(p.chart_type.findData('radar'));p.refresh()
+    assert p.chart_stack.currentWidget() is p.radar and len(p.radar.axes)==5
