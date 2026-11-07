@@ -278,6 +278,8 @@ def draw_card(
             border = tokens()["accent"]
         elif priority:
             border = "#FDE68A" if tokens()["background"] == "#111827" else border
+        elif not search_match and not overlap and background.upper() == "#F3F4F6":
+            border = "#94A3B8"
     painter.setPen(
         QPen(
             QColor(border),

@@ -52,7 +52,7 @@ DARK_ANALYSIS = {
     "#A9D7FF": "#244E78",
     "#FFE16A": "#705B25",
     "#94D8A0": "#1F5237",
-    "#FFFFFF": "#253244",
+    "#FFFFFF": "#F3F4F6",
     "#F4A6A6": "#763D43",
     "#B8BEC6": "#485260",
     "#C5A5ED": "#594375",
@@ -82,6 +82,9 @@ QWidget#sidebar {{ background:{t['sidebar']}; border-right:1px solid {t['border'
 QLabel {{ background:transparent; border:none; }}
 QLabel#title,QLabel#pageTitle {{ font-size:17pt; font-weight:700; }}
 QLabel#section {{ font-size:11pt; font-weight:700; }}
+QLabel#kpiValue {{ font-size:18pt; font-weight:700; }}
+QLabel[kpiInk="dark"] {{ color:#111827; }}
+QLabel[kpiInk="light"] {{ color:#F1F5F9; }}
 QLabel#muted,QLabel[tone="muted"] {{ color:{t['muted']}; }}
 QLabel#count {{ color:{t['accent']}; font-size:12pt; font-weight:700; }}
 QLabel#statValue {{ color:{t['accent']}; font-weight:700; }}
@@ -263,6 +266,8 @@ def analysis_color(value):
 
 def contrast_text(background):
     c = QColor(background)
+    if c.name().upper() == "#F3F4F6":
+        return "#111827"
 
     def linear(v):
         return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
