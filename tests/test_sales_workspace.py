@@ -393,3 +393,29 @@ def test_sparse_300_machine_cross_table_keeps_real_groups_and_missing_combinatio
     assert len(linked) == 300 and all(
         len(item.data(Qt.ItemDataRole.UserRole)) == 1 for item in linked
     )
+
+
+def test_numeric_detail_sort_uses_values_and_keeps_matching_identity(window):
+    from PySide6.QtCore import Qt
+    from prize_swap.analytics_data import FIELDS
+
+    w = window
+    p = w.analysis_page
+    f = w.floor
+    f.machines[0].sales = 900
+    f.machines[1].sales = 10000
+    f.machines[0].po_rate = 0.12
+    f.machines[1].po_rate = 0.09
+    w.show_sales_analysis()
+    p.refresh()
+    column = list(FIELDS).index("sales")
+    p.detail_table.sortItems(column, Qt.SortOrder.AscendingOrder)
+    assert p.detail_table.item(0, column).text() == "900"
+    assert p.detail_table.item(0, 0).data(Qt.ItemDataRole.UserRole) == [f.machines[0].uid]
+    p.legacy.table.sortItems(4, Qt.SortOrder.AscendingOrder)
+    assert (
+        p.legacy.table.item(0, 0).text() == "リング"
+        and p.legacy.table.item(0, 4).sort_value == 0.09
+    )
+    p.detail_clicked(0, column)
+    assert f.analysis_highlight_uids == {f.machines[0].uid}

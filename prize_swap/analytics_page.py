@@ -465,7 +465,11 @@ class SalesPage(QWidget):
         raw = []
         for r in self.records:
             raw.append(
-                [formatted(k, r.get(k)) for k in keys] + [r["loaded_at"] or "—", r["source_file"]]
+                [
+                    (formatted(k, r.get(k)), r.get(k)) if k in NUMERIC else formatted(k, r.get(k))
+                    for k in keys
+                ]
+                + [r["loaded_at"] or "—", r["source_file"]]
             )
         fill_table(self.detail_table, [FIELDS[k] for k in keys] + ["更新日時", "実績ファイル"], raw)
         self.detail_table.setSortingEnabled(False)

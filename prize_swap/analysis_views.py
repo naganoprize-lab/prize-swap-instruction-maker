@@ -32,6 +32,8 @@ from .floor_status import ratio_text, days_text, effective_stat, money, ratio, d
 class ValueItem(QTableWidgetItem):
     def __init__(self, text, value=None):
         super().__init__(str(text))
+        if value is None and type(text) in (int, float):
+            value = text
         self.sort_value = value if value is not None else str(text).casefold()
         self.setToolTip(str(text))
         if type(self.sort_value) in (int, float) or str(text).endswith("%"):
@@ -330,14 +332,14 @@ class MethodAnalysisPanel(QWidget):
                         (r["count"], r["count"]),
                         (money(r["average_sales"]), r["average_sales"]),
                         (money(r["sales"]), r["sales"]),
-                        percent_text(r["po_rate"]),
-                        percent_text(r["po_arithmetic"]),
+                        (percent_text(r["po_rate"]), r["po_rate"]),
+                        (percent_text(r["po_arithmetic"]), r["po_arithmetic"]),
                         r["po_mode"],
-                        percent_text(r["cost_rate"]),
-                        percent_text(r["cost_arithmetic"]),
+                        (percent_text(r["cost_rate"]), r["cost_rate"]),
+                        (percent_text(r["cost_arithmetic"]), r["cost_arithmetic"]),
                         r["cost_mode"],
-                        "—" if r["ratio"] is None else f'{r["ratio"]:.1f}%',
-                        money(r["gross_profit"]),
+                        ("—" if r["ratio"] is None else f'{r["ratio"]:.1f}%', r["ratio"]),
+                        (money(r["gross_profit"]), r["gross_profit"]),
                         period,
                         f'{len(r["products"])}商品：' + "、".join(r["products"]),
                         coverage,
@@ -368,6 +370,7 @@ class MethodAnalysisPanel(QWidget):
                 [r["uids"] for r in records],
             )
             table.setSortingEnabled(False)
+            self.table = table
             table.cellClicked.connect(
                 lambda row, col: locate(table.item(row, 0).data(Qt.ItemDataRole.UserRole) or [])
             )
