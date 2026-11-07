@@ -244,6 +244,10 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         index=(ids.index(current)+direction)%len(ids) if current else (0 if direction>0 else len(ids)-1)
         self.scene.clearSelection();node=self.nodes[ids[index]];node.setSelected(True);self.view.ensureVisible(node,40,40)
 
+    def show_method_analysis(self):
+        from .analysis_views import show_method_analysis
+        show_method_analysis(self)
+
     def show_candidates(self):
         from .analysis_views import show_candidates
         show_candidates(self)

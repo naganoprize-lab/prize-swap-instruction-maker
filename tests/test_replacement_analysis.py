@@ -54,3 +54,30 @@ def test_candidate_assignment_requires_confirmation_and_undo(tmp_path,monkeypatc
         w.history.undo();assert product.machines==['20000右']
         w.history.redo();assert product.machines==['20000右','20088左']
     finally:w.timer.stop();w.day_timer.stop();w.close()
+
+
+def test_method_analysis_weighting_missing_values_and_periods():
+    from prize_swap.method_analysis import totals
+    a=Machine(number='20000右',operation_method='リング',sales=100,average=50,po_rate=.1,cost_rate=.2,cost=20,gross_profit=80,ratio=50)
+    b=Machine(number='20001右',operation_method='リング',sales=300,average=100,po_rate=.2,cost_rate=.6,cost=180,gross_profit=120,ratio=150)
+    missing=Machine(number='20002右',operation_method='フック')
+    unset=Machine(number='20003右')
+    result=totals([a,b,missing,unset]);ring=next(r for r in result if r['method']=='リング')
+    assert ring['count']==2 and ring['average_sales']==75 and ring['sales']==400 and ring['gross_profit']==200
+    assert ring['po_rate']==pytest.approx(.175) and ring['po_arithmetic']==pytest.approx(.15)
+    assert ring['cost_rate']==pytest.approx(.5) and ring['cost_arithmetic']==pytest.approx(.4) and ring['ratio']==100
+    assert next(r for r in result if r['method']=='フック')['sales'] is None
+    assert any(r['method']=='未設定' for r in result)
+    # Even with the same method, separate periods never become one total.
+    a.analysis={'period_start':'2026-11-01','period_end':'2026-11-03','values':{}}
+    b.analysis={'period_start':'2026-11-04','period_end':'2026-11-06','values':{}}
+    assert len(totals([a,b]))==2
+
+
+def test_method_analysis_type_filter_and_fallback_arithmetic():
+    from prize_swap.method_analysis import totals
+    machines=[Machine(kind='機種A',operation_method='自由方法',po_rate=.1,cost_rate=.3),Machine(kind='機種B',operation_method='自由方法',po_rate=.3,cost_rate=.5)]
+    result=totals(machines,type_filter='機種A')
+    assert len(result)==1 and result[0]['count']==1 and result[0]['po_rate']==.1
+    assert '単純平均' in result[0]['po_mode']
+    assert totals(machines,method_filter='橋渡し')==[]

@@ -78,3 +78,55 @@ def propose_assignments(owner,numbers,parent=None):
     before=owner.state();old=deepcopy(product.machines);new=list(dict.fromkeys(old+numbers));product.machines=new
     owner.history.push(DetailCommand(owner,before,owner.state(),[(product,{'machines':(old,deepcopy(new))})]))
     owner.product_edited.emit();owner.sync();owner.schedule_save();return True
+
+
+class MethodBars(QWidget):
+    def __init__(self):
+        super().__init__();self.records=[];self.setMinimumHeight(180)
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.fillRect(self.rect(),QColor('white'))
+        records=self.records
+        if not records:painter.drawText(10,30,'集計対象がありません。');return
+        values=[max(0,r['average_sales'] or 0) for r in records];largest=max(values,default=0) or 1
+        height=max(20,(self.height()-30)/max(1,len(records)))
+        for i,(r,value) in enumerate(zip(records,values)):
+            y=20+i*height;painter.setPen(QColor('#20242A'))
+            painter.drawText(4,round(y+14),r['method'][:12]);painter.fillRect(140,round(y),round(max(0,self.width()-300)*value/largest),max(8,round(height-5)),QColor('#94D8A0'))
+            painter.drawText(max(145,self.width()-150),round(y+14),money(r['average_sales'])+'円')
+        painter.end()
+
+
+def show_method_analysis(owner):
+    from .method_analysis import totals
+    from .analysis_settings import machine_type
+    from .performance_validation import period_text
+    from PySide6.QtWidgets import QScrollArea
+    dialog=QDialog(owner);dialog.setWindowTitle('運営方法別の成績分析');dialog.resize(1200,760)
+    layout=QVBoxLayout(dialog);row=QHBoxLayout();layout.addLayout(row)
+    kinds=QComboBox();kinds.addItem('全機種','')
+    for name in sorted(set(machine_type(m,owner.analysis_settings) for m in owner.machines)):kinds.addItem(name,name)
+    methods=QComboBox();methods.addItem('全運営方法','')
+    for name in sorted(set(m.operation_method.strip() or '未設定' for m in owner.machines)):methods.addItem(name,name)
+    row.addWidget(kinds);row.addWidget(methods)
+    note=QLabel('平均売上・アベ比は有効値の単純平均。PO率は売上加重を優先し、原価率は同じ有効対象の合計原価÷合計売上を優先します。欠損値は0で埋めません。異なる期間・期間不明の別ファイルは合算しません。')
+    note.setWordWrap(True);layout.addWidget(note)
+    container=QVBoxLayout();layout.addLayout(container,1)
+    scroll=QScrollArea();scroll.setWidgetResizable(True);bars=MethodBars();scroll.setWidget(bars);layout.addWidget(scroll,1)
+    table=None
+    def refresh():
+        nonlocal table
+        records=totals(owner.machines,owner.analysis_settings,kinds.currentData(),methods.currentData())
+        rows=[]
+        for r in records:
+            start,end,_=r['period'];period=f'{start} ～ {end}' if start and end else '対象期間不明（比較不可）'
+            coverage=' / '.join(f'{k}:{v}/{r["count"]}台' for k,v in r['coverage'].items())
+            rows.append([r['method'],(r['count'],r['count']),(money(r['average_sales']),r['average_sales']),(money(r['sales']),r['sales']),
+                percent_text(r['po_rate']),percent_text(r['po_arithmetic']),r['po_mode'],percent_text(r['cost_rate']),percent_text(r['cost_arithmetic']),r['cost_mode'],
+                '—' if r['ratio'] is None else f'{r["ratio"]:.1f}%',money(r['gross_profit']),period,f'{len(r["products"])}商品：'+ '、'.join(r['products']),coverage])
+        if table:container.removeWidget(table);table.deleteLater()
+        table=make_table(['運営方法','ブース数','平均売上','総売上','PO率（優先方式）','PO率単純平均','PO率計算方式','原価率（優先方式）','原価率単純平均','原価率計算方式','平均アベ比','粗利益','集計期間','商品構成','有効値件数'],rows);container.addWidget(table)
+        # Each bar remains a separate period; its full label makes comparison caveats explicit.
+        bars.records=[dict(r,method=r['method']+' '+(r['period'][0] or '期間不明')) for r in records]
+        bars.setMinimumHeight(max(180,len(records)*32));bars.update()
+    kinds.currentIndexChanged.connect(refresh);methods.currentIndexChanged.connect(refresh);refresh()
+    close=QDialogButtonBox(QDialogButtonBox.StandardButton.Close);close.rejected.connect(dialog.reject);layout.addWidget(close);dialog.exec()
