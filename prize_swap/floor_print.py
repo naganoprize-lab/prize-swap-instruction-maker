@@ -1,6 +1,6 @@
 """Viewport-independent, vector floor printing with card-safe pagination."""
 
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from datetime import date
 import math
 
@@ -9,8 +9,17 @@ from PySide6.QtGui import QColor, QPageLayout, QPageSize, QPen
 from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
 from .core import AppError
-from .floor_render import CardRenderer, FIELDS, draw_card
-from .floor_status import machine_status, overlapping
+from .floor_render import CardRenderer, FIELDS, SUMMARY_FIELDS, draw_card
+from .floor_presentation import ordered_machines
+from .floor_status import ratio_text, days_text
+from .floor_status import (
+    machine_status,
+    overlapping,
+    filter_status,
+    filter_legend,
+    FILTER_FIELDS,
+    COLOR_FILTERS,
+)
 from .printing import configured_printer, render_pages, save_rendered_pdf, text_block
 from .fonts import print_font
 
@@ -29,7 +38,12 @@ class FloorPrintOptions:
     card_size: str = "auto"
     card_width: float = 200
     card_height: float = 150
-    fields: list = field(default_factory=lambda: list(FIELDS))
+    fields: list = field(default_factory=lambda: list(SUMMARY_FIELDS))
+    card_style: str = "summary"
+    color_filter: str = "ratio"
+    sort: str = "number"
+    descending: bool = False
+    visible_only: bool = False
     colour: bool = True
     show_methods: bool = False
     selection_only: bool = False
@@ -39,9 +53,18 @@ class FloorPrintOptions:
         if (
             self.paper not in (*PAPERS, "custom")
             or self.orientation not in ("portrait", "landscape")
-            or self.mode not in ("fit", "tile", "selection", "actual")
+            or self.mode not in ("fit", "tile", "selection", "actual", "list")
         ):
             raise AppError("売り場印刷の用紙・方向・印刷方式が不正です。")
+        if self.color_filter not in COLOR_FILTERS:
+            raise AppError("印刷の色フィルターが不正です。")
+        if self.card_style not in ("summary", "detailed") or self.sort not in (
+            "number",
+            "ratio",
+            "days",
+            "product",
+        ):
+            raise AppError("印刷の表示形式・並べ替えが不正です。")
         if self.font_size not in ("standard", "large", "xlarge") or self.card_size not in (
             "auto",
             "standard",
@@ -74,7 +97,14 @@ class FloorPrintOptions:
             raise AppError("印刷する項目を1つ以上選択してください。")
         if any(
             type(getattr(self, n)) is not bool
-            for n in ("colour", "show_methods", "selection_only", "boundaries")
+            for n in (
+                "colour",
+                "show_methods",
+                "selection_only",
+                "boundaries",
+                "visible_only",
+                "descending",
+            )
         ):
             raise AppError("印刷の表示設定が不正です。")
         return self
@@ -160,6 +190,7 @@ class FloorPage:
     cards: list
     row: int = 0
     column: int = 0
+    table_rows: list | None = None
 
 
 @dataclass
@@ -208,7 +239,7 @@ def plan_floor(
     width, height = page_size or options.printable_points()
     heading = f"売り場レイアウト　基準日 {reference:%Y/%m/%d}"
     note = "売上・アベレージ・アベ比は読込時の値です。基準日は投入日数だけに適用。" + (
-        f" 読込：{loaded_at[:16]}" if loaded_at else ""
+        f" 読込：{loaded_at}" if loaded_at else ""
     )
     headers = [
         text_block(heading, width, print_font(14), renderer.device),
@@ -217,7 +248,7 @@ def plan_floor(
     header_height = sum(b.height for b in headers) + 8
     footers = [
         text_block(
-            "青：投入予定／黄枠：優先入替／橙：200%以上／緑：100%以上／白：50〜100%未満・不明／赤：50%未満",
+            filter_legend(options.color_filter),
             width,
             print_font(9),
             renderer.device,
@@ -227,13 +258,17 @@ def plan_floor(
     body = QRectF(0, header_height, width, height - header_height - footer_height)
     if body.width() < 40 or body.height() < 40:
         raise AppError("用紙の印刷可能領域が小さすぎます。大きい用紙を選んでください。")
+    if options.mode == "list":
+        return plan_table(
+            chosen, assignments, options, reference, renderer, body, width, height, headers, footers
+        )
     cards = []
     font = {"standard": 14, "large": 18, "xlarge": 22}[options.font_size]
     factor = 1.4 if options.card_size == "enlarge" else 1
     for m in chosen:
         plans = assignments.get(m.number, [])
         priority = any(p.priority for p in plans)
-        colour, status = machine_status(m, bool(plans), priority)
+        colour, status = filter_status(m, options.color_filter, reference, bool(plans), priority)
         methods = (
             "／".join(dict.fromkeys(p.machine_methods.get(m.number) or "未設定" for p in plans))
             if options.show_methods
@@ -245,11 +280,16 @@ def plan_floor(
             w,
             h,
             font,
-            options.fields,
+            (
+                FILTER_FIELDS[options.color_filter]
+                if options.card_style == "summary"
+                else options.fields
+            ),
             reference,
             status,
             methods,
             grow=options.card_size == "auto",
+            summary=options.card_style == "summary",
         )
         if options.card_size == "auto":
             h = max(h, layout.height)
@@ -294,11 +334,109 @@ def plan_floor(
     minimum = min(c.text.minimum_font * c.text.scale * scale for c in cards)
     if minimum < 8:
         warnings.append(
-            f"最小印刷文字は約{minimum:.1f}ptです。複数ページ分割・大きい用紙・印刷項目の削減を推奨します。"
+            f"最小印刷文字は約{minimum:.1f}ptです。A3・複数ページ分割・印刷項目の削減を推奨します。"
         )
     return FloorPlan(
         pages, scale, body, width, height, options, reference, warnings, headers, footers, bounds
     )
+
+
+def plan_table(
+    machines, assignments, options, reference, renderer, body, width, height, headers, footers
+):
+    font_size = {"standard": 11, "large": 13, "xlarge": 15}[options.font_size]
+    fields = FILTER_FIELDS[options.color_filter]
+    widths = [width * 0.22, width * 0.24, width * 0.54]
+    labels = [
+        {"number": "マシン番号 / 状態", "ratio": "アベ比", "days": "設置日数", "product": "商品名"}[
+            key
+        ]
+        for key in fields
+    ]
+    table_headers = [
+        text_block(label, w - 12, print_font(font_size), renderer.device)
+        for label, w in zip(labels, widths)
+    ]
+    heading = max(b.height for b in table_headers) + 12
+    rows = []
+    for m in ordered_machines(machines, options.sort, options.descending, reference):
+        plans = assignments.get(m.number, [])
+        colour, status = filter_status(
+            m, options.color_filter, reference, bool(plans), any(p.priority for p in plans)
+        )
+        number = (
+            (m.number or m.source_key or "未設定")
+            + (" / 投入予定" if plans else "")
+            + (" / 優先" if any(p.priority for p in plans) else "")
+        )
+        data = {
+            "number": number,
+            "ratio": ratio_text(m),
+            "days": days_text(m, reference),
+            "product": m.product or "商品未設定",
+        }
+        values = [data[key] for key in fields]
+        blocks = [
+            text_block(
+                value,
+                w - 12,
+                print_font(font_size + 2 if fields[i] in ("ratio", "days") else font_size),
+                renderer.device,
+            )
+            for i, (value, w) in enumerate(zip(values, widths))
+        ]
+        h = max(b.height for b in blocks) + 12
+        if h + heading > body.height():
+            raise AppError(
+                "商品名が一覧表の1ページに収まりません。A3・小さい印刷文字・商品名の修正を選んでください。"
+            )
+        rows.append((m.uid, blocks, h, colour))
+    pages = []
+    current = []
+    used = heading
+    for row in rows:
+        if current and used + row[2] > body.height():
+            pages.append(FloorPage(QPointF(), [], table_rows=current))
+            current = []
+            used = heading
+        current.append(row)
+        used += row[2]
+    if current:
+        pages.append(FloorPage(QPointF(), [], table_rows=current))
+    plan = FloorPlan(
+        pages,
+        1,
+        body,
+        width,
+        height,
+        options,
+        reference,
+        [],
+        headers,
+        footers,
+        QRectF(0, 0, width, body.height()),
+    )
+    plan.table_widths = widths
+    plan.table_headers = table_headers
+    plan.table_heading = heading
+    return plan
+
+
+def draw_table(painter, plan, page):
+    painter.save()
+    painter.setPen(QPen(QColor("#24392F"), 0.8))
+    y = plan.body.top()
+    rows = [(None, plan.table_headers, plan.table_heading, "#EAF0EC"), *page.table_rows]
+    for _, blocks, height, background in rows:
+        x = 0
+        for block, width in zip(blocks, plan.table_widths):
+            rect = QRectF(x, y, width, height)
+            painter.fillRect(rect, QColor(background))
+            painter.drawRect(rect)
+            block.draw(painter, QPointF(x + 6, y + (height - block.height) / 2))
+            x += width
+        y += height
+    painter.restore()
 
 
 def draw_floor_page(painter, plan, index):
@@ -313,6 +451,8 @@ def draw_floor_page(painter, plan, index):
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawRect(plan.body)
     page = plan.pages[index]
+    if page.table_rows is not None:
+        draw_table(painter, plan, page)
     painter.save()
     painter.translate(plan.body.topLeft())
     painter.scale(plan.scale, plan.scale)
@@ -327,10 +467,13 @@ def draw_floor_page(painter, plan, index):
         y += block.height
     painter.setFont(print_font(9, False))
     painter.setPen(QColor("black"))
+    footer = (
+        f"ページ {index+1}/{len(plan.pages)}　マシン一覧表"
+        if page.table_rows is not None
+        else f"ページ {index+1}/{len(plan.pages)}　範囲：行{page.row+1}・列{page.column+1}　{plan.scale/.75*100:.1f}%（画面100%基準）"
+    )
     painter.drawText(
-        QRectF(0, plan.height - 15, plan.width, 15),
-        Qt.AlignmentFlag.AlignLeft,
-        f"ページ {index+1}/{len(plan.pages)}　範囲：行{page.row+1}・列{page.column+1}　{plan.scale/.75*100:.1f}%（画面100%基準）",
+        QRectF(0, plan.height - 15, plan.width, 15), Qt.AlignmentFlag.AlignLeft, footer
     )
     painter.restore()
 

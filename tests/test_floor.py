@@ -103,6 +103,7 @@ def test_add_duplicate_delete_warning_undo_redo(floor, monkeypatch):
 
 
 def test_actual_drag_multiple_selection_resize_and_undo(floor):
+    floor.edit_mode.setChecked(True)  # Viewing clicks now open details; dragging is explicit.
     a = Machine(number="100左", x=100, y=100)
     b = Machine(number="101右", x=360, y=100)
     floor.add_machine(a)
@@ -191,10 +192,10 @@ def test_floor_colors_and_pdf(floor, tmp_path):
         floor.scene.render(painter,QRectF(0,0,180,120),QRectF(0,0,180,120))
         painter.end()
         return image.pixelColor(170,110).name()
-    assert pixel() == "#e1effc"
+    assert pixel() == "#a9d7ff"
     floor.products()[0].priority = True
     floor.sync()
-    assert pixel() == "#e1effc"  # Priority uses a yellow border; planned blue stays dominant.
+    assert pixel() == "#a9d7ff"  # Priority uses a yellow border; planned blue stays dominant.
     path = tmp_path / "配置図.pdf"
     floor.paint_floor(configured_printer(path))
     doc = QPdfDocument()

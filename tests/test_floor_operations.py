@@ -176,7 +176,7 @@ def test_reference_modes_and_json_do_not_change_data_or_positions(floor, tmp_pat
     }
     floor.restore(legacy)
     assert floor.machines[0].ratio is None and floor.machines[0].sales is None
-    assert floor.print_options.paper == "A4" and floor.display_mode.currentData() == "all"
+    assert floor.print_options.paper == "A4" and floor.display_mode.currentData() == "compact"
 
 
 def test_size_font_settings_keep_coordinates_and_undo(floor):
@@ -205,6 +205,7 @@ def test_size_font_settings_keep_coordinates_and_undo(floor):
 
 
 def test_298_cards_measured_once_then_cached(floor):
+    floor.display_mode.setCurrentIndex(floor.display_mode.findData("all"))
     floor.machines = [
         Machine(
             number=str(10000 + i),

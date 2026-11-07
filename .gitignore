@@ -7,3 +7,5 @@ dist/
 build-fonts/
 build-diagnostics/
 build-smoke/
+
+build-visual/

@@ -30,6 +30,21 @@ class Machine:
     ratio_from_excel: bool = False
     installed_on: str | None = None
     font_size: float = 12
+    maker: str = ""
+    po_rate: float | None = None
+    units: int | float | str = ""
+    cases: int | float | str = ""
+    limit: str = ""
+    operation_method: str = ""
+    reference_average: float | None = None
+    analysis: dict | None = None
+    operating_days: float | None = None
+    gross_profit: float | None = None
+    cost_rate: float | None = None
+    dispensed: float | None = None
+    per_item: float | None = None
+    unit_price: float | None = None
+    cost: float | None = None
 
     def __post_init__(self):
         if isinstance(self.installed_on, (date, datetime)):
@@ -45,7 +60,16 @@ def validate_machines(records):
             m = Machine(**record)
             if any(
                 not isinstance(getattr(m, key), str)
-                for key in ("number", "kind", "product", "source_key", "uid")
+                for key in (
+                    "number",
+                    "kind",
+                    "product",
+                    "source_key",
+                    "uid",
+                    "maker",
+                    "limit",
+                    "operation_method",
+                )
             ):
                 raise ValueError("文字列項目が不正")
             if not m.uid or m.uid in ids:
@@ -66,7 +90,20 @@ def validate_machines(records):
                     raise ValueError("位置・サイズが不正")
             if m.width < 80 or m.height < 60:
                 raise ValueError("サイズが小さすぎます")
-            for key in ("sales", "average", "ratio"):
+            for key in (
+                "sales",
+                "average",
+                "ratio",
+                "po_rate",
+                "reference_average",
+                "operating_days",
+                "gross_profit",
+                "cost_rate",
+                "dispensed",
+                "per_item",
+                "unit_price",
+                "cost",
+            ):
                 value = getattr(m, key)
                 if value is not None and (
                     isinstance(value, bool)
@@ -74,6 +111,14 @@ def validate_machines(records):
                     or not math.isfinite(value)
                 ):
                     raise ValueError("稼働数値が不正")
+            from .sales_analysis import validate_overlay
+
+            validate_overlay(m.analysis)
+            if m.reference_average is not None and m.reference_average <= 0:
+                raise ValueError("基準アベレージは正の値で指定してください")
+            from .core import quantity
+
+            m.units, m.cases = quantity(m.units), quantity(m.cases)
             if m.average is not None and m.average < 0:
                 raise ValueError("アベレージは0以上で指定してください")
             if type(m.ratio_from_excel) is not bool:
@@ -111,7 +156,7 @@ def validate_state(state):
         raise AppError("運営方法表示設定が不正です。")
     if type(state.get("snap", True)) is not bool:
         raise AppError("スナップ設定が不正です。")
-    if state.get("display_mode", "all") not in ("product", "analysis", "all"):
+    if state.get("display_mode", "all") not in ("compact", "product", "analysis", "all"):
         raise AppError("表示モードが不正です。")
     if state.get("reference_date") is not None and parse_date(state["reference_date"]) is None:
         raise AppError("基準日が不正です。")
@@ -127,6 +172,39 @@ def validate_state(state):
     from .floor_print import FloorPrintOptions
 
     FloorPrintOptions.restore(state.get("print_options"))
+    from .floor_presentation import validate_presentation
+
+    validate_presentation(state.get("presentation", {}))
+    center = state.get("view_center")
+    if center is not None and (
+        not isinstance(center, list)
+        or len(center) != 2
+        or any(
+            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+            for v in center
+        )
+    ):
+        raise AppError("表示位置が不正です。")
+    presets = state.get("card_presets", {})
+    if not isinstance(presets, dict) or len(presets) > 50:
+        raise AppError("カードプリセットが不正です。")
+    for name, settings in presets.items():
+        if (
+            not isinstance(name, str)
+            or not isinstance(settings, list)
+            or len(settings) != 3
+            or any(
+                isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                for v in settings
+            )
+            or not (
+                80 <= settings[0] <= 2000 and 60 <= settings[1] <= 2000 and 6 <= settings[2] <= 72
+            )
+        ):
+            raise AppError("カードプリセットのサイズが不正です。")
+    from .sales_analysis import validate_snapshot
+
+    validate_snapshot(state.get("sales_analysis"))
     return state
 
 
@@ -142,12 +220,57 @@ def block_metrics(ws, cell, epoch):
             result.update(sales=numeric(first.value), average=numeric(second.value))
         elif label in ("PO率/アベ比", "PO率／アベ比"):
             result.update(
+                po_rate=percent(first.value, first.number_format),
                 ratio=percent(second.value, second.number_format),
                 ratio_from_excel=second.value is not None and str(second.value).strip() != "",
             )
         elif label in ("設置日/設定2", "設置日／設定2", "設置日", "投入日"):
             value = parse_date(first.value, epoch)
             result["installed_on"] = value.isoformat() if value else None
+        elif label in ("メーカー", "運営方法", "入数", "CS数", "獲得個数制限", "PO率"):
+            key = {
+                "メーカー": "maker",
+                "運営方法": "operation_method",
+                "入数": "units",
+                "CS数": "cases",
+                "獲得個数制限": "limit",
+                "PO率": "po_rate",
+            }[label]
+            if key == "po_rate":
+                result[key] = percent(first.value, first.number_format)
+            elif key in ("units", "cases"):
+                result[key] = numeric(first.value) if numeric(first.value) is not None else ""
+            else:
+                result[key] = str(first.value).strip() if first.value is not None else ""
+        elif label in (
+            "平均売上",
+            "売上金額",
+            "稼働日数",
+            "粗利益",
+            "原価率",
+            "P/O率",
+            "払出数",
+            "個当たり",
+            "景品単価",
+            "原価",
+        ):
+            key = {
+                "平均売上": "average",
+                "売上金額": "sales",
+                "稼働日数": "operating_days",
+                "粗利益": "gross_profit",
+                "原価率": "cost_rate",
+                "P/O率": "po_rate",
+                "払出数": "dispensed",
+                "個当たり": "per_item",
+                "景品単価": "unit_price",
+                "原価": "cost",
+            }[label]
+            result[key] = (
+                percent(first.value, first.number_format)
+                if key in ("po_rate", "cost_rate")
+                else numeric(first.value)
+            )
         elif label in ("売上", "アベレージ", "アベ比", "アベ比(%)"):
             key = {
                 "売上": "sales",
@@ -251,6 +374,9 @@ def import_layout(path):
             warnings.append(
                 f"{unknown}枠は実マシン番号の対応がないため未設定です。参照IDから実番号を推測していません。"
             )
+        from .sales_analysis import ensure_references
+
+        ensure_references(machines)
         return machines, warnings
     finally:
         wb.close()

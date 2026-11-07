@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtPrintSupport import QPrintPreviewWidget
 
 from .core import AppError
+from .floor_status import COLOR_FILTERS
 from .floor_render import FIELDS, FIELD_LABELS
 from .floor_print import FloorPrintOptions, floor_printer
 
@@ -34,16 +35,25 @@ class FloorPrintControls(QWidget):
         self.numbers = {}
         self.checks = {}
         choices = {
+            "color_filter": [(label, key) for key, label in COLOR_FILTERS.items()],
             "paper": [(p, p) for p in ("A4", "A3", "A2", "A1", "A0")]
             + [("ユーザー指定", "custom")],
             "orientation": [("横向き", "landscape"), ("縦向き", "portrait")],
             "mode": [
                 ("1枚に全体を収める", "fit"),
-                ("複数ページに分割", "tile"),
+                ("エリア別に分割して拡大", "tile"),
                 ("選択範囲だけを1枚に", "selection"),
-                ("実寸相当・倍率指定", "actual"),
+                ("指定倍率で複数ページ", "actual"),
+                ("マシン一覧表", "list"),
             ],
             "font_size": [("標準", "standard"), ("大", "large"), ("特大", "xlarge")],
+            "card_style": [("通常（フィルターの3項目）", "summary"), ("詳細項目", "detailed")],
+            "sort": [
+                ("マシン番号", "number"),
+                ("アベ比", "ratio"),
+                ("投入日数", "days"),
+                ("商品名", "product"),
+            ],
             "card_size": [
                 ("自動（文字を優先）", "auto"),
                 ("標準", "standard"),
@@ -51,11 +61,14 @@ class FloorPrintControls(QWidget):
             ],
         }
         labels = {
+            "color_filter": "印刷用の色フィルター",
             "paper": "用紙",
             "orientation": "方向",
             "mode": "印刷方式",
             "font_size": "印刷文字",
             "card_size": "印刷カード",
+            "card_style": "カード表示",
+            "sort": "一覧表の順序",
         }
         for key, items in choices.items():
             c = QComboBox()
@@ -79,6 +92,8 @@ class FloorPrintControls(QWidget):
             self.numbers[key] = spin
         for key, label in (
             ("colour", "カラー（解除で白黒）"),
+            ("descending", "一覧表を降順"),
+            ("visible_only", "画面の絞り込み対象のみ印刷"),
             ("show_methods", "運営方法を印刷"),
             ("selection_only", "選択したマシンだけ"),
             ("boundaries", "画面にページ境界を表示"),
@@ -88,7 +103,7 @@ class FloorPrintControls(QWidget):
             self.checks[key] = check
             form.addRow(check)
         self.fields = {}
-        form.addRow(QLabel("印刷する項目（状態の文字は常に表示）"))
+        form.addRow(QLabel("詳細項目モードのみ選択可（通常・一覧表はフィルターの3項目）"))
         for field in FIELDS:
             check = QCheckBox(FIELD_LABELS[field])
             check.setChecked(field in options.fields)
@@ -108,6 +123,14 @@ class FloorPrintControls(QWidget):
         self.update_enabled()
 
     def update_enabled(self):
+        table = self.combos["mode"].currentData() == "list"
+        for field in self.fields.values():
+            field.setEnabled(not table and self.combos["card_style"].currentData() == "detailed")
+        for key in ("card_width", "card_height"):
+            self.numbers[key].setEnabled(not table)
+        for key in ("card_style", "card_size"):
+            self.combos[key].setEnabled(not table)
+        self.checks["show_methods"].setEnabled(not table)
         custom = self.combos["paper"].currentData() == "custom"
         for key in ("width_mm", "height_mm"):
             self.numbers[key].setEnabled(custom)

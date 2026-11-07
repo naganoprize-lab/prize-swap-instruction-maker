@@ -87,8 +87,49 @@ def run(output):
             w.floor.print_floor()
         reference_text=normalized_pdf_text("".join(p["text"] for p in require_searchable_pdf(floor_reference)["pages"]))
         direct_text=normalized_pdf_text("".join(p["text"] for p in require_searchable_pdf(floor_direct)["pages"]))
-        assert reference_text==direct_text and "アベ比49.9%" in direct_text and "投入4日" in direct_text
+        assert reference_text==direct_text and "アベ比49.9%" in direct_text and "設置日数" not in direct_text
         report["floor_print"]={"paper":"A3","preview_pages":1,"direct_pdf_equal":True}
+        from .floor_details import MachineDetailDialog
+        positions=[(m.x,m.y,m.width,m.height) for m in w.floor.machines]
+        w.tabs.setCurrentWidget(w.floor)
+        w.floor.toggle_fullscreen();app.processEvents()
+        assert w.floor._fullscreen_host.isFullScreen()
+        for mode in ("readable","list","actual"):
+            w.floor.layout_mode.setCurrentIndex(w.floor.layout_mode.findData(mode))
+            assert [(m.x,m.y,m.width,m.height) for m in w.floor.machines]==positions
+        w.floor._fullscreen_host.close();app.processEvents()
+        assert w.tabs.currentWidget() is w.floor
+        detail=MachineDetailDialog(w.floor,w.floor.machines[0])
+        assert detail.name.toPlainText()=="現在の商品A" and detail.values["sales"].text()=="1,000"
+        assert len(detail.products)==1
+        detail.reject()
+        w.floor.set_print_options(FloorPrintOptions(mode="list",paper="A4"))
+        table_path=output/"売り場マシン一覧表.pdf"
+        table=w.floor.paint_floor(floor_printer(w.floor.print_options,table_path))
+        table_text=normalized_pdf_text("".join(p["text"] for p in require_searchable_pdf(table_path)["pages"]))
+        assert table_text.count("現在の商品A")==1 and table_text.count("現在の商品B")==1
+        report["floor_workspace"]={"fullscreen":True,"modes_keep_coordinates":True,"detail":True,"table_pages":len(table.pages)}
+        from openpyxl import Workbook
+        from .sales_analysis import HEADERS
+        from .floor_status import effective_stat,ratio
+        analysis_path=output/"売上分析入力.xlsx"
+        workbook=Workbook();sheet=workbook.active;sheet.title="景品運営分析表"
+        for column,label in HEADERS.items():sheet.cell(1,column+1,label)
+        for row,number in enumerate(("20085-02","29999-01"),2):
+            values=[None,number,None,None,"売上登録用",12000,3,4000,8000,.33,.08,20,600,"表示禁止の景品種別",500,4000]
+            for column,value in enumerate(values,1):sheet.cell(row,column,value)
+            sheet.cell(row,10).number_format="0.00%";sheet.cell(row,11).number_format="0.00%"
+        workbook.save(analysis_path);workbook.close()
+        previous=[(m.number,m.product,m.x,m.y,m.installed_on) for m in w.floor.machines]
+        imported=w.floor.import_analysis_path(analysis_path)
+        assert imported["read"]==2 and imported["matched"]==1 and len(imported["unmatched"])==1
+        assert previous==[(m.number,m.product,m.x,m.y,m.installed_on) for m in w.floor.machines]
+        assert effective_stat(w.floor.machines[0],"sales")==12000 and abs(ratio(w.floor.machines[0])-99.8)<.01
+        analysis_pdf=output/"売上分析反映.pdf";w.floor.paint_floor(floor_printer(w.floor.print_options,analysis_pdf))
+        contents=normalized_pdf_text("".join(p["text"] for p in require_searchable_pdf(analysis_pdf)["pages"]))
+        assert "99.8%" in contents and "現在の商品A" in contents and "売上登録用" not in contents
+        report["sales_analysis"]={"read":imported["read"],"matched":imported["matched"],"unmatched":len(imported["unmatched"]),"ratio":ratio(w.floor.machines[0])}
+        w.tabs.setCurrentIndex(0)
         source_name = w.products[0].name
         assert w.labels.model.entries[0].automatic_copies == 2
         assert w.labels.model.setData(w.labels.model.index(0, 1), "LABEL_ONLY 商品名")

@@ -7,13 +7,48 @@ import unicodedata
 from .core import parse_date
 
 COLORS = {
-    "planned": "#E1EFFC",
-    "high": "#FFF0DA",
-    "active": "#E7F4E9",
+    "planned": "#A9D7FF",
+    "high": "#FFE16A",
+    "active": "#94D8A0",
     "low": "#FFFFFF",
-    "poor": "#FCE4E4",
+    "poor": "#F4A6A6",
     "unknown": "#FFFFFF",
+    "aged": "#C5A5ED",
 }
+
+COLOR_FILTERS = {"ratio": "アベ比", "planned": "投入予定地", "age": "設置日数"}
+FILTER_FIELDS = {
+    "ratio": ("number", "ratio", "product"),
+    "planned": ("number", "ratio", "product"),
+    "age": ("number", "days", "product"),
+}
+
+
+def filter_status(machine, mode, reference, planned=False, priority=False):
+    if mode == "ratio":
+        return machine_status(machine, planned, priority)
+    if mode == "planned":
+        colour = COLORS["planned"] if planned else COLORS["low"]
+        label = "投入予定" if planned else "投入予定なし"
+    elif mode == "age":
+        age = days(machine, reference)
+        colour = COLORS["aged"] if age is not None and age >= 10 else COLORS["low"]
+        label = "設置日数 " + days_text(machine, reference)
+        if planned:
+            label += " / 投入予定"
+    else:
+        raise ValueError("色フィルターが不正です。")
+    if priority:
+        label += " / 優先入替"
+    return colour, label
+
+
+def filter_legend(mode):
+    return {
+        "ratio": "青：投入予定／黄枠：優先入替／黄：高稼働（200%以上）／緑：100〜200%未満／白：50〜100%未満・不明／赤：低稼働（50%未満）",
+        "planned": "青：投入予定地／白：投入予定なし／黄枠：優先入替（アベ比による色分けは無効）",
+        "age": "紫：設置10日以上／白：10日未満・不明・未来／黄枠：優先入替",
+    }[mode]
 
 
 def numeric(value):
@@ -45,12 +80,44 @@ def percent(value, number_format="General"):
     return number * 100 if "%" in fmt and not is_string else number
 
 
+def effective_stat(machine, key):
+    overlay = getattr(machine, "analysis", None)
+    if overlay and overlay.get("values", {}).get(key) is not None:
+        return overlay["values"][key]
+    return getattr(machine, key, None)
+
+
+def reference_average(machine):
+    value = getattr(machine, "reference_average", None)
+    if value is not None:
+        return value if value > 0 and math.isfinite(value) else None
+    if machine.average is not None and machine.ratio is not None and machine.ratio > 0:
+        value = machine.average * 100 / machine.ratio
+        return value if value > 0 and math.isfinite(value) else None
+    if (
+        machine.ratio is None
+        and not machine.ratio_from_excel
+        and machine.average is not None
+        and machine.average > 0
+    ):
+        return machine.average
+    return None
+
+
 def ratio(machine):
+    if getattr(machine, "analysis", None):
+        average = effective_stat(machine, "average")
+        reference = reference_average(machine)
+        if average is None or reference is None:
+            return None
+        value = average / reference * 100
+        return value if math.isfinite(value) else None
     if machine.ratio is not None or machine.ratio_from_excel:
         return machine.ratio
     if machine.sales is None or machine.average is None or machine.average <= 0:
         return None
-    return machine.sales / machine.average * 100
+    value = machine.sales / machine.average * 100
+    return value if math.isfinite(value) else None
 
 
 def days(machine, reference):

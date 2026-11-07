@@ -121,6 +121,18 @@ def run(output):
             warnings=floor_plan.warnings,fonts=evidence["fonts"],boundary_values=[49.9,50,99.9,100,199.9,200],
             colours=[c.background for c in floor_plan.pages[0].cards],
             text=[p["text"] for p in evidence["pages"]])
+        table_path=output/"floor-machine-table.pdf"
+        table_plan=save_floor_pdf(table_path,machines,{},FloorPrintOptions(paper="A3",mode="list"),day)
+        table_pdf=require_searchable_pdf(table_path)
+        table_text=compact("".join(p["text"] for p in table_pdf["pages"]))
+        if any(table_text.count(f"FLOOR{i:03}")!=1 for i in range(298)):
+            raise ValueError("Missing or repeated floor table names")
+        doc=QPdfDocument();doc.load(str(table_path))
+        image=doc.render(0,QSize(1263,893))
+        if image.isNull() or not image.save(str(output/"floor-machine-table-1.png")):
+            raise ValueError("Floor table rasterization failed")
+        doc.close()
+        report["floor_operations"]["table_pages"]=len(table_plan.pages)
         report["ok"] = True
     except Exception:
         report["error"] = traceback.format_exc()
