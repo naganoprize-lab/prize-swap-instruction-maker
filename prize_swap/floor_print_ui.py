@@ -30,6 +30,7 @@ class FloorPrintControls(QWidget):
 
     def __init__(self, options, parent=None):
         super().__init__(parent)
+        self.analysis_settings = dict(options.analysis_settings)
         form = QFormLayout(self)
         self.combos = {}
         self.numbers = {}
@@ -93,7 +94,7 @@ class FloorPrintControls(QWidget):
         for key, label in (
             ("colour", "カラー（解除で白黒）"),
             ("descending", "一覧表を降順"),
-            ("visible_only", "画面の絞り込み対象のみ印刷"),
+            ("visible_only", "画面の検索・強調一致だけを印刷"),
             ("show_methods", "運営方法を印刷"),
             ("selection_only", "選択したマシンだけ"),
             ("boundaries", "画面にページ境界を表示"),
@@ -142,6 +143,7 @@ class FloorPrintControls(QWidget):
         data = {key: c.currentData() for key, c in self.combos.items()}
         data.update({key: s.value() for key, s in self.numbers.items()})
         data.update({key: c.isChecked() for key, c in self.checks.items()})
+        data["analysis_settings"] = dict(self.analysis_settings)
         data["fields"] = [key for key, c in self.fields.items() if c.isChecked()]
         return FloorPrintOptions(**data).validate()
 

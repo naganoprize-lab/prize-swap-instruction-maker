@@ -123,16 +123,20 @@ def build_toolbar(owner, layout):
     owner.fullscreen_button = button(top, "全画面", owner.toggle_fullscreen)
     second = row()
     owner.floor_search = QLineEdit()
-    owner.floor_search.setPlaceholderText("マシン番号・商品名を検索")
+    owner.floor_search.setPlaceholderText("番号・商品・機種・方法を検索")
     owner.floor_search.setClearButtonEnabled(True)
     second.addWidget(owner.floor_search, 1)
     owner.floor_search.textChanged.connect(owner.presentation_changed)
+    owner.search_count=QLabel("検索結果：0 / 0ブース")
+    second.addWidget(owner.search_count)
+    button(second,"前へ",lambda:owner.next_match(-1))
+    button(second,"次へ",lambda:owner.next_match(1))
     owner.filter_by = QComboBox()
     for label, key in (
-        ("絞込なし", "all"),
-        ("絞込：50%未満", "poor"),
-        ("絞込：200%以上", "high"),
-        ("絞込：投入予定", "planned"),
+        ("強調なし", "all"),
+        ("強調：50%未満", "poor"),
+        ("強調：200%以上", "high"),
+        ("強調：投入予定", "planned"),
     ):
         owner.filter_by.addItem(label, key)
     second.addWidget(owner.filter_by)
@@ -171,6 +175,7 @@ def build_toolbar(owner, layout):
         second,
         "表示設定",
         [
+            ("分析・判定・色・照合の設定", owner.analysis_settings_dialog),
             ("カード・文字サイズ", owner.card_settings),
             ("表示カードのプリセット", owner.presentation_settings),
             ("プリセット保存", owner.save_card_preset),

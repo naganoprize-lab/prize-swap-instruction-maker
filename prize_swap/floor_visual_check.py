@@ -104,10 +104,10 @@ def run(output):
         assert floor.isVisibleTo(host) and floor.view.scene() is scene
         for b in host.buttons.values():
             assert b.isVisibleTo(host) and b.width() > 0 and b.height() > 0
-        report["ratio"] = inspect_card(floor, uid, "#A9D7FF")
+        report["ratio"] = inspect_card(floor, uid, "#F4A6A6")
         assert report["ratio"]["dpr"] >= float(report["scale_requested"]) * 0.9
         assert host.grab().save(str(output / "fullscreen-ratio.png"))
-        for mode, colour in (("planned", "#A9D7FF"), ("age", "#C5A5ED"), ("ratio", "#A9D7FF")):
+        for mode, colour in (("planned", "#A9D7FF"), ("age", "#C5A5ED"), ("ratio", "#F4A6A6")):
             host.filter_combo.setCurrentIndex(host.filter_combo.findData(mode))
             app.processEvents()
             report[mode] = inspect_card(floor, uid, colour)
@@ -186,7 +186,7 @@ def run(output):
         )
         assert floor.presentation == settings and [m.uid for m in floor.selected()] == [uid]
         assert floor.view.scene() is scene and [asdict(m) for m in floor.machines] == before
-        report["restored"] = inspect_card(floor, uid, "#A9D7FF")
+        report["restored"] = inspect_card(floor, uid, "#F4A6A6")
         assert window.grab().save(str(output / "restored.png"))
         report.update(
             ok=True, details_opened=len(opened), drag_and_undo=True, selection_preserved=True

@@ -22,9 +22,16 @@ from .performance_validation import period_text, reconcile
 
 class SalesAnalysisMixin:
     def import_analysis_path(self, path):
-        snapshot = load_analysis(path)  # Parse before changing any current state.
+        snapshot = load_analysis(path, dict(absolute=self.analysis_settings["tolerance_absolute"],relative=self.analysis_settings["tolerance_relative"]))  # Parse before changing any current state.
         before = self.state()
         snapshot["issues"] = reconcile(self.machines, snapshot, self.analysis_state)
+        from .analysis_settings import normalize_type,type_style
+        for record in snapshot["records"].values():
+            name=normalize_type(record.get("machine_name", ""))
+            if name and name not in self.analysis_settings["types"]:
+                canonical_name=next((k for k in self.analysis_settings["types"] if k.casefold()==name.casefold()),name)
+                if canonical_name!=name:self.analysis_settings["aliases"][name]=canonical_name
+                self.analysis_settings["types"].setdefault(canonical_name,type_style(canonical_name,self.analysis_settings))
         self.analysis_state = snapshot
         self.rebuild()
         self.record(before, "売上分析Excel読込")

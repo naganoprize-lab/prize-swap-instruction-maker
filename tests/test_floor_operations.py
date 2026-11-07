@@ -61,7 +61,8 @@ def test_ratio_boundaries_and_planned_priority(floor, value, key):
         assert "50%未満" in status
     floor.add_machine(m)
     floor.scene.clearSelection()
-    assert floor.card_context(m)[0] == COLORS["planned"]
+    assert floor.card_context(m)[0] == background
+    assert "投入予定" in floor.card_context(m)[1]
     floor.products()[0].included = False
     floor.sync()
     assert floor.card_context(m)[0] == background
@@ -78,7 +79,7 @@ def test_missing_and_explicit_ratio_precedence():
     assert ratio(Machine(sales=100, average=50, ratio=49.9)) == 49.9
     for m in (Machine(), Machine(sales=0), Machine(sales=10, average=0), Machine(average=10)):
         assert ratio(m) is None and ratio_text(m) == "—"
-        assert machine_status(m)[0] == "#FFFFFF"
+        assert machine_status(m)[0] == "#B8BEC6"
     assert ratio(Machine(sales=0, average=10)) == 0
     assert money(None) == "—" and money(0) == "0"
     assert percent(0.499, "0.0%") == pytest.approx(49.9)

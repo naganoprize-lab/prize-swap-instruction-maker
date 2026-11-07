@@ -118,6 +118,7 @@ def test_pdf_boundary_colours_are_visible_and_text_is_searchable(tmp_path):
     planned = Product(DAY, "次の商品", machines=[machines[0].number], priority=True)
     blue = tmp_path / "投入予定.pdf"
     options.colour = True
+    options.color_filter = "planned"  # Blue background is reserved for the planned-location filter.
     plan = save_floor_pdf(blue, machines, {machines[0].number: [planned]}, options, DAY)
     assert plan.pages[0].cards[0].background == COLORS["planned"]
     doc.load(str(blue))

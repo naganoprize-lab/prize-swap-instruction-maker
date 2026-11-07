@@ -132,7 +132,8 @@ def test_visible_only_is_explicit_and_selection_of_print_table(tmp_path):
         w.floor.machines = machines(10)
         w.floor.rebuild()
         w.floor.filter_by.setCurrentIndex(w.floor.filter_by.findData("poor"))
-        assert len(w.floor.visible_nodes()) == 2
+        assert len(w.floor.visible_nodes()) == 10
+        assert len(w.floor._match_uids) == 2
         assert len(w.floor.print_machines()) == 10
         w.floor.set_print_options(FloorPrintOptions(mode="list", visible_only=True))
         assert len(w.floor.print_machines()) == 2

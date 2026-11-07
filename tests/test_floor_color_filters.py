@@ -29,7 +29,7 @@ DAY = date(2026, 11, 7)
         (10, "#C5A5ED", "10日"),
         (0, "#FFFFFF", "0日"),
         (-1, "#FFFFFF", "投入予定"),
-        (None, "#FFFFFF", "—"),
+        (None, "#B8BEC6", "—"),
     ],
 )
 def test_age_boundary_unknown_and_future(age, colour, label):

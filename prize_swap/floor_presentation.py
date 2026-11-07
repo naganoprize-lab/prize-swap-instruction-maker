@@ -2,6 +2,8 @@
 
 import math
 import re
+import unicodedata
+from .analysis_settings import machine_type
 from PySide6.QtCore import QRectF
 from .core import AppError
 from .floor_status import ratio, days, COLOR_FILTERS
@@ -84,10 +86,17 @@ def ordered_machines(machines, key="number", descending=False, reference=None):
 
 
 def visible_machines(machines, assignments, settings, reference):
-    needle = settings["search"].strip().casefold()
+    """Display filters never remove a machine or change the projection."""
+    return list(machines)
+
+
+def matching_machines(machines, assignments, settings, reference, analysis_settings=None):
+    def normalized(value):
+        return "".join(unicodedata.normalize("NFKC", value).split()).casefold()
+    needle = normalized(settings["search"])
     result = []
     for m in machines:
-        if needle and needle not in (m.number + " " + m.product + " " + m.source_key).casefold():
+        if needle and needle not in normalized(" ".join((m.number, m.product, m.source_key, machine_type(m, analysis_settings), m.operation_method, " ".join(p.machine_methods.get(m.number, "") for p in assignments.get(m.number, []))))):
             continue
         value = ratio(m)
         kind = settings["filter"]

@@ -182,6 +182,7 @@ def test_autosave_manual_session_restore_and_reset(floor, layout_excel, tmp_path
 
 
 def test_floor_colors_and_pdf(floor, tmp_path):
+    floor.set_color_filter("planned")
     m = Machine(number="20111左", x=0,y=0, product="現在の商品")
     floor.add_machine(m)
     floor.scene.clearSelection()

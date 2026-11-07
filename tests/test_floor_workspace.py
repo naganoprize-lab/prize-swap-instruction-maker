@@ -73,7 +73,7 @@ def floor(tmp_path):
         (100, "#94D8A0"),
         (199.9, "#94D8A0"),
         (200, "#FFE16A"),
-        (None, "#FFFFFF"),
+        (None, "#B8BEC6"),
     ],
 )
 def test_new_palette_literal_and_blue_priority(value, colour):
@@ -181,27 +181,31 @@ def test_projection_sorting_filters_leave_300_positions_unchanged(floor):
             floor.descending.setChecked(True)
             assert [asdict(m) for m in floor.machines] == before
     floor.filter_by.setCurrentIndex(floor.filter_by.findData("poor"))
-    assert len(floor.visible_nodes()) == 50
+    assert len(floor.visible_nodes()) == 300
+    assert len(floor._match_uids) == 50
     floor.filter_by.setCurrentIndex(floor.filter_by.findData("high"))
-    assert len(floor.visible_nodes()) == 100
+    assert len(floor.visible_nodes()) == 300
+    assert len(floor._match_uids) == 100
     floor.floor_search.setText("商品299")
-    assert len(floor.visible_nodes()) == 1
+    assert len(floor.visible_nodes()) == 300
+    assert len(floor._match_uids) == 1
     assert [asdict(m) for m in floor.machines] == before
 
 
 def test_filter_days_and_planned_uses_real_values(floor):
     floor.filter_by.setCurrentIndex(floor.filter_by.findData("planned"))
-    assert [n.machine.number for n in floor.visible_nodes()] == ["20000右"]
+    assert [n.machine.number for n in floor.visible_nodes() if n.search_match] == ["20000右"]
     floor.products()[0].included = False
     floor.sync()
-    assert not floor.visible_nodes()
+    assert not floor._match_uids
+    assert len(floor.visible_nodes()) == len(floor.machines)
     floor.filter_by.setCurrentIndex(0)
     floor.days_filter.setChecked(True)
     floor.min_days.setValue(2)
     floor.max_days.setValue(3)
-    assert {n.machine.number for n in floor.visible_nodes()} == {"20002右", "20003右"}
+    assert {n.machine.number for n in floor.visible_nodes() if n.search_match} == {"20002右", "20003右"}
     floor.reference_date.setDate(QDate(2026, 11, 7))
-    assert {n.machine.number for n in floor.visible_nodes()} == {"20003右", "20004右"}
+    assert {n.machine.number for n in floor.visible_nodes() if n.search_match} == {"20003右", "20004右"}
 
 
 def test_fullscreen_esc_keeps_selection_and_coordinates(floor, monkeypatch):
@@ -283,7 +287,7 @@ def test_po_rate_excel_percent_import(tmp_path):
     wb.save(path)
     wb.close()
     machines, _ = import_layout(path)
-    assert machines[0].po_rate == 25 and machines[0].ratio == pytest.approx(49.9)
+    assert machines[0].po_rate == .25 and machines[0].ratio == pytest.approx(49.9)
 
 
 def test_search_delete_and_undo_edit_text_without_deleting_machine(floor, monkeypatch):

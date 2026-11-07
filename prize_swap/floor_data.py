@@ -211,6 +211,8 @@ def validate_state(state):
             )
         ):
             raise AppError("カードプリセットのサイズが不正です。")
+    from .analysis_settings import validate_settings
+    validate_settings(state.get("analysis_settings"))
     from .sales_analysis import validate_snapshot
 
     validate_snapshot(state.get("sales_analysis"))

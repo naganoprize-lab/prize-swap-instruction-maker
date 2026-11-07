@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPen
 from .core import parse_date
 from .fonts import print_font
 from .printing import text_block
-from .floor_status import days_text, money, ratio_text, FILTER_FIELDS, effective_stat, ratio
+from .floor_status import days_text, money, ratio_text, FILTER_FIELDS, effective_stat, ratio, metric_text
 
 FIELDS = ("number", "product", "sales", "average", "ratio", "installed_on", "days")
 FIELD_LABELS = {
@@ -20,6 +20,7 @@ FIELD_LABELS = {
     "ratio": "アベ比",
     "installed_on": "設置日",
     "days": "投入日数",
+    "po_rate":"PO率", "cost_rate":"原価率", "sales_metric":"売上比較", "machine_type":"機種", "assessment":"入替候補",
 }
 SUMMARY_FIELDS = ("number", "ratio", "days", "product")
 DISPLAY_FIELDS = {
@@ -47,7 +48,7 @@ class CardRenderer:
         self.measured = 0
         self.hits = 0
 
-    def content(self, machine, width, base, fields, reference, status, methods=""):
+    def content(self, machine, width, base, fields, reference, status, methods="", settings=None):
         self.measured += 1
         padding = 5
         gap = max(1, base * 0.12)
@@ -81,6 +82,8 @@ class CardRenderer:
                     False,
                 )
             )
+        for key in ("po_rate", "cost_rate", "sales_metric", "machine_type", "assessment"):
+            if key in fields:records.append((metric_text(machine,key,reference,settings),base*1.3,True))
         if methods:
             records.append(("運営方法 " + methods, base * 0.85, False))
         records.append((status, base * 0.8, True))
@@ -98,7 +101,7 @@ class CardRenderer:
             minimum = min(minimum, size)
         return CardLayout(blocks, y - gap + padding, minimum)
 
-    def summary_content(self, machine, width, base, fields, reference, status, truncate=False):
+    def summary_content(self, machine, width, base, fields, reference, status, truncate=False, settings=None):
         self.measured += 1
         records = []
         if "number" in fields:
@@ -118,6 +121,8 @@ class CardRenderer:
                     base * (1.8 if "ratio" not in fields else 1.4),
                 )
             )
+        for key in ("po_rate", "cost_rate", "sales_metric", "machine_type", "assessment"):
+            if key in fields:records.append((metric_text(machine,key,reference,settings),base*1.6))
         if "product" in fields:
             records.append((machine.product or "商品未設定", base))
         y = 6
@@ -166,8 +171,12 @@ class CardRenderer:
         grow=False,
         summary=False,
         truncate=False,
+        settings=None,
     ):
         key = (
+            repr(settings),
+            tuple(effective_stat(machine,k) for k in ("po_rate","cost_rate")),
+            (machine.analysis or {}).get("machine_name", machine.kind),
             machine.number,
             machine.source_key,
             machine.product,
@@ -194,9 +203,9 @@ class CardRenderer:
 
         def content(size):
             return (
-                self.summary_content(machine, width, size, fields, reference, status, truncate)
+                self.summary_content(machine, width, size, fields, reference, status, truncate,settings)
                 if summary
-                else self.content(machine, width, size, fields, reference, status, methods)
+                else self.content(machine, width, size, fields, reference, status, methods,settings)
             )
 
         target = content(font)
@@ -219,18 +228,22 @@ class CardRenderer:
         return target
 
 
-def draw_card(painter, rect, layout, background, priority=False, selected=False, overlap=False):
+def draw_card(painter, rect, layout, background, priority=False, selected=False, overlap=False, search_match=False):
     painter.save()
     painter.setRenderHint(painter.RenderHint.Antialiasing)
     border = (
-        "#173EBC" if selected else "#9B6900" if priority else "#B42318" if overlap else "#60736A"
+        "#173EBC" if selected else "#00B8D9" if search_match else "#9B6900" if priority else "#B42318" if overlap else "#60736A"
     )
-    painter.setPen(QPen(QColor(border), 4 if selected else 3 if priority else 2 if overlap else 1))
+    painter.setPen(QPen(QColor(border), 4 if selected or search_match else 3 if priority else 2 if overlap else 1))
     painter.setBrush(QColor(background))
     painter.drawRoundedRect(rect, 5, 5)
+    if any("投入予定" in block.text for _,block,_ in layout.blocks):
+        painter.setPen(QPen(QColor("#134F80"),1))
+        painter.setBrush(QColor("#A9D7FF"))
+        painter.drawEllipse(QPointF(rect.right()-7,rect.top()+7),4,4)
     painter.translate(rect.topLeft())
     painter.scale(layout.scale, layout.scale)
-    painter.setPen(QColor("#10231B"))
+    painter.setPen(QColor("#20242A"))
     for point, block, _ in layout.blocks:
         block.draw(painter, point)
     painter.restore()

@@ -11,7 +11,8 @@ from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 from .core import AppError
 from .floor_render import CardRenderer, FIELDS, SUMMARY_FIELDS, draw_card
 from .floor_presentation import ordered_machines
-from .floor_status import ratio_text, days_text
+from .floor_status import ratio_text, days_text, metric_text
+from .analysis_settings import validate_settings, sales_boundaries
 from .floor_status import (
     machine_status,
     overlapping,
@@ -48,8 +49,10 @@ class FloorPrintOptions:
     show_methods: bool = False
     selection_only: bool = False
     boundaries: bool = True
+    analysis_settings: dict = field(default_factory=dict)
 
     def validate(self):
+        validate_settings(self.analysis_settings)
         if (
             self.paper not in (*PAPERS, "custom")
             or self.orientation not in ("portrait", "landscape")
@@ -248,7 +251,7 @@ def plan_floor(
     header_height = sum(b.height for b in headers) + 8
     footers = [
         text_block(
-            filter_legend(options.color_filter),
+            filter_legend(options.color_filter, options.analysis_settings),
             width,
             print_font(9),
             renderer.device,
@@ -268,7 +271,7 @@ def plan_floor(
     for m in chosen:
         plans = assignments.get(m.number, [])
         priority = any(p.priority for p in plans)
-        colour, status = filter_status(m, options.color_filter, reference, bool(plans), priority)
+        colour, status = filter_status(m, options.color_filter, reference, bool(plans), priority, validate_settings(options.analysis_settings) | {"_sales_bounds":sales_boundaries(chosen,validate_settings(options.analysis_settings))})
         methods = (
             "／".join(dict.fromkeys(p.machine_methods.get(m.number) or "未設定" for p in plans))
             if options.show_methods
@@ -290,6 +293,7 @@ def plan_floor(
             methods,
             grow=options.card_size == "auto",
             summary=options.card_style == "summary",
+            settings=options.analysis_settings,
         )
         if options.card_size == "auto":
             h = max(h, layout.height)
@@ -348,7 +352,7 @@ def plan_table(
     fields = FILTER_FIELDS[options.color_filter]
     widths = [width * 0.22, width * 0.24, width * 0.54]
     labels = [
-        {"number": "マシン番号 / 状態", "ratio": "アベ比", "days": "設置日数", "product": "商品名"}[
+        {"number": "マシン番号 / 状態", "ratio": "アベ比", "days": "設置日数", "product": "商品名", "po_rate":"PO率", "cost_rate":"原価率", "sales_metric":"平均売上 / 総売上", "machine_type":"機種", "assessment":"入替候補"}[
             key
         ]
         for key in fields
@@ -362,7 +366,7 @@ def plan_table(
     for m in ordered_machines(machines, options.sort, options.descending, reference):
         plans = assignments.get(m.number, [])
         colour, status = filter_status(
-            m, options.color_filter, reference, bool(plans), any(p.priority for p in plans)
+            m, options.color_filter, reference, bool(plans), any(p.priority for p in plans), validate_settings(options.analysis_settings) | {"_sales_bounds":sales_boundaries(machines,validate_settings(options.analysis_settings))}
         )
         number = (
             (m.number or m.source_key or "未設定")
@@ -375,6 +379,7 @@ def plan_table(
             "days": days_text(m, reference),
             "product": m.product or "商品未設定",
         }
+        data.update({k:metric_text(m,k,reference,options.analysis_settings) for k in ("po_rate","cost_rate","sales_metric","machine_type","assessment") if k in fields})
         values = [data[key] for key in fields]
         blocks = [
             text_block(
