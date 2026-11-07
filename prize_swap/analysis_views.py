@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QComboBox,
 )
+from .machine_matching import machine_key,display_identity,normalize_number
 from .floor_status import ratio_text, days_text, effective_stat, money, ratio, days
 
 
@@ -82,7 +83,7 @@ def show_candidates(owner):
         rows.append(
             [
                 (f'{a["priority"]+1} {a["status"]}', a["priority"]),
-                m.number,
+                display_identity(m),
                 m.product,
                 (ratio_text(m), ratio(m)),
                 (days_text(m, owner.reference_day()), days(m, owner.reference_day())),
@@ -129,7 +130,7 @@ def show_candidates(owner):
 
     def locate(row, *_):
         number = table.item(row, 1).text()
-        ids = [m.uid for m in owner.machines if m.number == number]
+        ids = [m.uid for m in owner.machines if machine_key(m) == number or m.source_key == number]
         owner.highlight_group(ids)
         if ids:
             owner.scene.clearSelection()
@@ -159,7 +160,7 @@ def show_candidates(owner):
 
 
 def propose_assignments(owner, numbers, parent=None):
-    numbers = [n for n in numbers if n]
+    numbers = [normalize_number(n,allow_bare=True) for n in numbers if normalize_number(n,allow_bare=True)]
     products = [p for p in owner.products() if p.day == owner.selected_day()]
     if not numbers or not products:
         owner.message.emit("機器と選択日の入替先商品を用意してください。")

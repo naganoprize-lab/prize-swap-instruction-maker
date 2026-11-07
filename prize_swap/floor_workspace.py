@@ -294,6 +294,28 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         node.setSelected(True)
         self.view.ensureVisible(node, 40, 40)
 
+    def apply_matching(self, rows, overrides):
+        from .machine_matching import validate_references,prepare_references,normalize_number
+        from .floor_data import validate_machines
+        from dataclasses import asdict
+        validate_references(rows)
+        updated=deepcopy(self.machines)
+        for m in updated:
+            if m.uid in overrides:
+                value=overrides[m.uid]
+                if value is not None and value and normalize_number(value)!=value:raise ValueError("手動の機械番号が不正です。")
+                m.manual_number=value
+        prepare_references(updated,rows);validate_machines([asdict(m) for m in updated])
+        before=self.state();self.number_references=deepcopy(rows);self.machines=updated
+        by_uid={m.uid:m for m in self.machines}
+        for uid,node in self.nodes.items():node.machine=by_uid[uid]
+        self.refresh_assignments();self.record(before,"管理ナンバー照合の修正");self.sync()
+        self.update_info()
+
+    def show_matching(self):
+        from .matching_ui import show_matching
+        show_matching(self)
+
     def show_history(self):
         from .history_ui import show_history
 

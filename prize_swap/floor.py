@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtPrintSupport import QPrintDialog
 
 from .core import AppError, machine_numbers
+from .machine_matching import machine_key, display_identity
 from .floor_data import Machine, import_layout, save_layout, validate_machines, validate_state
 from .fonts import print_font
 from .floor_status import (
@@ -158,14 +159,14 @@ class MachineNode(QGraphicsObject):
                 and self.owner.presentation["edit"]
                 and self.owner.presentation["mode"] == "actual"
             )
-        plans = self.owner.assignments().get(m.number, [])
+        plans = self.owner.assignments().get(machine_key(m), [])
         installed = m.installed_on or "—"
         self.setToolTip(
-            f"{m.number or '番号未設定'} / {m.kind}\n{m.product}\n売上 {money(effective_stat(m,"sales"))} / アベレージ {money(effective_stat(m,"average"))} / アベ比 {ratio_text(m)}\n設置日 {installed} / 投入日数 {days_text(m,self.owner.reference_day())}\n参照ID：{m.source_key or '追加マシン'}"
+            f"{display_identity(m)} / {m.kind}\n{m.product}\n売上 {money(effective_stat(m,"sales"))} / アベレージ {money(effective_stat(m,"average"))} / アベ比 {ratio_text(m)}\n設置日 {installed} / 投入日数 {days_text(m,self.owner.reference_day())}\n参照ID：{m.source_key or '追加マシン'}"
             + (
                 "\n入替予定："
                 + "、".join(
-                    p.name + "（" + (p.machine_methods.get(m.number) or "方法未設定") + "）"
+                    p.name + "（" + (p.machine_methods.get(machine_key(m)) or "方法未設定") + "）"
                     for p in plans
                 )
                 if plans
@@ -415,6 +416,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self._active_preview = None
         from .sales_analysis import empty_snapshot
 
+        self.number_references = []
         self.analysis_state = empty_snapshot()
         self.performance_history = []
         from .analysis_settings import validate_settings
@@ -484,6 +486,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def refresh_assignments(self):
         from .sales_analysis import apply_snapshot
 
+        from .machine_matching import prepare_references
+        if self.number_references:prepare_references(self.machines,self.number_references)
         apply_snapshot(self.machines, self.analysis_state)
         result = {}
         for p in self.products():
@@ -497,7 +501,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
     def state(self):
         return dict(
-            version=2,
+            version=3,
+            number_references=deepcopy(self.number_references),
             performance_history=deepcopy(self.performance_history),
             analysis_settings=deepcopy(self.analysis_settings),
             sales_analysis=deepcopy(self.analysis_state),
@@ -522,6 +527,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         state = validate_state(state)
         from .sales_analysis import validate_snapshot
 
+        self.number_references=deepcopy(state.get("number_references", []))
         self.analysis_state = deepcopy(validate_snapshot(state.get("sales_analysis")))
         from .performance_history import validate_history
 
@@ -592,7 +598,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.scene.setSceneRect(rect if self.machines else QRectF(0, 0, 1500, 1000))
 
     def update_info(self):
-        unresolved = sum(not m.number for m in self.machines)
+        unresolved = sum(not machine_key(m) for m in self.machines)
         self.overlaps = overlapping(self.machines)
         self.apply_presentation()
         text = (
@@ -756,7 +762,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         return getattr(self, "_effective_metric_settings", self.analysis_settings)
 
     def card_context(self, m):
-        plans = self.assignments().get(m.number, [])
+        plans = self.assignments().get(machine_key(m), [])
         priority = any(p.priority for p in plans)
         background, status = filter_status(
             m,
@@ -774,7 +780,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         if m.uid in self.overlaps:
             status += " / 重なり"
         methods = (
-            "／".join(dict.fromkeys(p.machine_methods.get(m.number) or "未設定" for p in plans))
+            "／".join(dict.fromkeys(p.machine_methods.get(machine_key(m)) or "未設定" for p in plans))
             if self.show_methods.isChecked()
             else ""
         )
@@ -991,6 +997,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 installation = parse_date(installed.text())
                 if installed.text().strip() and installation is None:
                     raise AppError("設置日を日付形式で入力してください。")
+                if machine.number!=value:
+                    machine.number_origin="direct";machine.manual_number=None
                 machine.number, machine.kind, machine.product = (
                     value,
                     kind.currentText(),
@@ -1035,7 +1043,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         selected = self.selected()
         if not selected:
             return
-        used = self.related({m.number for m in selected if m.number})
+        used = self.related({machine_key(m) for m in selected if machine_key(m)})
         warning = (
             f"\n注意：{len(used)}件の入替予定で使用中です。予定のマシン番号は残ります。商品一覧で修正してください。"
             if used
@@ -1118,8 +1126,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.record(before, "マシン整列")
 
     def import_path(self, path, preserve=False):
-        machines, warnings = import_layout(path)
+        machines, warnings, references = import_layout(path,with_references=True)
         before = self.state()
+        self.number_references=references
         self.initialized = True
         self.source = str(path)
         self.loaded_at = datetime.now().astimezone().isoformat(timespec="minutes")
@@ -1157,6 +1166,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                         "limit",
                         "operation_method",
                         "reference_average",
+                        "reference_number", "reference_warning", "number_origin", "layout_loaded_at",
                     ):
                         setattr(m, field, getattr(fresh, field))
         self.rebuild()

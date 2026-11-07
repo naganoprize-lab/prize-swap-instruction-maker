@@ -4,6 +4,7 @@ import math
 import re
 import unicodedata
 from .analysis_settings import machine_type
+from .machine_matching import machine_key,display_identity
 from PySide6.QtCore import QRectF
 from .core import AppError
 from .floor_status import ratio, days, COLOR_FILTERS
@@ -78,7 +79,7 @@ def ordered_machines(machines, key="number", descending=False, reference=None):
             return days(m, reference)
         if key == "product":
             return m.product.casefold()
-        return natural(m.number or m.source_key)
+        return natural(display_identity(m))
 
     known = [m for m in machines if value(m) is not None]
     missing = [m for m in machines if value(m) is None]
@@ -100,13 +101,13 @@ def matching_machines(machines, assignments, settings, reference, analysis_setti
         if needle and needle not in normalized(
             " ".join(
                 (
-                    m.number,
+                    machine_key(m),
                     m.product,
                     m.source_key,
                     machine_type(m, analysis_settings),
                     m.operation_method,
                     " ".join(
-                        p.machine_methods.get(m.number, "") for p in assignments.get(m.number, [])
+                        p.machine_methods.get(machine_key(m), "") for p in assignments.get(machine_key(m), [])
                     ),
                 )
             )
@@ -118,7 +119,7 @@ def matching_machines(machines, assignments, settings, reference, analysis_setti
             continue
         if kind == "high" and (value is None or value < 200):
             continue
-        if kind == "planned" and not assignments.get(m.number):
+        if kind == "planned" and not assignments.get(machine_key(m)):
             continue
         age = days(m, reference)
         if settings["min_days"] is not None and (age is None or age < settings["min_days"]):

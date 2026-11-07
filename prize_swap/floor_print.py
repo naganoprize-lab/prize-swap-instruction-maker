@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QPageLayout, QPageSize, QPen
 from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
 from .core import AppError
+from .machine_matching import machine_key,display_identity
 from .floor_render import CardRenderer, FIELDS, SUMMARY_FIELDS, draw_card
 from .floor_presentation import ordered_machines
 from .floor_status import ratio_text, days_text, metric_text
@@ -284,7 +285,7 @@ def plan_floor(
     font = {"standard": 14, "large": 18, "xlarge": 22}[options.font_size]
     factor = 1.4 if options.card_size == "enlarge" else 1
     for m in chosen:
-        plans = assignments.get(m.number, [])
+        plans = assignments.get(machine_key(m), [])
         priority = any(p.priority for p in plans)
         colour, status = filter_status(
             m,
@@ -295,7 +296,7 @@ def plan_floor(
             metrics_settings,
         )
         methods = (
-            "／".join(dict.fromkeys(p.machine_methods.get(m.number) or "未設定" for p in plans))
+            "／".join(dict.fromkeys(p.machine_methods.get(machine_key(m)) or "未設定" for p in plans))
             if options.show_methods
             else ""
         )
@@ -404,7 +405,7 @@ def plan_table(
     heading = max(b.height for b in table_headers) + 12
     rows = []
     for m in ordered_machines(machines, options.sort, options.descending, reference):
-        plans = assignments.get(m.number, [])
+        plans = assignments.get(machine_key(m), [])
         colour, status = filter_status(
             m,
             options.color_filter,
@@ -414,7 +415,7 @@ def plan_table(
             metrics_settings,
         )
         number = (
-            (m.number or m.source_key or "未設定")
+            display_identity(m)
             + (" / 投入予定" if plans else "")
             + (" / 優先" if any(p.priority for p in plans) else "")
         )

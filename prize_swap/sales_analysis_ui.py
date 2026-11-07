@@ -39,7 +39,9 @@ class SalesAnalysisMixin:
             snapshot.update(
                 {k: existing[k] for k in ("period_start", "period_end", "period_source")}
             )
-        by_number = {m.number: m for m in self.machines if m.number}
+        from .machine_matching import resolve_matches
+        matches=resolve_matches(self.machines,snapshot["records"])
+        by_number={matches[m.uid].number:m for m in self.machines if matches[m.uid].matched}
         for number, record in snapshot["records"].items():
             if existing:
                 record["product_context"] = deepcopy(

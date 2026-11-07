@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from .analysis_settings import validate_settings
+from .machine_matching import machine_key
 from .floor_status import ratio, days, effective_stat
 from .floor_dashboard import freshness
 
@@ -24,7 +25,7 @@ def comparable_trend(machine, history):
         snapshot = entry.get("snapshot", entry)
         if snapshot.get("period_source") not in ("excel", "manual"):
             continue
-        prior = snapshot.get("records", {}).get(machine.number)
+        prior = snapshot.get("records", {}).get(machine_key(machine))
         stop = snapshot.get("period_end")
         begin = snapshot.get("period_start")
         if not prior or not begin or not stop or stop >= start:
@@ -92,7 +93,7 @@ def assess(machine, reference, settings=None, history=()):
     elif trend < s["decline_ratio"]:
         reasons.append(f"平均売上が前回比{trend:.1%}に低下")
     return dict(
-        machine_id=machine.number,
+        machine_id=machine_key(machine),
         uid=machine.uid,
         status=status,
         priority=priority,

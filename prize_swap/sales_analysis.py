@@ -55,10 +55,8 @@ HEADERS = {
 
 
 def normalize_number(value):
-    if not isinstance(value, str):
-        return None
-    match = re.fullmatch(r"([0-9]+)-(01|02)", value.strip())
-    return match[1] + ("左" if match[2] == "01" else "右") if match else None
+    from .machine_matching import normalize_number as normalize
+    return normalize(value) if isinstance(value,str) else None
 
 
 def empty_snapshot():
@@ -380,8 +378,14 @@ def apply_snapshot(machines, snapshot):
     records = snapshot["records"]
     if records:
         ensure_references(machines)
+    from .machine_matching import resolve_matches
+    matches=resolve_matches(machines,records)
     for machine in machines:
-        record = records.get(machine.number)
+        match=matches[machine.uid]
+        machine.resolved_number=match.number
+        machine.match_method=match.method
+        machine.match_message=match.message
+        record = records.get(match.number) if match.matched else None
         machine.analysis = (
             dict(
                 values=deepcopy(record["values"]) if record else {k: None for k in METRICS},
@@ -397,18 +401,20 @@ def apply_snapshot(machines, snapshot):
                 quality_issues=[
                     i
                     for i in snapshot.get("issues", [])
-                    if i["number"] == machine.number and i["severity"] == "エラー"
+                    if i["number"] == match.number and i["severity"] == "エラー"
                 ],
             )
-            if snapshot["file_name"]
+            if record
             else None
         )
 
 
 def import_summary(machines, snapshot):
-    numbers = {m.number for m in machines if m.number}
-    matched = set(snapshot["records"]) & numbers
-    unmatched = sorted(set(snapshot["records"]) - numbers)
+    from .machine_matching import resolve_matches
+    matches=resolve_matches(machines,snapshot["records"])
+    numbers={r.number for r in matches.values() if r.number}
+    matched={r.number for r in matches.values() if r.matched}
+    unmatched=sorted(set(snapshot["records"])-matched)
     issues = reconcile(machines, snapshot)
     return dict(
         issues=issues,

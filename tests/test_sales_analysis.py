@@ -216,7 +216,7 @@ def test_optional_fallback_zero_unknown_reference_and_new_snapshot(floor, tmp_pa
     assert effective_stat(m, "average") == 0 and effective_stat(m, "sales") == 0 and ratio(m) == 0
     assert effective_stat(m, "po_rate") is None  # Latest missing data stays unknown.
     floor.import_analysis_path(report_file(tmp_path / "別マシン.xlsx", [data_row("29999-01")]))
-    assert effective_stat(m, "sales") is None and ratio(m) is None  # Absent from the newest snapshot.
+    assert effective_stat(m, "sales") == 7500 and ratio(m) == 50  # Unmatched: use identified layout values.
     floor.add_machine(Machine(number="29999左", product="追加商品"))
     fresh = floor.machines[-1]
     assert effective_stat(fresh, "sales") == 30000 and fresh.product == "追加商品"

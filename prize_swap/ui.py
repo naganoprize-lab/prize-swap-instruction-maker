@@ -19,6 +19,7 @@ from .methods import allocation_status, format_allocations, aggregate_booths, to
 from .booth_style import METRIC_COLORS
 from .floor import FloorWidget
 from .floor_data import validate_state
+from .machine_matching import machine_key
 from .labels_data import LabelStore
 from .labels_ui import LabelsWidget
 
@@ -188,7 +189,7 @@ class Window(QMainWindow):
         self.table.setModel(self.proxy)
         self.table.selectionModel().selectionChanged.connect(self.update_allocation_notice)
         self.delegate = ProductDelegate(self.table)
-        self.delegate.machine_options = lambda: sorted(m.number for m in self.floor.machines if m.number)
+        self.delegate.machine_options = lambda: sorted(machine_key(m) for m in self.floor.machines if machine_key(m))
         self.table.setItemDelegate(self.delegate)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -387,7 +388,7 @@ class Window(QMainWindow):
         if not self.confirm_method_allocations():
             raise AppError("運営方法の台数を確認してから再実行してください。")
         if self.floor.initialized:
-            registered = {m.number for m in self.floor.machines if m.number}
+            registered = {machine_key(m) for m in self.floor.machines if machine_key(m)}
             missing = sorted({n for p in self.visible if p.included for n in p.machines if n not in registered})
             if missing:
                 answer = QMessageBox.question(self, "入替予定のマシン番号を確認", "配置にないマシン番号が入替予定に残っています：\n" + "、".join(missing) + "\n印刷・保存を続けますか？")

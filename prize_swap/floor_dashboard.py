@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolButton
 from .floor_status import ratio
+from .machine_matching import machine_key
 from .performance_validation import period_text
 
 BINS = ("50%未満", "50〜100%未満", "100〜200%未満", "200%以上", "不明")
@@ -109,7 +110,7 @@ class FloorDashboard(QWidget):
             assess(m, o.reference_day(), o.analysis_settings)["status"] in ("要確認", "入替検討")
             for m in o.machines
         )
-        plans = sum(bool(o.assignments().get(m.number)) for m in o.machines)
+        plans = sum(bool(o.assignments().get(machine_key(m))) for m in o.machines)
         self.summary.setText(
             f'管理 {len(o.machines)} ｜ 入替検討 {candidates} ｜ 投入予定 {plans} ｜ 未照合 {len(data["unmatched"])+len(o.analysis_state.get("unmatched_rows",[]))}'
         )

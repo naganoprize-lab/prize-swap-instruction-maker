@@ -49,7 +49,8 @@ def test_unknown_period_no_inference_and_missing_no_silent_fallback(tmp_path):
     n = Machine(number="29999右", sales=200, average=100, ratio=200)
     apply_snapshot([m, n], v)
     assert effective_stat(m, "po_rate") is None
-    assert effective_stat(n, "sales") is None and ratio(n) is None
+    assert effective_stat(n, "sales") == 200 and ratio(n) == 200
+    assert n.match_method == "layout"
     assert n.sales == 200
 
 

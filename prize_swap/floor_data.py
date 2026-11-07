@@ -47,6 +47,14 @@ class Machine:
     per_item: float | None = None
     unit_price: float | None = None
     cost: float | None = None
+    reference_number: str = ""
+    reference_warning: str = ""
+    number_origin: str = "direct"
+    manual_number: str | None = None
+    resolved_number: str = ""
+    match_method: str = "layout"
+    match_message: str = ""
+    layout_loaded_at: str = ""
 
     def __post_init__(self):
         if isinstance(self.installed_on, (date, datetime)):
@@ -71,9 +79,13 @@ def validate_machines(records):
                     "maker",
                     "limit",
                     "operation_method",
+                    "reference_number", "reference_warning", "number_origin", "resolved_number", "match_method", "match_message", "layout_loaded_at",
                 )
             ):
                 raise ValueError("文字列項目が不正")
+            from .machine_matching import normalize_number, MATCH_LABELS
+            if m.number_origin not in ("direct", "reference") or m.match_method not in MATCH_LABELS:raise ValueError("照合状態が不正")
+            if m.manual_number is not None and (not isinstance(m.manual_number,str) or m.manual_number and normalize_number(m.manual_number)!=m.manual_number):raise ValueError("手動照合先が不正")
             if not m.uid or m.uid in ids:
                 raise ValueError("マシンIDが重複")
             ids.add(m.uid)
@@ -146,7 +158,7 @@ def validate_machines(records):
 def validate_state(state):
     if (
         not isinstance(state, dict)
-        or state.get("version") not in (1, 2)
+        or state.get("version") not in (1, 2, 3)
         or not isinstance(state.get("source", ""), str)
     ):
         raise AppError("配置JSONの形式が不正です。")
@@ -157,6 +169,8 @@ def validate_state(state):
                 if record.get(key) is not None:
                     record[key] /= 100
         state["version"] = 2
+    from .machine_matching import validate_references
+    validate_references(state.get("number_references", []))
     validate_machines(state.get("machines"))
     validate_machines(state.get("original", []))
     if type(state.get("initialized", False)) is not bool:
@@ -307,37 +321,17 @@ def block_metrics(ws, cell, epoch):
     return result
 
 
-def import_layout(path):
+def import_layout(path, with_references=False):
     wb = load_workbook(path, data_only=True, read_only=False)
     try:
         if "投入中レイアウト" not in wb.sheetnames:
             raise AppError("「投入中レイアウト」シートがありません。")
         ws = wb["投入中レイアウト"]
-        mapping, warnings = {}, []
-        if "管理番号参考値" in wb.sheetnames:
-            for key, number in wb["管理番号参考値"].iter_rows(
-                min_col=1, max_col=2, values_only=True
-            ):
-                if key is None or number is None:
-                    continue
-                try:
-                    numbers = machine_numbers(str(number).strip())
-                    if len(numbers) != 1:
-                        raise AppError("番号が複数")
-                    key = str(key).strip()
-                    if key in mapping and mapping[key] != numbers[0]:
-                        warnings.append(f"参照ID {key} の対応が競合しています。")
-                        mapping[key] = ""
-                    else:
-                        mapping[key] = numbers[0]
-                except AppError:
-                    warnings.append(f"参照ID {key} の管理番号が不正です。")
-        cells = [
-            c
-            for row in ws
-            for c in row
-            if isinstance(c.value, str) and re.fullmatch(r"[LR]_\d+", c.value.strip())
-        ]
+        from .machine_matching import read_reference_rows, reference_index, normalize_reference, normalize_number
+        references=read_reference_rows(wb)
+        mapping, problems=reference_index(references)
+        warnings=[f"{key}：{message}" for key,message in problems.items()]
+        cells = [c for row in ws for c in row if normalize_reference(c.value) is not None or normalize_number(c.value) is not None]
         if not cells:
             raise AppError("レイアウトに L_番号 / R_番号 のマシン枠が見つかりません。")
         if len(cells) > 5000:
@@ -362,8 +356,9 @@ def import_layout(path):
         origin_x, origin_y = min(xs[c.column - 1] for c in cells), min(ys[c.row - 1] for c in cells)
         machines, seen = [], set()
         for cell in cells:
-            key = cell.value.strip()
-            number = mapping.get(key, "")
+            key = normalize_reference(cell.value) or ""
+            direct=normalize_number(cell.value)
+            number = direct or mapping.get(key, "")
             if number in seen:
                 warnings.append(
                     f"{cell.coordinate}：管理番号 {number} が重複するため未設定にしました。"
@@ -377,6 +372,10 @@ def import_layout(path):
                     number=number,
                     product=str(product) if product is not None else "",
                     source_key=key,
+                    number_origin="direct" if direct else "reference",
+                    reference_number=mapping.get(key, ""),
+                    reference_warning=problems.get(key, ""),
+                    layout_loaded_at=datetime.now().astimezone().isoformat(timespec="seconds"),
                     x=xs[cell.column - 1] - origin_x,
                     y=ys[cell.row - 1] - origin_y,
                     width=max(80, xs[cell.column + 2] - xs[cell.column - 1] - 8),
@@ -392,7 +391,7 @@ def import_layout(path):
         from .sales_analysis import ensure_references
 
         ensure_references(machines)
-        return machines, warnings
+        return (machines, warnings, references) if with_references else (machines, warnings)
     finally:
         wb.close()
 

@@ -67,6 +67,7 @@ def build_toolbar(owner, layout):
         "分析",
         [
             ("実績読込結果・異常一覧", owner.show_analysis_report),
+            ("管理ナンバー照合・手動確認", owner.show_matching),
             ("入替候補", owner.show_candidates),
             ("運営方法別分析", owner.show_method_analysis),
             ("売上履歴", owner.show_history),

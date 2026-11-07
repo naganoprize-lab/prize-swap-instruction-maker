@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 from .core import AppError, LIMITS, METHODS, quantity
 from .floor_data import validate_machines
+from .machine_matching import display_identity,machine_key,MATCH_LABELS,value_source
 from .floor_status import money, ratio_text, days_text, effective_stat, reference_average
 from .methods import editor_state, set_allocations, format_counts, plans
 from .methods_editor import MethodsCombo
@@ -136,7 +137,7 @@ class MachineDetailDialog(QDialog):
         self.owner = owner
         self.original = machine
         self.updated = deepcopy(machine)
-        self.setWindowTitle(f"マシン詳細 — {machine.number or machine.source_key or '未設定'}")
+        self.setWindowTitle(f"マシン詳細 — {display_identity(machine)}")
         available = self.screen().availableGeometry()
         self.resize(
             min(820, max(360, available.width() - 30)), min(800, max(300, available.height() - 50))
@@ -152,7 +153,14 @@ class MachineDetailDialog(QDialog):
         tabs.addTab(scroll, "現在投入中の商品")
         self.values = {}
         for key, label, value in (
-            ("number", "マシン番号", machine.number),
+            ("number", "マシン番号", display_identity(machine)),
+            ("source_key", "管理ナンバー", machine.source_key),
+            ("resolved_number", "照合先の機械番号", machine.resolved_number),
+            ("match_method", "照合方法", MATCH_LABELS[machine.match_method]),
+            ("match_message", "照合の確認事項", machine.match_message),
+            ("provenance", "実績データの取得元", "景品運営分析表" if machine.analysis else "レイアウト由来"),
+            ("ratio_source", "アベ比の取得元", value_source(machine,"ratio")),
+            ("updated_at", "データ更新日時", (machine.analysis or {}).get("loaded_at") or machine.layout_loaded_at),
             ("sales", "売上金額", money(effective_stat(machine, "sales"))),
             ("average", "平均売上", money(effective_stat(machine, "average"))),
             ("ratio", "アベ比", ratio_text(machine)),
@@ -174,6 +182,8 @@ class MachineDetailDialog(QDialog):
                 widget.textInteractionFlags() | Qt.TextInteractionFlag.TextSelectableByMouse
             )
             self.values[key] = widget
+            widget.setWordWrap(True)
+            if key in ("sales","average","ratio","po_rate"):widget.setToolTip(value_source(machine,key))
             form.addRow(label, widget)
         for key, label in (
             ("operating_days", "稼働日数（売上集計期間）"),
@@ -199,7 +209,7 @@ class MachineDetailDialog(QDialog):
             (
                 f"売上分析優先：{source['file_name']} ／ 読込（JST） {source['loaded_at']}"
                 if source
-                else "従来のレイアウトExcelの実績値（未取得は —）"
+                else "レイアウト由来の実績値（未取得は —）"
             )
         )
         label.setWordWrap(True)
@@ -255,8 +265,8 @@ class MachineDetailDialog(QDialog):
         for product in owner.products():
             if (
                 product.day == owner.selected_day()
-                and machine.number
-                and machine.number in product.machines
+                and machine_key(machine)
+                and machine_key(machine) in product.machines
             ):
                 product_panel = ProductPanel(product)
                 self.products.append(product_panel)

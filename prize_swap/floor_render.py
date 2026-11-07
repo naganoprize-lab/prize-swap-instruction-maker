@@ -7,6 +7,7 @@ from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QFont, QImage, QPen
 
 from .core import parse_date
+from .machine_matching import display_identity
 from .fonts import print_font
 from .printing import text_block
 from .floor_status import (
@@ -67,7 +68,7 @@ class CardRenderer:
         records = []
         if "number" in fields:
             records.append(
-                (machine.number or f"未設定 ({machine.source_key or '新規'})", base * 1.35, True)
+                (display_identity(machine), base * 1.35, True)
             )
         if "product" in fields:
             records.append((machine.product or "商品未設定", base * 1.18, True))
@@ -120,7 +121,7 @@ class CardRenderer:
         self.measured += 1
         records = []
         if "number" in fields:
-            number = machine.number or f"未設定 ({machine.source_key or '新規'})"
+            number = display_identity(machine)
             if "投入予定" in status:
                 number += " / 投入予定"
             if "優先入替" in status:
@@ -193,7 +194,7 @@ class CardRenderer:
             repr(settings),
             tuple(effective_stat(machine, k) for k in ("po_rate", "cost_rate")),
             (machine.analysis or {}).get("machine_name", machine.kind),
-            machine.number,
+            display_identity(machine),
             machine.source_key,
             machine.product,
             effective_stat(machine, "sales"),
