@@ -16,7 +16,13 @@ def window(tmp_path):
     w = Window(layout_storage=tmp_path / "auto.json")
     w.themes.set_mode("light", persist=False)
     w.floor.machines = [
-        Machine(number=f"{20000+i}右", product=f"商品{i}", ratio=i, x=i % 20 * 240, y=i // 20 * 180)
+        Machine(
+            number=f"{20000+i}右",
+            product=f"商品{i}",
+            ratio=i,
+            x=i % 20 * 240,
+            y=i // 20 * 180,
+        )
         for i in range(300)
     ]
     w.floor.rebuild()
@@ -95,6 +101,29 @@ def test_page_search_keeps_full_floor_and_dashboard_uses_same_values(window):
     window.dashboard_page.locate("50%未満")
     assert window.tabs.currentWidget() is window.floor
     assert len(window.floor._highlight_uids) == 50 and len(window.floor.visible_nodes()) == 300
+
+
+def test_short_high_dpi_workspace_keeps_canvas_and_dashboard_accessible(window):
+    window.setMinimumSize(900, 560)
+    window.resize(1000, 560)
+    window.tabs.setCurrentWidget(window.floor)
+    QApplication.processEvents()
+    from PySide6.QtTest import QTest
+
+    QTest.qWait(50)  # Settle the nested layout after compact chrome is applied.
+    floor = window.floor
+    before = [(m.x, m.y, m.width, m.height) for m in floor.machines]
+    expanded = floor.analysis_settings["dashboard_visible"]
+    assert floor.dashboard.compact and floor.view.viewport().height() > 200
+    floor.dashboard.toggle.click()
+    assert window.tabs.currentWidget() is window.dashboard_page
+    window.tabs.setCurrentWidget(floor)
+    window.resize(1500, 900)
+    QApplication.processEvents()
+    assert not floor.dashboard.compact
+    assert floor.dashboard.content.isVisible() == expanded
+    assert floor.analysis_settings["dashboard_visible"] == expanded
+    assert [(m.x, m.y, m.width, m.height) for m in floor.machines] == before
 
 
 def test_settings_theme_control_and_compact_navigation_keep_card_sizes(window):

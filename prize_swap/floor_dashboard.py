@@ -56,6 +56,7 @@ class FloorDashboard(QWidget):
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
+        self.compact = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(2)
@@ -93,9 +94,29 @@ class FloorDashboard(QWidget):
         bins.addStretch()
         outer.addWidget(self.content)
         self.toggle.toggled.connect(self.expanded)
+        self.toggle.clicked.connect(self.open_compact_dashboard)
         self.groups = distribution([])
 
+    def set_compact(self, value):
+        """Reserve canvas space on short high-DPI desktops, without saving a UI override."""
+        if self.compact == value:
+            return
+        self.compact = value
+        self.toggle.blockSignals(True)
+        self.toggle.setCheckable(not value)
+        self.toggle.setChecked(self.owner.analysis_settings["dashboard_visible"])
+        self.toggle.blockSignals(False)
+        self.toggle.setText("集計の詳細 ↗" if value else "売り場ダッシュボード ▾")
+        self.content.setVisible(not value and self.owner.analysis_settings["dashboard_visible"])
+
+    def open_compact_dashboard(self):
+        window = self.owner.window()
+        if self.compact and hasattr(window, "dashboard_page"):
+            window.tabs.setCurrentWidget(window.dashboard_page)
+
     def expanded(self, value):
+        if self.compact:
+            return
         self.content.setVisible(value)
         self.owner.analysis_settings["dashboard_visible"] = value
         self.owner.schedule_save()
@@ -132,4 +153,5 @@ class FloorDashboard(QWidget):
         self.toggle.blockSignals(True)
         self.toggle.setChecked(o.analysis_settings["dashboard_visible"])
         self.toggle.blockSignals(False)
-        self.content.setVisible(o.analysis_settings["dashboard_visible"])
+        self.content.setVisible(not self.compact and o.analysis_settings["dashboard_visible"])
+        self.toggle.setToolTip(self.dates.text() + "\n" + o.info.text())

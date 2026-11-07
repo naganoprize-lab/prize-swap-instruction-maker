@@ -521,6 +521,13 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         if not self._fullscreen_transition:
             QTimer.singleShot(0, self.restore_view_center)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "dashboard"):
+            compact = self.height() < 420 and hasattr(self.window(), "dashboard_page")
+            self.dashboard.set_compact(compact)
+            self.info.setVisible(not compact)
+
     def assignments(self):
         return self._assignments
 

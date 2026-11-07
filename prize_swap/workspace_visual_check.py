@@ -157,12 +157,24 @@ def run(output):
             app.processEvents()
             report["themes"][mode] = checks
         # Bounds are measured inside the real window, including high-DPI layout.
+        QTest.qWait(50)
         root = window.centralWidget()
-        for control in (window.theme_button, window.settings_button, *window.print_buttons):
+        for control in (
+            window.theme_button,
+            window.settings_button,
+            *window.print_buttons,
+        ):
             assert control.isVisible() and root.rect().contains(
                 control.mapTo(root, control.rect().bottomRight())
             ), "Header action outside workspace"
-        assert floor.view.viewport().height() > 180 and floor.view.viewport().width() > 300
+        report["workspace_geometry"] = dict(
+            window=[window.width(), window.height()],
+            viewport=[floor.view.viewport().width(), floor.view.viewport().height()],
+            compact_dashboard=floor.dashboard.compact,
+        )
+        assert (
+            floor.view.viewport().height() > 180 and floor.view.viewport().width() > 300
+        ), f"Insufficient canvas: {report['workspace_geometry']}; screen={report['available_screen']}"
         opened = []
 
         def close_details():
@@ -267,7 +279,8 @@ def run(output):
 
         errors = []
         with patch("prize_swap.floor.QPrintDialog", Accepted), patch(
-            "prize_swap.floor.floor_printer", lambda options: floor_printer(options, direct)
+            "prize_swap.floor.floor_printer",
+            lambda options: floor_printer(options, direct),
         ), patch.object(
             QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes
         ), patch.object(
