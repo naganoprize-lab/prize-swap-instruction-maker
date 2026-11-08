@@ -181,13 +181,16 @@ def atomic_json(path: Path, payload: dict):
             temp.unlink()
 
 
-def save_session(path, products, selected_day, source, layout="column", rows_per_page=20, floor_layout=None, label_state=None, print_mode="auto"):
+def save_session(path, products, selected_day, source, layout="column", rows_per_page=20, floor_layout=None, label_state=None, print_mode="auto", workflow_state=None):
     if source and Path(path).resolve() == Path(source).resolve():
         raise AppError("入力Excelと同じ場所には保存できません。")
     from .instructions import prepare_entry
     for p in products: prepare_entry(p)
     records = [{**asdict(p), "day": p.day.isoformat(), "assigned_machine_count": p.assigned_machine_count} for p in products]
     data = dict(version=1, products=records, selected_day=selected_day.isoformat(), source=str(source or ""), layout=layout, rows_per_page=rows_per_page)
+    if workflow_state is not None:
+        from .workflow_state import validate_workflow
+        data['workflow_state']=validate_workflow(workflow_state)
     data["print_mode"] = print_mode
     if floor_layout is not None:
         data["floor_layout"] = floor_layout
@@ -203,6 +206,8 @@ def load_session(path):
             raise ValueError("未対応の形式")
         if data.get("print_mode","auto") not in ("auto","standard","compact"):
             raise ValueError("印刷モードが不正")
+        from .workflow_state import validate_workflow
+        validate_workflow(data.get('workflow_state'))
         selected = date.fromisoformat(data["selected_day"])
         page_rows = data.get("rows_per_page", 20)
         if type(page_rows) is not int or not 1 <= page_rows <= 50:

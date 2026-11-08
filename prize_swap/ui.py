@@ -371,6 +371,19 @@ class Window(InstructionEditorMixin, QMainWindow):
 
         self.preflight = PreflightPanel(self)
         self.instruction_tabs.addTab(self.preflight, "印刷前チェック")
+        from .workflow_state import WorkflowStore
+        from .operation_history_ui import OperationHistoryPanel
+        from .app_shortcuts import AppShortcuts
+
+        self.workflow = WorkflowStore(self)
+        self.operation_history = OperationHistoryPanel(self)
+        self.instruction_tabs.addTab(self.operation_history, "編集履歴")
+        self.shortcuts = AppShortcuts(self)
+        self.workflow.changed.connect(
+            lambda: (
+                self.instruction_save_timer.start(800) if not self._loading_instructions else None
+            )
+        )
         self.themes.load(self.appearance_path)
         self.theme_changed()
         self.restore_instruction_autosave()
@@ -818,6 +831,7 @@ class Window(InstructionEditorMixin, QMainWindow):
             dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, True)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 if self.paint_printer(printer):
+                    self.workflow.record_file("output", "プリンターへ送信", "直接印刷")
                     self.statusBar().showMessage(
                         "印刷ジョブを送信しました。実際の出力はプリンターで確認してください。",
                         10000,
@@ -840,6 +854,15 @@ class Window(InstructionEditorMixin, QMainWindow):
                     path,
                     lambda temp: self.paint_printer(configured_printer(temp)),
                     [self.source, self.floor.source],
+                )
+                self.workflow.record_file(
+                    "output",
+                    path,
+                    {
+                        "instructions": "指示書PDF",
+                        "map": "入替予定地図PDF",
+                        "both": "指示書＋地図PDF",
+                    }[self.floor.instruction_print_options["mode"]],
                 )
                 self.statusBar().showMessage(f"PDFを保存しました：{path} {plan.reason}", 15000)
         except Exception as exc:
@@ -956,6 +979,7 @@ class Window(InstructionEditorMixin, QMainWindow):
                     p.import_snapshot = import_values(p)
                 self.products = products
             self.source = path
+            self.workflow.record_file("excel", path, "入荷予定表")
             self.file_label.setText(Path(path).name)
             self.file_label.setToolTip(path)
             self.update_dates()
@@ -1007,7 +1031,9 @@ class Window(InstructionEditorMixin, QMainWindow):
                     floor_layout=self.floor.state(),
                     label_state=self.labels.state(),
                     print_mode=self.print_mode.currentData(),
+                    workflow_state=self.workflow.state(),
                 )
+                self.workflow.record_file("saved", path, "入替指示書")
                 self.dirty = False
                 self.statusBar().showMessage("一時保存しました。", 5000)
             except Exception as exc:
@@ -1019,10 +1045,12 @@ class Window(InstructionEditorMixin, QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "一時保存を開く", "", "JSON (*.json)")
         if path:
             try:
+                self._loading_instructions = True
                 products, day, data = load_session(path)
                 if "floor_layout" in data:
                     validate_state(data["floor_layout"])
                 label_store = LabelStore.restore(data.get("label_printing"), products)
+                self.workflow.restore(data.get("workflow_state"))
                 self.products, self.source = products, data.get("source", "")
                 self.instruction_history.clear()
                 self.labels.store = label_store
@@ -1040,9 +1068,12 @@ class Window(InstructionEditorMixin, QMainWindow):
                     self.floor.schedule_save()
                 self.refresh()
                 self.dirty = False
+                self.workflow.reset_watchers()
                 self.notice.setText("一時保存から復元しました。商品一覧と配置を復元できます。")
             except Exception as exc:
                 self.error(exc)
+            finally:
+                self._loading_instructions = False
 
     def export(self):
         try:

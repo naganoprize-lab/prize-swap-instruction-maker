@@ -456,6 +456,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
     def __init__(self, products, selected_day, storage_path=None, parent=None):
         super().__init__(parent)
+        self.app_window = parent
         self.products, self.selected_day = products, selected_day
         self.machines, self.original = [], []
         from .selection import SelectionState
@@ -476,7 +477,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             )
             / "floor-autosave.json"
         )
-        self.history = QUndoStack(self)
+        from .workflow_state import AuditUndoStack
+
+        self.history = AuditUndoStack(self)
         self.history.setUndoLimit(100)
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
@@ -1451,6 +1454,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                     return
             try:
                 save_layout(path, self.state())
+                if hasattr(self.app_window, "workflow"):
+                    self.app_window.workflow.record_file("saved", path, "売り場レイアウト")
                 self.message.emit("配置を保存しました。")
             except Exception as exc:
                 QMessageBox.warning(self, "保存エラー", str(exc))

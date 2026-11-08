@@ -217,7 +217,9 @@ class InstructionDialog(QDialog):
 
 class InstructionEditorMixin:
     def setup_instruction_editing(self, controls):
-        self.instruction_history = QUndoStack(self)
+        from .workflow_state import AuditUndoStack
+
+        self.instruction_history = AuditUndoStack(self)
         self.instruction_history.setUndoLimit(100)
         self._instruction_applying = False
         self._loading_instructions = False
@@ -290,6 +292,8 @@ class InstructionEditorMixin:
             key = b.machine.uid if b.machine else b.token
             if key and key in seen:
                 conflicts.append(b.token or key)
+            if key:
+                seen.add(key)
         return (
             not conflicts
             or QMessageBox.question(
@@ -492,6 +496,7 @@ class InstructionEditorMixin:
                 floor_layout=self.floor.state(),
                 label_state=self.labels.state(),
                 print_mode=self.print_mode.currentData(),
+                workflow_state=self.workflow.state() if hasattr(self, "workflow") else None,
             )
         except Exception as exc:
             self.statusBar().showMessage("指示の自動保存に失敗しました：" + str(exc), 10000)
@@ -504,6 +509,8 @@ class InstructionEditorMixin:
             products, day, data = load_session(self.instruction_autosave_path)
             from .labels_data import LabelStore
 
+            if hasattr(self, "workflow"):
+                self.workflow.restore(data.get("workflow_state"))
             self.products = products
             self.source = data.get("source", "")
             self.file_label.setText(Path(self.source).name or "自動保存から復元")
@@ -519,6 +526,8 @@ class InstructionEditorMixin:
             self.day.setDate(QDate(day.year, day.month, day.day))
             self.refresh()
             self.dirty = False
+            if hasattr(self, "workflow"):
+                self.workflow.reset_watchers()
             self.notice.setText("指示の自動保存を復元しました。")
         except Exception as exc:
             self.statusBar().showMessage("指示の自動保存を復元できません：" + str(exc), 10000)

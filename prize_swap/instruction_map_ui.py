@@ -357,6 +357,8 @@ class InstructionMapPage(QWidget):
                     lambda temp: self.render(configured_printer(temp)),
                     [self.owner.source, self.owner.floor.source],
                 )
+                if hasattr(self.owner, "workflow"):
+                    self.owner.workflow.record_file("output", path, "入替予定地図PDF")
         except Exception as exc:
             self.owner.error(exc)
 
@@ -383,5 +385,7 @@ class InstructionMapPage(QWidget):
                         f"選択したプリンターは{p.paper}をサポートしていません。用紙設定を確認してください。"
                     )
                 self.render(printer)
+                if hasattr(self.owner, "workflow"):
+                    self.owner.workflow.record_file("output", "プリンターへ送信", "入替予定地図")
         except Exception as exc:
             self.owner.error(exc)
