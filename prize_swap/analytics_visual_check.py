@@ -127,7 +127,7 @@ def run(output):
         manager().set_mode("light", persist=False)
         window.tabs.setCurrentWidget(f)
         f.set_zoom(100)
-        f.view.centerOn(350, 160)
+        f.view.centerOn(235, 75)
         app.processEvents()
         f.selection_state.set_mode("range")
         start = f.view.mapFromScene(QPointF(1, 1))

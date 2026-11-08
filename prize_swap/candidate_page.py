@@ -311,7 +311,7 @@ class CandidatePage(QWidget):
             if not excluded:
                 if status in counts:
                     counts[status] += 1
-                if planned:
+                if planned or m.uid in added_ids:
                     counts["入替予定登録済み"] += 1
             added = m.uid in added_ids
             shown = "除外" if excluded else "入替予定登録済み" if planned or added else status

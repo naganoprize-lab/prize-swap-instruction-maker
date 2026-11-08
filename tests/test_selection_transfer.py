@@ -161,6 +161,7 @@ def test_single_bulk_transfer_drafts_identity_unknown_save_restore_and_undo(
     f.history.redo()
     assert len(window.products) == 3
     window.candidate_page.refresh()
+    assert window.candidate_page.cards["入替予定登録済み"].value.text() == "3"
     assert sum("追加済み" in window.candidate_page.table.item(i, 10).text() for i in range(6)) == 3
     window.tabs.setCurrentWidget(window.instruction_page)
     window.refresh()
