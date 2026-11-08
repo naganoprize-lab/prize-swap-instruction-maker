@@ -164,10 +164,9 @@ def test_fullscreen_in_real_tab_and_detail_save_updates_instruction_model(tmp_pa
             dialog.products[0].name.setPlainText("予定商品を編集")
             dialog.products[0].methods.change_count("橋渡し", 2)
             dialog.accept()
-            return dialog.result()
 
-        monkeypatch.setattr(MachineDetailDialog, "exec", edit_and_accept)
         w.floor.open_selected_details()
+        edit_and_accept(w.floor.detail_controller.panel)
         assert w.floor.machines[0].product == "現在商品を編集"
         assert (
             w.products[0].name == "予定商品を編集" and w.products[0].planned_booths["橋渡し"] == 2

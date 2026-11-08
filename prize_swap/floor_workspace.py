@@ -621,51 +621,7 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
             self.message.emit("マシンを選択してください。")
 
     def open_details(self, uid):
-        if self._detail_open:
-            return
-        from .floor_details import MachineDetailDialog, DetailCommand
-
-        machine = next((m for m in self.machines if m.uid == uid), None)
-        if machine is None:
-            return
-        self._detail_open = True
-        try:
-            dialog = MachineDetailDialog(self, machine)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                before = self.state()
-                changes = []
-                for panel in dialog.products:
-                    values = {
-                        key: (
-                            deepcopy(getattr(panel.source, key)),
-                            deepcopy(getattr(panel.draft, key)),
-                        )
-                        for key in (
-                            "name",
-                            "maker",
-                            "units",
-                            "cases",
-                            "limit",
-                            "methods",
-                            "planned_booths",
-                            "machine_methods",
-                            "retired_machine_methods",
-                        )
-                        if getattr(panel.source, key) != getattr(panel.draft, key)
-                    }
-                    if values:
-                        changes.append((panel.source, values))
-                self.machines[self.machines.index(machine)] = dialog.updated
-                self.rebuild()
-                dialog.apply_products()
-                after = self.state()
-                if before != after or changes:
-                    self.history.push(DetailCommand(self, before, after, changes))
-                self.product_edited.emit()
-                self.sync()
-                self.schedule_save()
-        finally:
-            self._detail_open = False
+        return self.detail_controller.show_machine(uid)
 
     def print_machines(self):
         if self.print_options.visible_only:

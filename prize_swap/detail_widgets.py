@@ -105,6 +105,7 @@ def build_overview(dialog, tabs, scroll, panel):
     left_layout = QVBoxLayout(left)
     left_layout.setContentsMargins(0, 0, 0, 0)
     grid = QGridLayout()
+    d.kpi_grid = grid
     grid.setSpacing(6)
     for column in range(3):
         grid.setColumnStretch(column, 1)
@@ -172,7 +173,7 @@ def refresh_overview(d):
     r = machine_record(m, o.reference_day(), o.analysis_settings, o.assignments())
     d.header_meta.setText(
         f'管理 {m.source_key or "—"} ｜ {r["machine_type"] or "機種 —"} ｜ {d.method.currentText() or "方法 —"}\n'
-        f'{MATCH_LABELS[m.match_method]} ｜ 更新 {r["updated_at"] or "不明"}'
+        f'{MATCH_LABELS[m.match_method]} ｜ 更新 {r["updated_at"] or "不明"} ｜ {r["period_text"]}'
     )
     from .po_evaluation import evaluate_po
 

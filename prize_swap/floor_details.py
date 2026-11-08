@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import asdict
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, QSignalBlocker
 from PySide6.QtGui import QUndoCommand
 from PySide6.QtWidgets import (
     QComboBox,
@@ -135,12 +135,16 @@ class ProductPanel(QWidget):
             self.source.candidate_assignment["replacement_product_name"] = self.source.name
 
 
-class MachineDetailDialog(QDialog):
+class MachineDetailPanel(QWidget):
+    accepted = Signal()
+    rejected = Signal()
+
     def __init__(self, owner, machine):
         super().__init__(owner)
         self.owner = owner
         self.original = machine
         self.updated = deepcopy(machine)
+        self.baseline = deepcopy(machine)
         self.setWindowTitle(f"マシン詳細 — {display_identity(machine)}")
         available = self.screen().availableGeometry()
         size = owner.analytics_ui["detail_size"]
@@ -155,6 +159,7 @@ class MachineDetailDialog(QDialog):
         owner.selection_state.changed.connect(self.refresh_shared_selection)
         outer.addWidget(self.shared_selection)
         tabs = QTabWidget()
+        self.tabs = tabs
         outer.addWidget(tabs, 1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -426,6 +431,12 @@ class MachineDetailDialog(QDialog):
 
     def update_responsive_layout(self):
         if hasattr(self, "splitter"):
+            columns = 1 if self.width() < 500 else 2 if self.width() < 960 else 3
+            if columns != getattr(self, "_kpi_columns", None):
+                for i, card in enumerate(self.kpis.values()):
+                    self.kpi_grid.removeWidget(card)
+                    self.kpi_grid.addWidget(card, i // columns, i % columns)
+                self._kpi_columns = columns
             orientation = (
                 Qt.Orientation.Vertical if self.width() < 960 else Qt.Orientation.Horizontal
             )
@@ -444,10 +455,137 @@ class MachineDetailDialog(QDialog):
             self.analysis_scope.setMaximumWidth(110 if self.width() < 700 else 220)
             self.analysis_button.setText("分析へ" if self.width() < 700 else "売上分析で表示")
 
-    def done(self, result):
-        self.owner.analytics_ui["detail_size"] = [max(300, self.width()), max(300, self.height())]
-        self.owner.schedule_save()
-        super().done(result)
+    def reject(self):
+        self.rejected.emit()
+
+    def is_dirty(self):
+        m = self.baseline
+        if (
+            self.name.toPlainText().strip() != m.product
+            or self.maker.text().strip() != m.maker
+            or self.units.text() != str(m.units)
+            or self.cases.text() != str(m.cases)
+            or self.limit.currentText() != m.limit
+            or self.method.currentText() != m.operation_method
+        ):
+            return True
+        if self._cost_was_edited and self.confirmed_cost.value() != (m.prize_cost or 0):
+            return True
+        pricing = m.play_pricing or {}
+        if (
+            self.play_amount.value() != pricing.get("amount", 0)
+            or self.play_count.value() != pricing.get("plays", 1)
+            or self.price_confirmed.isChecked() != pricing.get("confirmed", False)
+        ):
+            return True
+        if asdict(self.updated) != asdict(m):
+            return True
+        for panel in self.products:
+            try:
+                panel.validate()
+            except AppError:
+                return True
+            if any(
+                getattr(panel.source, k) != getattr(panel.draft, k)
+                for k in ("name", "maker", "units", "cases", "limit")
+            ) or editor_state(panel.source) != editor_state(panel.draft):
+                return True
+        return False
+
+    def load_machine(self, machine):
+        self.original = machine
+        self.baseline = deepcopy(machine)
+        self.updated = deepcopy(machine)
+        controls = [
+            self.shared_selection,
+            self.name,
+            self.maker,
+            self.units,
+            self.cases,
+            self.limit,
+            self.method,
+            self.confirmed_cost,
+            self.play_amount,
+            self.play_count,
+            self.price_confirmed,
+            self.po_definition,
+        ]
+        blockers = [QSignalBlocker(c) for c in controls]
+        self.shared_selection.setChecked(
+            machine.uid in self.owner.selection_state.selected_machine_keys
+        )
+        self.name.setPlainText(machine.product)
+        self.maker.setText(machine.maker)
+        self.units.setText(str(machine.units))
+        self.cases.setText(str(machine.cases))
+        self.limit.setCurrentText(machine.limit)
+        self.method.setCurrentText(machine.operation_method)
+        from .costing import cost_profile
+        from .po_evaluation import po_definition
+
+        c = cost_profile(machine)
+        self._cost_was_edited = c["confirmed"] is not None
+        self.confirmed_cost.setValue(
+            c["confirmed"] or (c["candidate"] if c["candidate_safe"] else 0) or 0
+        )
+        pricing = machine.play_pricing or {}
+        self.play_amount.setValue(pricing.get("amount", 0))
+        self.play_count.setValue(pricing.get("plays", 1))
+        self.price_confirmed.setChecked(pricing.get("confirmed", False))
+        self.po_definition.setCurrentIndex(self.po_definition.findData(po_definition(machine)))
+        del blockers
+        from .analytics_data import NUMERIC, formatted
+
+        for key in self.values:
+            if key in NUMERIC:
+                self.values[key].setText(formatted(key, effective_stat(machine, key)))
+        for key, value in dict(
+            number=display_identity(machine),
+            source_key=machine.source_key,
+            direct_number_raw=machine.direct_number_raw or machine.number,
+            resolved_number=machine.resolved_number,
+            match_method=MATCH_LABELS[machine.match_method],
+            match_message=machine.match_message,
+            provenance="景品運営分析表" if machine.analysis else "レイアウト由来",
+            ratio_source=value_source(machine, "ratio"),
+            updated_at=machine_updated_at(machine),
+            ratio=ratio_text(machine),
+            installed_on=machine.installed_on,
+            reference=self.owner.reference_day().isoformat(),
+            days=days_text(machine, self.owner.reference_day()),
+        ).items():
+            self.values[key].setText(missing(value))
+        while self.tabs.count() > 1:
+            widget = self.tabs.widget(1)
+            self.tabs.removeTab(1)
+            widget.deleteLater()
+        self.products = []
+        from .instructions import booths
+
+        related = {
+            b.product.entry_id
+            for b in booths(
+                [p for p in self.owner.products() if p.day == self.owner.selected_day()],
+                self.owner.machines,
+                self.owner.number_references,
+                all_entries=True,
+            )
+            if b.machine and b.machine.uid == machine.uid
+        }
+        for p in self.owner.products():
+            if p.entry_id in related:
+                panel = ProductPanel(p)
+                self.products.append(panel)
+                area = QScrollArea()
+                area.setWidgetResizable(True)
+                area.setWidget(panel)
+                self.tabs.addTab(area, "入替予定：" + (p.name[:18] or "商品未定"))
+        self.identity_label.setText(display_identity(machine))
+        self.header_product.setText(machine.product or "—")
+        self.header_product.setToolTip(machine.product)
+        self.error.clear()
+        self.refresh_po_inputs()
+        self.update_responsive_layout()
 
     def edit_metrics(self):
         draft = deepcopy(self.updated)
@@ -612,10 +750,45 @@ class MachineDetailDialog(QDialog):
                     "入替予定との整合性",
                     "変更前のマシン番号が入替予定で使われています。予定の番号は自動変更しません。商品一覧で変更先を確認・修正してください。",
                 )
-            super().accept()
+            self.accepted.emit()
         except AppError as exc:
             self.error.setText(str(exc))
 
     def apply_products(self):
         for panel in self.products:
             panel.apply()
+
+
+class MachineDetailDialog(QDialog):
+    """Compatibility wrapper; the operational floor uses the same panel in a real dock."""
+
+    def __init__(self, owner, machine):
+        super().__init__(owner)
+        self.panel = MachineDetailPanel(owner, machine)
+        self.setWindowTitle(self.panel.windowTitle())
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.panel)
+        self.resize(self.panel.size())
+        self.panel.accepted.connect(lambda: self.done(QDialog.DialogCode.Accepted))
+        self.panel.rejected.connect(lambda: self.done(QDialog.DialogCode.Rejected))
+
+    def __getattr__(self, name):
+        panel = self.__dict__.get("panel")
+        if panel is not None:
+            return getattr(panel, name)
+        raise AttributeError(name)
+
+    def accept(self):
+        self.panel.accept()
+
+    def reject(self):
+        self.panel.reject()
+
+    def done(self, result):
+        self.panel.owner.analytics_ui["detail_size"] = [
+            max(300, self.width()),
+            max(300, self.height()),
+        ]
+        self.panel.owner.schedule_save()
+        super().done(result)

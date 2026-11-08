@@ -200,6 +200,10 @@ def validate_machines(records):
 
 
 def validate_state(state):
+    from .detail_dock import validate_preferences
+
+    if isinstance(state, dict):
+        validate_preferences(state.get("detail_dock"))
     from .instruction_output import validate_options
 
     if isinstance(state, dict):

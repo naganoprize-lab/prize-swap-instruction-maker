@@ -178,13 +178,8 @@ def run(output):
         opened = []
 
         def close_details():
-            dialog = next(
-                (
-                    w
-                    for w in app.topLevelWidgets()
-                    if isinstance(w, MachineDetailDialog) and w.isVisible()
-                ),
-                None,
+            dialog = (
+                floor.detail_controller.panel if floor.detail_controller.dock.isVisible() else None
             )
             if dialog is None:
                 QTimer.singleShot(30, close_details)
@@ -198,7 +193,7 @@ def run(output):
                 opened.append(True)
                 dialog.grab().save(str(output / "machine-detail.png"))
             finally:
-                dialog.reject()
+                floor.detail_controller.dock.close()
 
         node = floor.nodes[floor.machines[1].uid]
         floor.view.ensureVisible(node)
@@ -210,6 +205,7 @@ def run(output):
             pos=floor.view.mapFromScene(node.sceneBoundingRect().center()),
         )
         app.processEvents()
+        QTest.qWait(80)
         assert opened
         scene = floor.scene
         floor.toggle_fullscreen()

@@ -269,6 +269,14 @@ class MachineNode(QGraphicsObject):
         self.press_position = event.screenPos()
         self.before = self.owner.state()
         self.ctrl_select = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        self.details_only_press = (
+            not self.owner.presentation["edit"]
+            and not self.ctrl_select
+            and len(self.owner.selection_state.selected_machine_keys) > 1
+        )
+        if self.details_only_press:
+            event.accept()
+            return
         if self.ctrl_select:
             self.setSelected(not self.isSelected())
             event.accept()
@@ -276,6 +284,12 @@ class MachineNode(QGraphicsObject):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if getattr(self, "details_only_press", False):
+            self.details_only_press = False
+            if (event.screenPos() - self.press_position).manhattanLength() < 5:
+                QTimer.singleShot(0, lambda: self.owner.open_details(self.machine.uid))
+            event.accept()
+            return
         if getattr(self, "ctrl_select", False):
             event.accept()
             return
@@ -521,7 +535,10 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.view = FloorView(self.scene, self)
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self.canvas_menu)
-        layout.addWidget(self.view, 1)
+        from .detail_dock import DetailDockController, validate_preferences
+
+        self.detail_settings = validate_preferences()
+        self.detail_controller = DetailDockController(self, self.view, layout)
         self.nodes = {}
         from .theme import manager
 
@@ -621,6 +638,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def state(self):
         return dict(
             version=3,
+            detail_dock=deepcopy(self.detail_settings),
             instruction_print_options=deepcopy(self.instruction_print_options),
             theme_mode=theme_manager().mode,
             analytics_ui=deepcopy(self.analytics_ui),
@@ -657,6 +675,10 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         from .instruction_output import validate_options
 
         self.instruction_print_options = validate_options(state.get("instruction_print_options"))
+        from .detail_dock import validate_preferences
+
+        if not keep_history:
+            self.detail_settings = validate_preferences(state.get("detail_dock"))
         self.number_references = deepcopy(state.get("number_references", []))
         from .analytics_data import validate_ui_state
 
@@ -708,6 +730,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         if not keep_history:
             self.history.clear()
         self.rebuild()
+        if not keep_history:
+            self.detail_controller.restore()
         if self._zoom is None:
             self.fit(save=False)
         else:

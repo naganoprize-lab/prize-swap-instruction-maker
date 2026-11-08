@@ -158,13 +158,8 @@ def run(output):
         detail_fits = []
 
         def close_detail():
-            dialog = next(
-                (
-                    d
-                    for d in app.topLevelWidgets()
-                    if isinstance(d, MachineDetailDialog) and d.isVisible()
-                ),
-                None,
+            dialog = (
+                floor.detail_controller.panel if floor.detail_controller.dock.isVisible() else None
             )
             if dialog is not None:
                 available = dialog.screen().availableGeometry()
@@ -173,7 +168,7 @@ def run(output):
                 )
                 dialog.grab().save(str(output / "details.png"))
                 opened.append(dialog.name.toPlainText())
-                dialog.reject()
+                floor.detail_controller.dock.close()
 
         timer = QTimer()
         timer.timeout.connect(close_detail)
@@ -181,6 +176,7 @@ def run(output):
         point = floor.view.mapFromScene(floor.nodes[uid].sceneBoundingRect().center())
         QTest.mouseClick(floor.view.viewport(), Qt.MouseButton.LeftButton, pos=point)
         app.processEvents()
+        QTest.qWait(60)
         timer.stop()
         assert len(opened) == 1, "Click did not open machine details"
         assert all(detail_fits), "Details do not fit the DPI-scaled screen"
