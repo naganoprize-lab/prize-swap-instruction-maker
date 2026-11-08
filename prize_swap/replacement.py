@@ -107,7 +107,7 @@ def assess(machine, reference, settings=None, history=()):
         reasons.append(stamp)
     trend, sources = None, []
     if trend is None:
-        reasons.append("売上推移：未評価（比較可能な別期間・同一商品の履歴不足）")
+        reasons.append("売上推移：未評価（平均売上による評価は一時停止中）")
     elif trend < s["decline_ratio"]:
         reasons.append("別期間の実績を検出（売上推移の評価は一時停止）")
     return dict(

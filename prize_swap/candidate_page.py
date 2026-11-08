@@ -223,7 +223,7 @@ class CandidatePage(QWidget):
                     if r["ratio"] is not None
                     and r["days"] is not None
                     and r["days"] >= 0
-                    and not m.analysis
+                    and a["reasons"][0] == "投入日数が判定条件に達していません。"
                     else "データ不足"
                 )
             planned = r["planned"]

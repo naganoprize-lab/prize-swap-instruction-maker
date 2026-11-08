@@ -212,3 +212,36 @@ def test_sales_bucket_uses_all_population_even_with_focus(window):
         saved["analytics_ui"]["overview_chart"] == "donut"
         and saved["analytics_ui"]["overview_methods"]
     )
+
+
+def test_valid_recent_install_is_observation_not_missing_data(window):
+    from prize_swap.sales_analysis import METRICS
+    from prize_swap.replacement import assess
+
+    f = window.floor
+    m = f.machines[0]
+    m.installed_on = DAY.isoformat()
+    m.analysis = dict(
+        values={key: None for key in METRICS},
+        file_name="synthetic.xlsx",
+        loaded_at="2026-11-08T12:00:00+09:00",
+        period_source="excel",
+        period_start="2026-11-08",
+        period_end="2026-11-08",
+        fingerprint="recent",
+    )
+    a = assess(m, DAY)
+    assert a["status"] == "判定保留" and a["trend"] is None
+    assert any("一時停止" in r for r in a["reasons"]) and not any(
+        "履歴不足" in r for r in a["reasons"]
+    )
+    p = window.candidate_page
+    p.search.setText(m.source_key)
+    p.changed()
+    p.refresh()
+    row = next(
+        i
+        for i in range(p.table.rowCount())
+        if p.table.item(i, 0).data(Qt.ItemDataRole.UserRole) == [m.uid]
+    )
+    assert p.table.item(row, 10).text() == "経過観察"
