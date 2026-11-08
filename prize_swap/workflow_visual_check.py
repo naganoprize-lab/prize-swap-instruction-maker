@@ -78,14 +78,19 @@ def run(output):
         f.selection_state.set(uids)
         w.navigation.activate("floor")
         f.open_details(f.machines[0].uid)
-        QTest.qWait(80)
+        QTest.qWait(150)
         c = f.detail_controller
         p = c.panel
-        assert (
-            not p.isWindow()
-            and not c.dock.isFloating()
-            and 0.32 < c.dock.width() / c.host.width() < 0.68
+        report["initial_dock"] = dict(
+            panel_is_window=p.isWindow(),
+            floating=c.dock.isFloating(),
+            ratio=c.dock.width() / c.host.width(),
+            host=list(c.host.rect().getRect()),
+            dock=list(c.dock.rect().getRect()),
+            screen=list(w.screen().availableGeometry().getRect()),
         )
+        assert not p.isWindow() and not c.dock.isFloating(), report["initial_dock"]
+        assert 0.32 < c.dock.width() / c.host.width() < 0.68, report["initial_dock"]
         buttons = p.findChild(QDialogButtonBox)
         assert c.host.rect().contains(buttons.mapTo(c.host, buttons.rect().bottomRight()))
         assert p.confirmed_cost.value() == 270 and cost_profile(p.updated)["source"] == "商品名末尾"

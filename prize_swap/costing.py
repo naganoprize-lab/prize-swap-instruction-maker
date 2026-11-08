@@ -19,7 +19,9 @@ def trailing_candidate(name):
     ambiguous = (
         bool(
             re.search(
-                r"(?:vol\.?|ver\.?|no\.?|型番|サイズ|容量|数量|モデル|第|全)\s*$", prefix, re.I
+                r"(?:vol\.?|ver\.?|no\.?|series|model|size|version|型番|サイズ|容量|数量|モデル|シリーズ|バージョン|第|全)\s*$",
+                prefix,
+                re.I,
             )
         )
         or value < 10

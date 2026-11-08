@@ -90,6 +90,7 @@ class DetailDockController:
         self.dock = DetailDock("マシン詳細", self.host)
         self.dock.controller = self
         self.dock.setObjectName("machineDetailDock")
+        self.dock.setMinimumWidth(326)
         self.dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
@@ -151,14 +152,26 @@ class DetailDockController:
         self.position.blockSignals(False)
         self.owner.schedule_save()
 
-    def apply_ratio(self):
+    def apply_ratio(self, desired=None):
+        from shiboken6 import isValid
+
+        if (
+            not isValid(self.owner)
+            or not isValid(self.dock)
+            or not self.owner.detail_settings["open"]
+        ):
+            return
+        if desired is not None and not self.dock.isFloating():
+            self.owner.detail_settings["ratio"] = desired
         if not self.dock.isFloating() and self.owner.detail_settings["open"]:
             self._restoring = True
+            self.host.layout().activate()
             self.host.resizeDocks(
                 [self.dock],
                 [int(self.host.width() * self.owner.detail_settings["ratio"])],
                 Qt.Orientation.Horizontal,
             )
+            self.host.layout().activate()
             self._restoring = False
             self.capture()
 
@@ -263,7 +276,14 @@ class DetailDockController:
         self._restoring = False
         self.owner.detail_settings = saved
         if was_hidden:
+            goal = saved["ratio"]
             self.set_position(saved["position"])
+            # Native Windows can deliver the first dock/host geometry changes
+            # after show(). Preserve the requested ratio through that first
+            # layout instead of persisting a transient full-width dock.
+            self.owner.detail_settings["ratio"] = goal
+            QTimer.singleShot(0, lambda: self.apply_ratio(goal))
+            QTimer.singleShot(50, lambda: self.apply_ratio(goal))
         self.capture()
         QTimer.singleShot(0, self.owner.restore_view_center)
         return True

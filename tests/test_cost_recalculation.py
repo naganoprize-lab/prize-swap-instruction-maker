@@ -51,7 +51,18 @@ def test_trailing_cost_precedes_official_but_saved_manual_is_preserved(name, cos
 
 
 @pytest.mark.parametrize(
-    "name", ["型番 270", "景品 Vol. 2", "サイズ 080", "景品 -20", "景品 0", "景品 2"]
+    "name",
+    [
+        "型番 270",
+        "景品 Vol. 2",
+        "サイズ 080",
+        "シリーズ 080",
+        "Model 270",
+        "Size 020",
+        "景品 -20",
+        "景品 0",
+        "景品 2",
+    ],
 )
 def test_model_size_and_invalid_suffix_require_confirmation(name):
     m = sample(product=name)

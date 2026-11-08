@@ -208,3 +208,20 @@ def test_fullscreen_dock_and_save_controls_fit_small_200_percent_monitor(tmp_pat
     assert result.returncode == 0 and report["ok"], report.get("error", result.stderr)
     assert report["detail_geometry"]["controls_fit"] and report["detail_geometry"]["on_screen"]
     assert report["details_opened"] == 1
+
+
+def test_first_open_keeps_requested_half_ratio_after_transient_native_geometry(window, monkeypatch):
+    w = window
+    c = w.floor.detail_controller
+    original = c.set_position
+
+    def transient(position):
+        original(position)
+        c.host.resizeDocks([c.dock], [int(c.host.width() * 0.8)], Qt.Orientation.Horizontal)
+        w.floor.detail_settings["ratio"] = 0.8
+
+    monkeypatch.setattr(c, "set_position", transient)
+    w.floor.open_details(w.floor.machines[0].uid)
+    QTest.qWait(120)
+    assert 0.45 < c.dock.width() / c.host.width() < 0.55
+    assert 0.45 < w.floor.detail_settings["ratio"] < 0.55
