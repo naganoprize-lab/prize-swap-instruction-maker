@@ -210,3 +210,24 @@ def test_sales_small_cohort_unrated_and_all_equal_neutral():
     ms[1].sales = 0
     peers = [score_record(m, DAY, s) for m in ms]
     assert evaluate(ms[0], DAY, s, peers)[1]["score"] == 50
+
+
+@pytest.mark.parametrize("amount,count", [("100%", 1), (None, 3)])
+def test_formal_fee_requires_money_units_and_complete_discount_conditions(tmp_path, amount, count):
+    from test_sales_analysis import report_file, data_row
+    from openpyxl import load_workbook
+    from prize_swap.sales_analysis import load_analysis, apply_snapshot
+
+    path = report_file(tmp_path / "fee.xlsx", [data_row()])
+    wb = load_workbook(path)
+    ws = wb.active
+    ws.cell(1, 17, "プレイ料金")
+    ws.cell(1, 18, "料金回数")
+    ws.cell(2, 17, amount)
+    ws.cell(2, 18, count)
+    wb.save(path)
+    wb.close()
+    snapshot = load_analysis(path)
+    m = Machine(number="20088左")
+    apply_snapshot([m], snapshot)
+    assert evaluate_po(m, validate_settings())["target"] is None

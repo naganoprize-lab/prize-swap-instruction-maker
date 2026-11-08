@@ -336,6 +336,8 @@ def load_analysis(path, tolerance=None):
                 raw_input = cell(input_key)
                 if raw_input not in (None, ""):
                     val = numeric(raw_input)
+                    if isinstance(raw_input, str) and "%" in unicodedata.normalize("NFKC", raw_input):
+                        val = None
                     if val is None or val <= 0 or input_key == "play_count" and val != int(val):
                         result["issues"].append(
                             issue(
@@ -355,6 +357,8 @@ def load_analysis(path, tolerance=None):
                 cell(k) not in (None, "") and k not in po_inputs
                 for k in ("play_amount", "play_count")
             ):
+                record["po_inputs"]["pricing_unavailable"] = True
+            if cell("play_count") not in (None, "") and "play_amount" not in po_inputs:
                 record["po_inputs"]["pricing_unavailable"] = True
             if "play_amount" in po_inputs:
                 record["po_inputs"]["pricing"] = dict(
