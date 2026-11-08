@@ -114,6 +114,9 @@ def run(output):
         assert floor.isVisibleTo(host) and floor.view.scene() is scene
         for b in host.buttons.values():
             assert b.isVisibleTo(host) and b.width() > 0 and b.height() > 0
+            assert host.rect().contains(
+                b.rect().translated(b.mapTo(host, b.rect().topLeft()))
+            ), "Fullscreen toolbar control is clipped"
         report["ratio"] = inspect_card(floor, uid, "#F4A6A6")
         assert report["ratio"]["dpr"] >= float(report["scale_requested"]) * 0.9
         assert host.grab().save(str(output / "fullscreen-ratio.png"))
@@ -195,13 +198,17 @@ def run(output):
                     if not dock.isFloating()
                     else dock.rect().contains(buttons.mapTo(dock, buttons.rect().bottomRight()))
                 )
-                detail_fits.append(fits and controls_fit)
+                visible_bounds = dock.rect().translated(dock.mapToGlobal(dock.rect().topLeft()))
+                on_screen = area.contains(visible_bounds)
+                detail_fits.append(fits and controls_fit and on_screen)
                 report["detail_geometry"] = dict(
                     screen=list(area.getRect()),
                     host=list(controller.host.rect().getRect()),
                     dock=list(bounds.getRect()),
                     editor=list(dialog.rect().getRect()),
                     controls_fit=controls_fit,
+                    visible_bounds=list(visible_bounds.getRect()),
+                    on_screen=on_screen,
                 )
                 dialog.grab().save(str(output / "details.png"))
                 opened.append(dialog.name.toPlainText())

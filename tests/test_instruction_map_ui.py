@@ -175,3 +175,23 @@ def test_map_zero_output_uses_the_same_current_scope_selection(window, tmp_path,
     if w.preflight.pending:
         w.preflight.continue_output()
     assert target.exists() and all(p.included for p in w.products)
+
+
+def test_preview_memory_source_releases_generated_file_for_regeneration_and_cleanup(window):
+    from pathlib import Path
+    from prize_swap.instruction_preview import InstructionPreview
+
+    w = window
+    w.floor.instruction_print_options["mode"] = "both"
+    dialog = InstructionPreview(w)
+    assert dialog.pdf_buffer.isOpen() and dialog.document.pageCount() > 0
+    dialog.path.unlink()  # Windows must allow replacement while the PDF view is open.
+    assert dialog.document.pageCount() > 0
+    dialog.paper.setCurrentText("A3")
+    QApplication.processEvents()
+    assert dialog.path.exists() and dialog.document.pageCount() > 0
+    runtime = Path(dialog.runtime.name)
+    dialog.reject()
+    assert (
+        not runtime.exists() and not dialog.pdf_buffer.isOpen() and dialog.view.document() is None
+    )

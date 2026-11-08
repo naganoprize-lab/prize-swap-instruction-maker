@@ -611,7 +611,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         if hasattr(self, "dashboard"):
             compact = self.height() < 500 and hasattr(self.window(), "dashboard_page")
             self.dashboard.set_compact(compact)
-            self.info.setVisible(not compact)
+            self.info.setVisible(
+                not compact and not self._fullscreen_host and not self._fullscreen_transition
+            )
             if hasattr(self, "selection_bar") and not self._fullscreen_host:
                 short = self.height() < 420
                 self.selection_bar.setVisible(not short)

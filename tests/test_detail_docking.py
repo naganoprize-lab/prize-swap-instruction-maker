@@ -206,4 +206,5 @@ def test_fullscreen_dock_and_save_controls_fit_small_200_percent_monitor(tmp_pat
     )
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert result.returncode == 0 and report["ok"], report.get("error", result.stderr)
-    assert report["detail_geometry"]["controls_fit"] and report["details_opened"] == 1
+    assert report["detail_geometry"]["controls_fit"] and report["detail_geometry"]["on_screen"]
+    assert report["details_opened"] == 1

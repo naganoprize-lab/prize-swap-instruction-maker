@@ -50,7 +50,9 @@ class FullscreenHost(QDialog):
             widget.hide()
         self.toolbar = QWidget(self)
         self.toolbar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        row = QHBoxLayout(self.toolbar)
+        from .control_flow import ControlFlow
+
+        row = ControlFlow(self.toolbar)
         row.setContentsMargins(6, 4, 6, 4)
         self.filter_combo = QComboBox()
         for key, label in COLOR_FILTERS.items():
@@ -68,7 +70,7 @@ class FullscreenHost(QDialog):
         self.search.setText(floor.floor_search.text())
         self.search.textChanged.connect(floor.floor_search.setText)
         floor.floor_search.textChanged.connect(self.search.setText)
-        row.addWidget(self.search, 1)
+        row.addWidget(self.search)
         for label, direction in (("前へ", -1), ("次へ", 1)):
             b = QToolButton()
             b.setText(label)
@@ -108,7 +110,6 @@ class FullscreenHost(QDialog):
 
         dashboard.toggled.connect(toggle_dashboard)
         row.addWidget(dashboard)
-        row.addStretch()
         close = QToolButton()
         close.setText("解除（Esc）")
         close.clicked.connect(self.close)

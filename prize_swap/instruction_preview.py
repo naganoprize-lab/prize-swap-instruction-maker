@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QBuffer, QIODevice
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
@@ -72,6 +72,7 @@ class InstructionPreview(QDialog):
         tools.addWidget(self.info, 1, 0, 1, 4)
         self.view = QPdfView()
         self.document = QPdfDocument(self)
+        self.pdf_buffer = QBuffer(self)
         self.view.setDocument(self.document)
         self.view.setPageMode(QPdfView.PageMode.MultiPage)
         self.view.setZoomMode(QPdfView.ZoomMode.FitInView)
@@ -116,17 +117,27 @@ class InstructionPreview(QDialog):
         else:
             self.map_page.load_options()
         o.floor.schedule_save()
+        self.view.setDocument(None)
         self.document.close()
+        self.pdf_buffer.close()
         render = (
             (lambda printer: o.render_work_set(printer, self.job_config))
             if self.job_config is not None
             else self.map_page.render if self.map_page else o.paint_printer
         )
         plan = save_rendered_pdf(self.path, lambda temp: render(configured_printer(temp)))
-        self.document.load(str(self.path))
+        # QtPdf can retain a filename-backed QFile during asynchronous rendering
+        # on Windows, preventing replacement or directory cleanup after close().
+        # Keep the preview in a QBuffer whose lifetime matches this dialog.
+        self.pdf_buffer.setData(self.path.read_bytes())
+        self.pdf_buffer.open(QIODevice.OpenModeFlag.ReadOnly)
+        self.document.load(self.pdf_buffer)
+        self.view.setDocument(self.document)
         self.info.setText(plan.reason)
 
     def done(self, result):
+        self.view.setDocument(None)
         self.document.close()
+        self.pdf_buffer.close()
         self.runtime.cleanup()
         super().done(result)

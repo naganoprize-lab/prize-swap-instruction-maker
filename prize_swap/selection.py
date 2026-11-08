@@ -34,7 +34,9 @@ class SelectionState(QObject):
 
 def selection_controls(floor):
     row = QWidget()
-    layout = QHBoxLayout(row)
+    from .control_flow import ControlFlow
+
+    layout = ControlFlow(row)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(4)
     mode = QComboBox()
@@ -82,7 +84,6 @@ def selection_controls(floor):
     row.selection_receiver = UpdateReceiver(row)
     floor.selection_state.changed.connect(row.selection_receiver.apply)
     refresh()
-    layout.addStretch()
     return row
 
 
