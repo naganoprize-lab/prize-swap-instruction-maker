@@ -133,6 +133,22 @@ def build_toolbar(owner, layout):
     button(top, "今日", owner.today)
     top.addStretch()
     owner.fullscreen_button = button(top, "全画面", owner.toggle_fullscreen)
+    from .selection import selection_controls
+
+    selection_bar = selection_controls(owner)
+    owner.selection_bar = selection_bar
+    owner.selection_popup = QToolButton()
+    owner.selection_popup.setText("選択")
+    selection_menu = QMenu(owner.selection_popup)
+    selection_action = QWidgetAction(selection_menu)
+    selection_action.setDefaultWidget(selection_controls(owner))
+    selection_menu.addAction(selection_action)
+    owner.selection_popup.setMenu(selection_menu)
+    owner.selection_popup.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+    owner.selection_popup.hide()
+    top.addWidget(owner.selection_popup)
+    layout.addWidget(selection_bar)
+    owner.toolbar_rows.append(selection_bar)
     second = row()
     owner.floor_search = QLineEdit()
     owner.floor_search.setPlaceholderText("番号・商品・機種・方法を検索")
@@ -249,7 +265,9 @@ def build_toolbar(owner, layout):
     layout.addWidget(owner.info)
     owner.analysis_clear = QToolButton()
     owner.analysis_clear.setText("分析による強調表示を解除")
-    owner.analysis_clear.setToolTip("分析の強調だけを解除し、通常の検索・倍率・フィルターを維持します。")
+    owner.analysis_clear.setToolTip(
+        "分析の強調だけを解除し、通常の検索・倍率・フィルターを維持します。"
+    )
     owner.analysis_clear.clicked.connect(owner.clear_analysis_highlight)
     owner.analysis_clear.hide()
     owner.analysis_note = QLabel()

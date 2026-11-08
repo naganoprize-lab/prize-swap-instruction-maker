@@ -114,7 +114,7 @@ def build_overview(dialog, tabs, scroll, panel):
         (
             ("ratio", "アベ比"),
             ("sales", "売上金額"),
-            ("po_target", "理論PO目安"),
+            ("po_target", "適正PO率"),
             ("cost_rate", "原価率"),
             ("po_rate", "PO率"),
             ("days", "投入日数"),

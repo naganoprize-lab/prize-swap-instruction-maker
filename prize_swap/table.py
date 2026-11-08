@@ -97,6 +97,13 @@ class ProductModel(QAbstractTableModel):
                 return (
                     editor_state(p) if role == Qt.ItemDataRole.EditRole else format_cell_status(p)
                 )
+            if (
+                col == 3
+                and role == Qt.ItemDataRole.DisplayRole
+                and p.candidate_assignment
+                and not value
+            ):
+                return "新商品未設定（現在の商品はツールチップで確認）"
             return ", ".join(value) if col == 6 else value
         if role == Qt.ItemDataRole.CheckStateRole and col in (0, 8):
             return Qt.CheckState.Checked if value else Qt.CheckState.Unchecked
@@ -131,6 +138,9 @@ class ProductModel(QAbstractTableModel):
             ):
                 return QColor(metric_colors(field)[1])
         if role == Qt.ItemDataRole.ToolTipRole:
+            if p.candidate_assignment and col in (3, 6):
+                a = p.candidate_assignment
+                return f"現在の商品：{a['current_product_name']}\n新しい商品：{p.name or '未設定'}\n管理：{a['management_number'] or '—'}\n{a['source_candidate_status']}：{a['source_candidate_reason']}\n入替日は未確定です。選択中の日付に下書きを表示しています。"
             if col == 7:
                 return format_allocations(p, "\n") + "\n" + allocation_status(p).message
             return "\n".join(value) if col == 6 else str(value)
@@ -165,7 +175,11 @@ class ProductModel(QAbstractTableModel):
                 value = p.methods
             elif col == 9 and value not in LIMITS:
                 raise AppError("個数制限を選択してください。")
+            if col == 0 and value and not p.name.strip():
+                raise AppError("新しい商品名を入力してから出力対象にしてください。")
             setattr(p, ATTRS[col], value)
+            if col == 3 and p.candidate_assignment:
+                p.candidate_assignment["replacement_product_name"] = value
             if col == 6:
                 sync_machine_methods(p)
             self.dataChanged.emit(

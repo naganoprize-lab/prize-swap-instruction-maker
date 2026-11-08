@@ -148,6 +148,12 @@ class MachineNode(QGraphicsObject):
             | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
+        self.selection_halo = QGraphicsRectItem(self.display_rect.adjusted(-4, -4, 4, 4), self)
+        self.selection_halo.setPen(QPen(QColor(90, 165, 255, 90), 5))
+        self.selection_halo.setBrush(Qt.BrushStyle.NoBrush)
+        self.selection_halo.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.selection_halo.setZValue(-1)
+        self.selection_halo.hide()
         self.handles = [ResizeHandle(self, i) for i in range(4)]
         self.update_handles()
 
@@ -164,6 +170,8 @@ class MachineNode(QGraphicsObject):
                 and self.owner.presentation["edit"]
                 and self.owner.presentation["mode"] == "actual"
             )
+        self.selection_halo.setRect(self.display_rect.adjusted(-4, -4, 4, 4))
+        self.selection_halo.setVisible(self.isSelected())
         plans = self.owner.assignments().get(machine_key(m), [])
         installed = m.installed_on or "—"
         self.setToolTip(
@@ -207,6 +215,14 @@ class MachineNode(QGraphicsObject):
             or self.machine.uid in getattr(self.owner, "_highlight_uids", set())
             or self.machine.uid in (self.owner.analysis_highlight_uids or set()),
         )
+        if self.isSelected():
+            painter.save()
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(72, 156, 255, 75), 10))
+            painter.drawRoundedRect(self.boundingRect().adjusted(5, 5, -5, -5), 6, 6)
+            painter.setPen(QPen(QColor("#2563EB"), 3))
+            painter.drawRoundedRect(self.boundingRect().adjusted(3, 3, -3, -3), 6, 6)
+            painter.restore()
         if (self.machine.analysis or {}).get(
             "quality_issues"
         ) or self.machine.match_method == "review":
@@ -232,6 +248,7 @@ class MachineNode(QGraphicsObject):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             self.machine.x, self.machine.y = self.pos().x(), self.pos().y()
         if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
+            self.selection_halo.setVisible(bool(value))
             for h in self.handles:
                 h.setVisible(
                     bool(value)
@@ -300,6 +317,10 @@ class FloorView(QGraphicsView):
         event.accept()
 
     def mousePressEvent(self, event):
+        from .selection import begin_drag
+
+        if begin_drag(self, event):
+            return
         if event.button() == Qt.MouseButton.MiddleButton or (
             event.button() == Qt.MouseButton.LeftButton
             and (
@@ -318,6 +339,14 @@ class FloorView(QGraphicsView):
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if hasattr(self, "_selection_start"):
+            from PySide6.QtCore import QRect
+
+            self._selection_band.setGeometry(
+                QRect(self._selection_start, event.position().toPoint()).normalized()
+            )
+            event.accept()
+            return
         if getattr(self, "_pan", None) is not None:
             point = event.position().toPoint()
             delta = point - self._pan
@@ -329,6 +358,16 @@ class FloorView(QGraphicsView):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        from .selection import end_drag
+
+        if end_drag(self, event):
+            return
+        if (
+            self.owner.selection_state.selection_mode == "individual"
+            or event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
+            event.accept()
+            return
         if getattr(self, "_pan", None) is not None:
             self._pan = None
             self.viewport().unsetCursor()
@@ -338,6 +377,14 @@ class FloorView(QGraphicsView):
             super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event):
+        if event.matches(QKeySequence.StandardKey.SelectAll):
+            self.owner.selection_state.set(m.uid for m in self.owner.machines)
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Escape:
+            self.owner.selection_state.set([])
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Space:
             self._space = True
             event.accept()
@@ -397,6 +444,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         super().__init__(parent)
         self.products, self.selected_day = products, selected_day
         self.machines, self.original = [], []
+        from .selection import SelectionState
+
+        self.selection_state = SelectionState(self)
+        self._syncing_selection = False
+        self.selection_state.changed.connect(self.apply_shared_selection)
         self.source = ""
         self.initialized = False
         self._assignments = {}
@@ -534,9 +586,13 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, "dashboard"):
-            compact = self.height() < 420 and hasattr(self.window(), "dashboard_page")
+            compact = self.height() < 500 and hasattr(self.window(), "dashboard_page")
             self.dashboard.set_compact(compact)
             self.info.setVisible(not compact)
+            if hasattr(self, "selection_bar") and not self._fullscreen_host:
+                short = self.height() < 420
+                self.selection_bar.setVisible(not short)
+                self.selection_popup.setVisible(short)
 
     def assignments(self):
         return self._assignments
@@ -655,6 +711,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.changed.emit()
 
     def rebuild(self):
+        self._syncing_selection = True
         self.refresh_assignments()
         self.scene.clear()
         self.nodes = {}
@@ -662,6 +719,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             node = MachineNode(self, m)
             self.nodes[m.uid] = node
             self.scene.addItem(node)
+        self._syncing_selection = False
+        self.selection_state.set(self.selection_state.selected_machine_keys & set(self.nodes))
+        self.apply_shared_selection()
         self.apply_presentation()
         self.update_scene_rect()
         self.update_info()
@@ -878,13 +938,33 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             methods,
         )
 
+    def apply_shared_selection(self):
+        if not hasattr(self, "scene") or self._syncing_selection:
+            return
+        self._syncing_selection = True
+        self.scene.blockSignals(True)
+        for uid, node in self.nodes.items():
+            node.setSelected(uid in self.selection_state.selected_machine_keys)
+            node.update_handles()
+        self.scene.blockSignals(False)
+        self._syncing_selection = False
+        self.view.viewport().setCursor(
+            Qt.CursorShape.CrossCursor
+            if self.selection_state.selection_mode == "range"
+            else Qt.CursorShape.ArrowCursor
+        )
+        self.view.viewport().update()
+
     def selection_changed(self):
+        if self._syncing_selection:
+            return
         if hasattr(self, "nodes"):
+            self.selection_state.set(
+                item.machine.uid
+                for item in self.scene.selectedItems()
+                if isinstance(item, MachineNode)
+            )
             self.refresh_frames()
-            for node in self.scene.selectedItems():
-                if isinstance(node, MachineNode):
-                    self.view.ensureVisible(node, 25, 25)
-            self.capture_view(False)
             self.view.viewport().update()
 
     def refresh_frames(self):
@@ -1013,7 +1093,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.initialized = True
         self.machines.append(machine)
         self.rebuild()
-        self.nodes[machine.uid].setSelected(True)
+        self.selection_state.set({machine.uid})
         self.record(before, "マシン追加")
         self.view.centerOn(self.nodes[machine.uid])
         self.capture_view(False)
@@ -1188,8 +1268,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         ]
         self.machines.extend(clones)
         self.rebuild()
-        for m in clones:
-            self.nodes[m.uid].setSelected(True)
+        self.selection_state.set(m.uid for m in clones)
         self.record(before, "マシン複製")
         self.message.emit(
             "複製しました。番号は未設定です。ダブルクリックで新しい番号を登録してください。"

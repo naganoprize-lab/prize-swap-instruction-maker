@@ -63,6 +63,7 @@ def normalize_number(value):
 def empty_snapshot():
     return dict(
         version=2,
+        po_definition="unknown",
         issues=[],
         unmatched_rows=[],
         fingerprint="",
@@ -106,9 +107,16 @@ def validate_snapshot(value):
     if not isinstance(value, dict) or value.get("version") not in (1, 2):
         raise AppError("売上分析の保存形式が不正です。")
     value = deepcopy(value)
+    if "po_definition" not in value and value.get("file_name"):
+        value["po_definition"] = (
+            "prize_per_play"  # Original source definition confirmed by the user.
+        )
     legacy = value["version"] == 1
     value = empty_snapshot() | value
     value["version"] = 2
+    from .po_evaluation import validate_definition
+
+    validate_definition(value.get("po_definition", "unknown"))
     records = value.get("records")
     if legacy:
         for record in records.values():
@@ -224,6 +232,9 @@ def validate_overlay(value):
     from .po_evaluation import validate_inputs
 
     validate_inputs(value.get("po_inputs"))
+    from .po_evaluation import validate_definition
+
+    validate_definition(value.get("po_definition", "unknown"))
     validate_values(value.get("values"))
 
 
@@ -254,7 +265,15 @@ def load_analysis(path, tolerance=None):
             canonical("プレイ料金"), labels.get(canonical("1プレイ料金"))
         )
         columns["play_count"] = labels.get(canonical("料金回数"))
+        for key, label in [
+            ("actual_plays", "プレイ回数"),
+            ("acquired_count", "景品獲得数"),
+            ("inserted_amount", "投入金額"),
+        ]:
+            columns[key] = labels.get(canonical(label))
         result = empty_snapshot()
+        # The source report's P/O definition was explicitly confirmed by the user.
+        result["po_definition"] = "prize_per_play"
         result.update(
             source=str(path.resolve()),
             file_name=path.name,
@@ -262,6 +281,13 @@ def load_analysis(path, tolerance=None):
             loaded_at=datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds"),
         )
         result.update(metadata(rows[1:]))
+        for cells in rows[1:]:
+            text = " ".join(str(c.value or "") for c in cells)
+            if ("PO率定義" in text or "P/O率定義" in text) and (
+                "景品獲得数" in text and "プレイ回数" in text
+            ):
+                result["po_definition"] = "prize_per_play"
+
         stamp = re.search(r"(\d{12,14})(?=\D|$)", path.stem)
         if stamp:
             try:
@@ -336,7 +362,9 @@ def load_analysis(path, tolerance=None):
                 raw_input = cell(input_key)
                 if raw_input not in (None, ""):
                     val = numeric(raw_input)
-                    if isinstance(raw_input, str) and "%" in unicodedata.normalize("NFKC", raw_input):
+                    if isinstance(raw_input, str) and "%" in unicodedata.normalize(
+                        "NFKC", raw_input
+                    ):
                         val = None
                     if val is None or val <= 0 or input_key == "play_count" and val != int(val):
                         result["issues"].append(
@@ -351,6 +379,30 @@ def load_analysis(path, tolerance=None):
                         continue
                     po_inputs[input_key] = val
             record["po_inputs"] = {}
+            for input_key in ("actual_plays", "acquired_count", "inserted_amount"):
+                v = cell(input_key)
+                if v not in (None, ""):
+                    number_value = numeric(v)
+                    percentage = isinstance(v, str) and "%" in unicodedata.normalize("NFKC", v)
+                    if (
+                        number_value is None
+                        or number_value < 0
+                        or percentage
+                        or input_key != "inserted_amount"
+                        and number_value != int(number_value)
+                    ):
+                        result["issues"].append(
+                            issue(
+                                number,
+                                "po_input",
+                                "実測の投入金額・回数・獲得数を確認してください。",
+                                "警告",
+                                row_index,
+                            )
+                        )
+                        record["po_inputs"]["pricing_unavailable"] = True
+                    else:
+                        record["po_inputs"][input_key] = number_value
             if "prize_cost" in po_inputs:
                 record["po_inputs"]["prize_cost"] = po_inputs["prize_cost"]
             if any(
@@ -444,6 +496,7 @@ def apply_snapshot(machines, snapshot):
             dict(
                 values=deepcopy(record["values"]) if record else {k: None for k in METRICS},
                 po_inputs=deepcopy(record.get("po_inputs", {})) if record else {},
+                po_definition=snapshot.get("po_definition", "unknown"),
                 machine_name=record.get("machine_name", "") if record else "",
                 file_name=snapshot["file_name"],
                 loaded_at=snapshot["loaded_at"],
@@ -489,3 +542,19 @@ def import_summary(machines, snapshot):
         ignored=snapshot["ignored_rows"],
         duplicates=snapshot["duplicate_rows"],
     )
+
+
+def set_po_definition(owner, definition):
+    from .po_evaluation import validate_definition
+
+    definition = validate_definition(definition)
+    before = owner.state()
+    owner.analysis_state["po_definition"] = definition
+    current = owner.analysis_state.get("fingerprint")
+    for entry in owner.performance_history:
+        if entry["snapshot"].get("fingerprint") == current:
+            entry["snapshot"]["po_definition"] = definition
+    apply_snapshot(owner.machines, owner.analysis_state)
+    owner.record(before, "Excel P/O率の定義確認")
+    owner.sync()
+    owner.schedule_save()

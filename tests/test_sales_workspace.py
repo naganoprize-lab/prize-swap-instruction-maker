@@ -52,7 +52,11 @@ def test_analysis_is_embedded_and_keeps_floor_state_and_selection(window, monkey
     assert (
         w.tabs.currentWidget() is w.analysis_page and w.navigation.buttons["analysis"].isChecked()
     )
-    assert w.analysis_page.detail_table.rowCount() == 300 and w.analysis_page.legacy.kinds
+    assert w.analysis_page.detail_table.rowCount() == 1 and w.analysis_page.legacy.kinds
+    assert w.analysis_page.selection_scope.currentData() == "selection"
+    w.analysis_page.selection_scope.setCurrentIndex(0)
+    w.analysis_page.refresh()
+    assert w.analysis_page.detail_table.rowCount() == 300
     w.analysis_page.search.setText("商品299")
     w.analysis_page.refresh()
     w.navigation.buttons["floor"].click()
@@ -184,7 +188,7 @@ def test_csv_excel_missing_zero_provenance_and_formula_safety(window, tmp_path):
     assert "平均売上" not in headers and m.average is None
     cell = s.cell(2, headers.index("商品名") + 1)
     assert cell.value == m.product and cell.data_type == "s"
-    po = s.cell(2, headers.index("PO率（内部比率 0.05=5%）") + 1)
+    po = s.cell(2, headers.index("実際PO率（内部比率 0.05=5%）") + 1)
     assert po.value == 0 and po.number_format == "0.00%"
     assert s.cell(2, headers.index("売上金額・取得元") + 1).value == "レイアウト由来"
     assert "景品種別" not in headers and set(b.sheetnames) >= {

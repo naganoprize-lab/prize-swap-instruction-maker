@@ -19,6 +19,17 @@ from PySide6.QtWidgets import (
 from .theme import tokens, analysis_color, manager
 from .analytics_data import bucket, formatted
 from .sales_evaluation import quartiles, classify, boundary_legend
+from .analysis_bands import (
+    SALES_LABELS,
+    SALES_COLORS,
+    PO_LABELS,
+    PO_COLORS,
+    COST_LABELS,
+    COST_COLORS,
+    AGE_LABELS,
+    AGE_COLORS,
+    UNKNOWN,
+)
 
 TITLES = {
     "ratio_bin": "アベ比の分布",
@@ -49,11 +60,16 @@ COLORS = {
     "不明": "#B8BEC6",
     "計算不可": "#B8BEC6",
 }
+COLORS.update(dict(zip(PO_LABELS, PO_COLORS)))
+COLORS.update(dict(zip(COST_LABELS, COST_COLORS)))
+COLORS.update(dict(zip(AGE_LABELS, AGE_COLORS)))
+COLORS.update({"不明": UNKNOWN, "計算不可": UNKNOWN})
 ORDERS = {
     "ratio_bin": ["50%未満", "50〜100%未満", "100〜200%未満", "200%以上", "不明"],
-    "po_bin": ["低い", "適正範囲", "高い", "計算不可"],
-    "cost_bin": ["低すぎる・要確認", "低め", "目標付近", "高い", "不明"],
-    "days_bin": ["0〜6日", "7〜13日", "14〜20日", "21〜27日", "28日以上", "投入予定", "不明"],
+    "po_bin": [*PO_LABELS, "計算不可"],
+    "cost_bin": [*COST_LABELS, "不明"],
+    "days_bin": [*AGE_LABELS, "投入予定", "不明"],
+    "sales_bin": [*SALES_LABELS, "同額", "不明"],
 }
 
 
@@ -65,9 +81,9 @@ def distribution(records, axis, settings, population=None):
             sales[r.get("sales_cohort")].append(r["sales"])
     bounds = {
         k: (
-            quartiles(v)
+            quartiles(v, settings["sales_percentiles"])
             if settings["sales_mode"] != "fixed"
-            else [settings[t] for t in ("sales_low", "sales_middle", "sales_high")]
+            else settings["sales_fixed_breaks"]
         )
         for k, v in sales.items()
     }
@@ -96,7 +112,14 @@ def distribution(records, axis, settings, population=None):
                 from .analysis_settings import type_style
 
                 color = type_style(label, settings)["color"]
-        row = rows.setdefault(label, dict(label=label, value=0, uids=[], color=color))
+        display_label = label
+        if axis == "machine_type" and label != "その他":
+            from .analysis_settings import type_style
+
+            display_label = type_style(label, settings)["short"]
+        row = rows.setdefault(
+            label, dict(label=label, display_label=display_label, value=0, uids=[], color=color)
+        )
         row["value"] += 1
         row["uids"].append(r["uid"])
     order = ORDERS.get(
@@ -221,7 +244,9 @@ class DistributionChart(QWidget):
                     rect,
                     Qt.AlignmentFlag.AlignVCenter,
                     fm.elidedText(
-                        f'{r["label"]} {r["value"]}台', Qt.TextElideMode.ElideRight, rect.width()
+                        f'{r.get("display_label",r["label"])} {r["value"]}台',
+                        Qt.TextElideMode.ElideRight,
+                        rect.width(),
                     ),
                 )
                 self.hits.append((rect, r))
@@ -238,7 +263,9 @@ class DistributionChart(QWidget):
             p.drawText(
                 QRectF(2, y, label_width - 6, step),
                 Qt.AlignmentFlag.AlignVCenter,
-                fm.elidedText(r["label"], Qt.TextElideMode.ElideRight, label_width - 6),
+                fm.elidedText(
+                    r.get("display_label", r["label"]), Qt.TextElideMode.ElideRight, label_width - 6
+                ),
             )
             bar = QRectF(
                 label_width, y + step * 0.22, bar_width * r["value"] / largest, max(4, step * 0.56)
@@ -286,7 +313,8 @@ class DistributionPage(QScrollArea):
         self.grid.setSpacing(8)
         outer.addLayout(self.grid)
         outer.addStretch()
-        for axis, title in TITLES.items():
+        for axis in page.owner.analytics_ui["tile_order"]:
+            title = TITLES[axis]
             card = QFrame()
             card.setObjectName("card")
             layout = QVBoxLayout(card)
@@ -297,6 +325,13 @@ class DistributionPage(QScrollArea):
             label = QLabel(title)
             label.setObjectName("section")
             title_row.addWidget(label, 1)
+            up = QPushButton("↑")
+            up.setToolTip("このタイルを前へ（表示順を保存）")
+            up.clicked.connect(lambda checked=False, a=axis: self.move_tile(a))
+            title_row.addWidget(up)
+            expand = QPushButton("拡大")
+            expand.clicked.connect(lambda checked=False, a=axis: self.expand_chart(a))
+            title_row.addWidget(expand)
             button = QPushButton("詳細")
             button.clicked.connect(lambda checked=False, a=axis: self.open_detail(a))
             title_row.addWidget(button)
@@ -316,6 +351,34 @@ class DistributionPage(QScrollArea):
             card.setMaximumHeight(300 if axis != "machine_type" else 350)
             self.cards[axis] = (card, info, chart, legend)
         self.reflow()
+
+    def move_tile(self, axis):
+        order = self.page.owner.analytics_ui["tile_order"]
+        i = order.index(axis)
+        if i:
+            order[i - 1], order[i] = order[i], order[i - 1]
+        self.page.owner.schedule_save()
+        self.reflow()
+
+    def expand_chart(self, axis):
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+
+        d = QDialog(self)
+        d.setWindowTitle(TITLES[axis])
+        d.resize(900, 620)
+        layout = QVBoxLayout(d)
+        chart = DistributionChart()
+        chart.rows = self.cards[axis][2].rows
+        chart.kind = self.form.currentData()
+        chart.activated.connect(self.page.host_window.highlight_analysis_machines)
+        layout.addWidget(chart, 1)
+        note = QLabel(self.cards[axis][3].toolTip())
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(d.reject)
+        layout.addWidget(close)
+        d.exec()
 
     def save_preferences(self, *_):
         p = self.page
@@ -344,7 +407,11 @@ class DistributionPage(QScrollArea):
         if not hasattr(self, "cards"):
             return
         cols = 3 if self.viewport().width() >= 1350 else 2 if self.viewport().width() >= 820 else 1
-        axes = [a for a in self.cards if a != "method" or self.method_button.isChecked()]
+        axes = [
+            a
+            for a in self.page.owner.analytics_ui["tile_order"]
+            if a != "method" or self.method_button.isChecked()
+        ]
         layout_key = (cols, tuple(axes))
         if getattr(self, "_layout_key", None) == layout_key:
             return

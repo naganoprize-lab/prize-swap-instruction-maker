@@ -72,6 +72,18 @@ class SalesPage(QWidget):
         self._advanced_manual = False
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
+        scope_row = QHBoxLayout()
+        root.addLayout(scope_row)
+        self.selection_scope = QComboBox()
+        self.selection_scope.addItem("全台", "all")
+        self.selection_scope.addItem("レイアウト選択中の台", "selection")
+        scope_row.addWidget(self.selection_scope)
+        self.selection_summary = QLabel()
+        self.selection_summary.setWordWrap(True)
+        scope_row.addWidget(self.selection_summary, 1)
+        self._selection_manual_all = False
+        self.selection_scope.currentIndexChanged.connect(self.selection_scope_changed)
+        self.owner.selection_state.changed.connect(self.layout_selection_changed)
         self.workspace_tabs = QTabWidget()
         root.addWidget(self.workspace_tabs)
         self.detail_page = QWidget()
@@ -79,7 +91,7 @@ class SalesPage(QWidget):
 
         self.distributions = DistributionPage(self)
         self.workspace_tabs.addTab(self.distributions, "売り場全体の分布")
-        self.workspace_tabs.addTab(self.detail_page, "詳細分析")
+        self.workspace_tabs.addTab(self.detail_page, "比較分析・詳細分析")
         outer = QVBoxLayout(self.detail_page)
         outer.setContentsMargins(6, 6, 6, 6)
         outer.setSpacing(5)
@@ -253,7 +265,7 @@ class SalesPage(QWidget):
         self.result_table = make_table([], [])
         self.detail_table = make_table([], [])
         self.data_tabs.addTab(self.result_table, "集計結果")
-        self.data_tabs.addTab(self.detail_table, "全項目・取得元")
+        self.workspace_tabs.addTab(self.detail_table, "詳細データ")
         self.legacy = MethodAnalysisPanel(self.owner)
         self.legacy_scroll = QScrollArea()
         self.legacy_scroll.setWidgetResizable(True)
@@ -422,6 +434,7 @@ class SalesPage(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self.use_layout_selection()
         self.owner.analytics.records()
         if (
             self.dirty
@@ -430,12 +443,47 @@ class SalesPage(QWidget):
         ):
             self.refresh()
 
+    def selection_scope_changed(self, *_):
+        self._selection_manual_all = self.selection_scope.currentData() == "all"
+        self.dirty = True
+        if hasattr(self, "timer"):
+            self.timer.start()
+
+    def use_layout_selection(self, explicit=False):
+        if explicit:
+            self._selection_manual_all = False
+            self.focus_uids = None
+        keys = self.owner.selection_state.selected_machine_keys
+        scope = "selection" if keys and not self._selection_manual_all else "all"
+        self.selection_scope.blockSignals(True)
+        self.selection_scope.setCurrentIndex(self.selection_scope.findData(scope))
+        self.selection_scope.blockSignals(False)
+        self.dirty = True
+        if hasattr(self, "timer"):
+            self.timer.start()
+
+    def layout_selection_changed(self):
+        self.use_layout_selection()
+
+    def target_uids(self):
+        if (
+            self.selection_scope.currentData() == "selection"
+            and self.owner.selection_state.selected_machine_keys
+        ):
+            keys = self.owner.selection_state.selected_machine_keys
+            return keys & self.focus_uids if self.focus_uids is not None else keys
+        return self.focus_uids
+
     def clear_focus(self):
         self.focus_uids = None
         self.changed()
         self.refresh()
 
     def focus_machine(self, uid, scope="machine"):
+        self.selection_scope.blockSignals(True)
+        self.selection_scope.setCurrentIndex(0)
+        self.selection_scope.blockSignals(False)
+        self._selection_manual_all = True
         self.workspace_tabs.setCurrentWidget(self.detail_page)
         rs = self.owner.analytics.records()
         r = next((r for r in rs if r["uid"] == uid), None)
@@ -460,7 +508,7 @@ class SalesPage(QWidget):
             self.records, self.results = self.owner.analytics.query(
                 self.conditions,
                 self.search.text(),
-                self.focus_uids,
+                self.target_uids(),
                 self.axis.currentData(),
                 self.metric_choice.currentData(),
                 self.operation.currentData(),
@@ -490,10 +538,20 @@ class SalesPage(QWidget):
             )
         except Exception as exc:
             self.records = filter_records(
-                self.owner.analytics.records(), self.conditions, self.search.text(), self.focus_uids
+                self.owner.analytics.records(),
+                self.conditions,
+                self.search.text(),
+                self.target_uids(),
             )
             self.results = []
             self.notice.setText(str(exc))
+        present = sum(r["sales"] is not None for r in self.records)
+        mode = (
+            "全" if self.selection_scope.currentData() == "all" and self.focus_uids is None else ""
+        )
+        self.selection_summary.setText(
+            f"分析対象：{mode}{len(self.records)}台 ／ 売上データあり：{present}台 ／ データなし：{len(self.records)-present}台"
+        )
         a = self.owner.analysis_state
         self.metadata.setText(
             f'{period_text(a)} ｜ 更新 {a["loaded_at"] or "未読込"} ｜ 分析対象 {len(self.records)} / {len(self.owner.machines)}台'
@@ -549,6 +607,7 @@ class SalesPage(QWidget):
                     )
         self.detail_table.setSortingEnabled(True)
         self.update_chart()
+        self.legacy.target_uids = {r["uid"] for r in self.records}
         self.legacy.refresh()
         self.distributions.refresh()
         self._render_build = self.owner.analytics.builds
@@ -589,7 +648,12 @@ class SalesPage(QWidget):
             self.filter_operator.setCurrentIndex(0)
         self.filter_upper.setVisible(self.filter_operator.currentData() == "range")
         self.filter_value.setVisible(self.filter_operator.currentData() != "missing")
-        percent = self.filter_field.currentData() in ("po_rate", "cost_rate")
+        percent = self.filter_field.currentData() in (
+            "po_rate",
+            "cost_rate",
+            "target_po_rate",
+            "excel_po_rate",
+        )
         self.filter_value.setPlaceholderText("割合(%)：5 → 5%" if percent else "数値または文字")
         self.filter_upper.setPlaceholderText("上限(%)" if percent else "上限")
 
@@ -608,7 +672,11 @@ class SalesPage(QWidget):
                     number = float(text.replace(",", "").rstrip("%"))
                     if not math.isfinite(number):
                         raise ValueError("有限の数値を入力してください。")
-                    return number / 100 if key in ("po_rate", "cost_rate") else number
+                    return (
+                        number / 100
+                        if key in ("po_rate", "cost_rate", "target_po_rate", "excel_po_rate")
+                        else number
+                    )
                 if key == "planned" and op == "eq":
                     if text not in ("投入予定", "予定なし", "あり", "なし"):
                         raise ValueError(

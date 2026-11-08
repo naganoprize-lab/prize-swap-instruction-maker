@@ -23,6 +23,14 @@ DEFAULTS = dict(
     sales_high=6000.0,
     default_play_price=100.0,
     po_tolerance=0.20,
+    po_outer_tolerance=0.50,
+    po_score_method="relative_linear",
+    cost_very_high=0.80,
+    sales_percentiles=[0.2, 0.4, 0.6, 0.8],
+    sales_fixed_breaks=[1000.0, 3000.0, 6000.0, 10000.0],
+    radar_sales_method="percentile",
+    radar_age_days=[0, 7, 14, 21, 28, 35],
+    radar_cost_knots=[0.5, 2 / 3, 5 / 6, 1, 7 / 6, 4 / 3],
     aliases={},
     types={},
     tolerance_absolute=2.0,
@@ -54,6 +62,12 @@ def validate_settings(value=None):
             "dashboard_visible",
             "fullscreen_dashboard",
             "radar_po_knots",
+            "po_score_method",
+            "sales_percentiles",
+            "sales_fixed_breaks",
+            "radar_sales_method",
+            "radar_age_days",
+            "radar_cost_knots",
         ):
             continue
         if key == "sales_benchmark" and v is None:
@@ -63,6 +77,54 @@ def validate_settings(value=None):
     for key in ("poor_days", "consider_days", "stale_days", "long_days"):
         if type(s[key]) is not int or s[key] > 100000:
             raise AppError("判定日数は0〜100000の整数で指定してください。")
+    if s["po_score_method"] not in ("relative_linear", "tolerance_linear") or s[
+        "radar_sales_method"
+    ] not in ("percentile", "linear_range"):
+        raise AppError("PO率・売上の評価方式が不正です。")
+    for key, length, limit in [
+        ("sales_percentiles", 4, 1),
+        ("sales_fixed_breaks", 4, 1e12),
+        ("radar_age_days", 6, 100000),
+        ("radar_cost_knots", 6, 20),
+    ]:
+        vs = s[key]
+        if (
+            not isinstance(vs, list)
+            or len(vs) != length
+            or any(
+                type(v) not in (int, float) or not math.isfinite(v) or v < 0 or v > limit
+                for v in vs
+            )
+            or any(a >= b for a, b in zip(vs, vs[1:]))
+        ):
+            raise AppError(f"{key} は昇順の有効な境界を指定してください。")
+    if (
+        s["sales_percentiles"][0] <= 0
+        or s["sales_percentiles"][-1] >= 1
+        or s["radar_age_days"][0] != 0
+        or any(type(v) is not int for v in s["radar_age_days"])
+        or s["radar_cost_knots"][3] != 1
+    ):
+        raise AppError("分位点・投入日数・原価率基準が不正です。")
+    if value and "po_outer_tolerance" not in value:
+        s["po_outer_tolerance"] = max(s["po_outer_tolerance"], s["po_tolerance"] + 0.3)
+    if value and "cost_very_high" not in value:
+        s["cost_very_high"] = max(
+            s["cost_very_high"],
+            (s["cost_high"] + 1) / 2 if s["cost_high"] >= s["cost_very_high"] else 0,
+        )
+    if (
+        not s["po_tolerance"] < s["po_outer_tolerance"] <= 10
+        or not s["cost_high"] <= s["cost_very_high"] <= 1
+    ):
+        raise AppError("PO率の外側許容差・原価率の高すぎる境界が不正です。")
+    if value and "sales_fixed_breaks" not in value and value.get("sales_mode") == "fixed":
+        low, mid, high = s["sales_low"], s["sales_middle"], s["sales_high"]
+        s["sales_fixed_breaks"] = (
+            [low, mid, (mid + high) / 2, high]
+            if low < mid < high
+            else [low, low + (high - low) / 3, low + 2 * (high - low) / 3, high]
+        )
     knots = s["radar_po_knots"]
     if type(s["radar_min_peers"]) is not int or not 3 <= s["radar_min_peers"] <= 10000:
         raise AppError("売上スコアの比較対象は3〜10000台で指定してください。")
@@ -78,7 +140,7 @@ def validate_settings(value=None):
         raise AppError("POスコア境界は7つの昇順倍率（中央は基準の100%）にしてください。")
     if not 0 <= s["po_low"] < s["po_high"] <= 1 or not 0 <= s["po_reference"] <= 1:
         raise AppError("PO率の下限・上限は0〜100%で下限＜上限にしてください。")
-    if not 0 <= s["cost_low"] < s["cost_near"] <= s["cost_target"] <= s["cost_high"] <= 1:
+    if not 0 <= s["cost_low"] < s["cost_near"] <= s["cost_high"] <= 1:
         raise AppError("原価率は低すぎる境界＜低め境界≦目標≦高い境界にしてください。")
     if (
         s["sales_mode"] not in ("benchmark", "fixed", "quantile")

@@ -68,6 +68,7 @@ def run_analysis_checks(floor, output):
                     sales * 0.6,
                 ]
             )
+        sheet.append([None, "P/O率定義", "景品獲得数÷プレイ回数"])
         sheet.append([None, "期間(自)", f"2026/11/0{1 if run==0 else 4}"])
         sheet.append([None, "期間(至)", f"2026/11/0{3 if run==0 else 6}"])
         sheet.append([None, "検索日時: 2026/11/07 18:19:35"])
@@ -85,7 +86,7 @@ def run_analysis_checks(floor, output):
     a = assess(
         floor.machines[0], date(2026, 11, 7), floor.analysis_settings, floor.performance_history
     )
-    assert a["trend"] is None  # Average-sales candidate evaluation is intentionally paused.
+    assert abs(a["trend"] - 0.75) < 1e-8  # Same length, disjoint periods; total sales only.
     raw_trend, raw_sources = comparable_trend(floor.machines[0], floor.performance_history)
     assert abs(raw_trend - 0.75) < 1e-8 and len(raw_sources) == 2  # History is retained.
     before = [asdict(m) for m in floor.machines]
@@ -132,7 +133,7 @@ def run_analysis_checks(floor, output):
         all_visible_during_search=True,
         node_identity_preserved=True,
         history_files=2,
-        trend=None,
+        trend=a["trend"],
         average_history_preserved=True,
         method_groups=3,
         filter_pdf_pages=previews,

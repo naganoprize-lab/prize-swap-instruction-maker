@@ -20,7 +20,7 @@ def test_packaged_smoke_entry_keeps_average_history_but_pauses_its_candidate_eva
     assert not report["physical_printer_tested"]
     analysis = report["integrated_analysis"]
     assert analysis["machines"] == 300 and analysis["history_files"] == 2
-    assert analysis["trend"] is None and analysis["average_history_preserved"]
+    assert abs(analysis["trend"] - 0.75) < 1e-8 and analysis["average_history_preserved"]
     assert analysis["roundtrip"] and analysis["all_visible_during_search"]
     assert set(analysis["filter_pdf_pages"]) == {
         "po_rate",

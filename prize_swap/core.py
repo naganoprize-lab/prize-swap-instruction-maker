@@ -25,9 +25,12 @@ def split_values(value: str) -> list[str]:
 
 
 def machine_numbers(value: str) -> list[str]:
-    result = split_values(value.replace(";", "\n").replace("；", "\n"))
-    if any(not re.fullmatch(r"[0-9]+[左右]?", s) for s in result):
-        raise AppError("マシン番号は半角数字と左右で入力してください（例：20085右）。")
+    import unicodedata
+    from .machine_matching import normalize_number, normalize_reference
+    raw=split_values(unicodedata.normalize("NFKC",value).replace(";", "\n").replace("；", "\n"))
+    result=list(dict.fromkeys(normalize_number(v,allow_bare=True) or normalize_reference(v) or v for v in raw))
+    if any(not re.fullmatch(r"(?:[0-9]+[左右]?|[LR]_\d+)", s) for s in result):
+        raise AppError("マシン番号は数字と左右、または管理ナンバーで入力してください（例：20085右、L_66）。")
     return result
 
 
@@ -86,6 +89,8 @@ class Product:
     planned_booths: dict[str, int | None] = field(default_factory=dict)
     machine_methods: dict[str, str | None] = field(default_factory=dict)
     retired_machine_methods: dict[str, str | None] = field(default_factory=dict)
+
+    candidate_assignment: dict | None = None
 
     @property
     def method_counts(self):
@@ -197,7 +202,9 @@ def load_session(path):
             if "method_counts" in record:
                 record.setdefault("planned_booths", record.pop("method_counts"))
             p = Product(**record)
-            if not isinstance(p.name, str) or not p.name.strip() or not isinstance(p.maker, str):
+            from .candidate_transfer import validate_assignment
+            p.candidate_assignment=validate_assignment(p.candidate_assignment)
+            if not isinstance(p.name, str) or (not p.name.strip() and not p.candidate_assignment) or not isinstance(p.maker, str):
                 raise ValueError("品名・メーカーが不正")
             p.units, p.cases = quantity(p.units), quantity(p.cases)
             if not isinstance(p.machines, list) or any(not isinstance(x, str) for x in p.machines):

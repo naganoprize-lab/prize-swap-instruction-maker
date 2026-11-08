@@ -37,14 +37,14 @@ def sales_score(machine, peers, settings):
     if not r.get("score_comparable") or r.get("sales") is None or n < 2:
         return None, f"同じ集計期間の全台比較：有効{n}台。比較対象不足。"
     if len(set(values)) == 1:
-        return 50.0, f"全{n}台が同額のため中立の状態です。"
-    if n < 4:
-        return None, f"有効{n}台：比較対象不足のため順位で優劣をつけません。"
+        return None, f"全{n}台が同額のため相対比較不可です。"
+    if settings["radar_sales_method"] == "linear_range":
+        score = (r["sales"] - min(values)) / (max(values) - min(values)) * 100
+        return min(100.0, max(0.0, score)), "全台の売上金額の最小〜最大範囲で比較。"
     low = sum(v < r["sales"] for v in values)
     ties = sum(v == r["sales"] for v in values)
-    return (low + (ties - 1) / 2) / (
-        n - 1
-    ) * 100, f"売上金額・同じ集計期間の全{n}台比較（同額は同順位）。"
+    score = (low + (ties - 1) / 2) / (n - 1) * 100
+    return min(100.0, max(0.0, score)), f"売上金額・同じ集計期間の全{n}台比較（同額は同順位）。"
 
 
 def score_record(machine, reference, settings, assignments=None):
@@ -68,9 +68,7 @@ def evaluate(machine, reference, settings=None, peers=(), assignments=None):
     r = score_record(machine, reference, s, assignments)
     sales, comparison = sales_score(r, peers, s)
     target = s["cost_target"]
-    cost_points = list(
-        zip([target * k for k in (0.5, 2 / 3, 5 / 6, 1, 7 / 6, 4 / 3)], [0, 50, 75, 100, 75, 0])
-    )
+    cost_points = list(zip([target * k for k in s["radar_cost_knots"]], [0, 50, 75, 100, 75, 0]))
     from .po_evaluation import evaluate_po
 
     po = evaluate_po(machine, s)
@@ -89,7 +87,7 @@ def evaluate(machine, reference, settings=None, peers=(), assignments=None):
             "days",
             "投入日数",
             (
-                interpolate(age, [(0, 100), (7, 80), (14, 60), (21, 40), (28, 20), (35, 0)])
+                interpolate(age, list(zip(s["radar_age_days"], [100, 80, 60, 40, 20, 0])))
                 if age is not None and age >= 0
                 else None
             ),
@@ -108,18 +106,28 @@ def evaluate(machine, reference, settings=None, peers=(), assignments=None):
             "PO率",
             po["score"],
             f"理論目安 {po_target:.2%}" if po_target is not None else "理論目安：計算不可",
-            po["explanation"] + " / " + po["cost_source"] + " / " + po["price_source"],
+            po["explanation"]
+            + " / "
+            + po["cost_source"]
+            + " / "
+            + po["price_source"]
+            + f' / 目標原価率 {s["cost_target"]:.0%} / 原価 {po["prize_cost"] if po["prize_cost"] is not None else "—"}円 / 1プレイ {po["play_price"] if po["play_price"] is not None else "—"}円'
+            + (
+                f' / 差 {po["deviation_points"]:+.2f}pt'
+                if po["deviation_points"] is not None
+                else " / 差 —"
+            ),
         ),
     ]
     output = []
     for key, label, score, goal, note in specs:
         actual = formatted(key, r[key])
         if key == "sales":
-            actual = "データなし" if r["sales"] is None else f'{formatted("sales",r["sales"])}円'
+            actual = "—" if r["sales"] is None else f'{formatted("sales",r["sales"])}円'
         elif key == "days" and age is not None and age >= 0:
             actual += "日"
         if r[key] is None:
-            actual = "データなし"
+            actual = "—"
         warning = " / ".join(po["warnings"]) if key == "po_rate" else ""
         if key == "cost_rate" and r[key] is not None and r[key] < s["cost_low"]:
             warning = "低原価率・要確認（入替確定ではありません）"

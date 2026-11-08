@@ -11,9 +11,9 @@ def episode(machine):
     return dict(product=machine.product, installed_on=machine.installed_on)
 
 
-def comparable_trend(machine, history):
+def comparable_trend(machine, history, metric="average"):
     overlay = machine.analysis or {}
-    current = overlay.get("values", {}).get("average")
+    current = overlay.get("values", {}).get(metric)
     start, end = overlay.get("period_start"), overlay.get("period_end")
     context = overlay.get("product_context")
     if (
@@ -25,8 +25,13 @@ def comparable_trend(machine, history):
         or not context.get("installed_on")
         or overlay.get("period_source") not in ("excel", "manual")
         or context != episode(machine)
+        or metric == "sales"
+        and start < machine.installed_on
     ):
         return None, []
+    from datetime import date
+
+    span = (date.fromisoformat(end) - date.fromisoformat(start)).days
     candidates = []
     for entry in history:
         if entry.get("deleted"):
@@ -41,7 +46,18 @@ def comparable_trend(machine, history):
             continue
         if prior.get("product_context") != context:
             continue
-        value = prior["values"].get("average")
+        if (
+            metric == "sales"
+            and (date.fromisoformat(stop) - date.fromisoformat(begin)).days != span
+        ):
+            continue
+        if metric == "sales" and (
+            prior.get("operation_context") != overlay.get("operation_context")
+            or overlay.get("operation_context") != machine.operation_method
+            or not machine.operation_method
+        ):
+            continue
+        value = prior["values"].get(metric)
         if value is None or value <= 0:
             continue
         candidates.append((stop, begin, value, snapshot.get("fingerprint", "")))
@@ -92,7 +108,8 @@ def assess(machine, reference, settings=None, history=()):
     from .po_evaluation import evaluate_po
 
     guidance = evaluate_po(machine, s)
-    if guidance["label"] in ("低い", "高い"):
+    po = guidance["actual"]
+    if po is not None and guidance["label"] in ("適正より低い", "適正より高い"):
         reasons.append(f"PO率{po:.2%}：理論目安から{guidance['label']}（原価・料金条件を確認）")
     elif po is not None and guidance["target"] is None:
         reasons.append("PO率の理論目安：原価・料金条件不足で未評価")
@@ -105,11 +122,13 @@ def assess(machine, reference, settings=None, history=()):
     stamp = freshness(overlay, s["stale_days"])
     if "古い" in stamp or "不明" in stamp or "未来" in stamp:
         reasons.append(stamp)
-    trend, sources = None, []
+    trend, sources = comparable_trend(machine, history, "sales")
     if trend is None:
-        reasons.append("売上推移：未評価（平均売上による評価は一時停止中）")
+        reasons.append(
+            "売上推移：未評価（商品・設置日・運営方法が一致する同日数の非重複期間が必要）"
+        )
     elif trend < s["decline_ratio"]:
-        reasons.append("別期間の実績を検出（売上推移の評価は一時停止）")
+        reasons.append("同日数・非重複期間の売上金額が前回より低下しています")
     return dict(
         machine_id=machine_key(machine),
         uid=machine.uid,

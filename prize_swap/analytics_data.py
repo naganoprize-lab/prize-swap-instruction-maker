@@ -28,7 +28,10 @@ NUMERIC = {
     "operating_days": ("稼働日数", "日"),
     "days": ("投入日数", "日"),
     "cost_rate": ("原価率", "比率"),
-    "po_rate": ("PO率", "比率"),
+    "po_rate": ("実際PO率", "比率"),
+    "excel_po_rate": ("Excel P/O率（原値）", "比率"),
+    "target_po_rate": ("適正PO率", "比率"),
+    "po_deviation": ("適正PO率との差", "pt"),
     "gross_profit": ("粗利益", "円"),
     "dispensed": ("払出数", "個"),
     "per_item": ("個当たり", "円"),
@@ -73,7 +76,7 @@ AGGREGATIONS = {
     "weighted": "売上加重平均",
     "recalculate": "合計原価÷合計売上",
 }
-RATIOS = {"ratio", "po_rate", "cost_rate"}
+RATIOS = {"ratio", "po_rate", "cost_rate", "excel_po_rate", "target_po_rate"}
 
 
 def normalized(value):
@@ -83,7 +86,7 @@ def normalized(value):
 def formatted(key, value):
     if value is None:
         return "—"
-    if key in ("cost_rate", "po_rate"):
+    if key in ("cost_rate", "po_rate", "excel_po_rate", "target_po_rate"):
         return f"{value:.2%}"
     if key == "ratio":
         return f"{value:,.1f}%"
@@ -113,14 +116,17 @@ def machine_record(machine, reference, settings, assignments=None, history=None)
         method=m.operation_method.strip() or "未設定",
         installed_on=m.installed_on,
         planned=bool((assignments or {}).get(machine_key(m))),
-        assessment=assess(m, reference, settings, history or [])["status"],
         match_method=MATCH_LABELS[m.match_method],
         period=period_key(m),
         loaded_at=(m.analysis or {}).get("loaded_at") or m.layout_loaded_at,
         extracted_at=(m.analysis or {}).get("extracted_at"),
         source_file=(m.analysis or {}).get("file_name") or "売り場レイアウト",
         updated_at=machine_updated_at(m),
-        sources={k: metric_info(m, k) for k in NUMERIC if k != "days"},
+        sources={
+            k: metric_info(m, k)
+            for k in NUMERIC
+            if k not in ("days", "excel_po_rate", "target_po_rate", "po_deviation")
+        },
     )
     record["sources"]["days"] = dict(
         value=record["days"],
@@ -129,6 +135,8 @@ def machine_record(machine, reference, settings, assignments=None, history=None)
         updated_at=m.manual_updates.get("installed_on", ""),
     )
     record["period_text"] = period_label(record["period"])
+    for key in ("excel_po_rate", "target_po_rate", "po_deviation"):
+        record["sources"][key] = dict(value=None, source="計算前", updated_at="")
     record["metric_periods"] = {
         key: (
             record["period"]
@@ -141,6 +149,36 @@ def machine_record(machine, reference, settings, assignments=None, history=None)
     from .sales_evaluation import cohort
 
     record["po_guidance"] = evaluate_po(m, settings)
+    po = record["po_guidance"]
+    record.update(
+        po_rate=po["actual"],
+        excel_po_rate=po["raw_actual"],
+        target_po_rate=po["target"],
+        po_deviation=po["deviation_points"],
+    )
+    for key, value in [
+        ("po_rate", po["actual"]),
+        ("excel_po_rate", po["raw_actual"]),
+        ("target_po_rate", po["target"]),
+        ("po_deviation", po["deviation_points"]),
+    ]:
+        record["sources"][key] = dict(
+            value=value,
+            source=(
+                po["actual_source"]
+                if key == "po_rate"
+                else (
+                    "Excel P/O率原値（定義別）"
+                    if key == "excel_po_rate"
+                    else po["cost_source"] + " / " + po["price_source"]
+                )
+            ),
+            updated_at=record["updated_at"],
+        )
+        record["metric_periods"][key] = record["period"] if m.analysis else (None, None, "layout")
+
+    record["assessment_detail"] = assess(m, reference, settings, history or [])
+    record["assessment"] = record["assessment_detail"]["status"]
     record["sales_cohort"] = cohort(m)
     return record
 
@@ -207,29 +245,13 @@ def bucket(r, axis, settings):
     if axis == "po_bin":
         return r.get("po_guidance", {}).get("label", "計算不可")
     if axis == "cost_bin":
-        return (
-            "低すぎる・要確認"
-            if value < settings["cost_low"]
-            else (
-                "低め"
-                if value < settings["cost_near"]
-                else "目標付近" if value <= settings["cost_high"] else "高い"
-            )
-        )
+        from .analysis_bands import cost_band
+
+        return cost_band(value, settings)[1]
     if axis == "days_bin":
-        return (
-            "投入予定"
-            if value < 0
-            else (
-                "0〜6日"
-                if value < 7
-                else (
-                    "7〜13日"
-                    if value < 14
-                    else "14〜20日" if value < 21 else "21〜27日" if value < 28 else "28日以上"
-                )
-            )
-        )
+        from .analysis_bands import age_band
+
+        return age_band(value)[1]
     from .sales_evaluation import classify
 
     bounds = settings.get("_sales_record_bounds", {}).get(r.get("sales_cohort"))
@@ -254,9 +276,9 @@ def aggregate(records, axis, metric, operation, settings, stack=None, population
     settings = settings | {
         "_sales_record_bounds": {
             k: (
-                quartiles(v)
+                quartiles(v, settings["sales_percentiles"])
                 if settings["sales_mode"] != "fixed"
-                else [settings[t] for t in ("sales_low", "sales_middle", "sales_high")]
+                else settings["sales_fixed_breaks"]
             )
             for k, v in sales_groups.items()
         }
@@ -357,6 +379,9 @@ class AnalyticsService:
                     repr(m.manual_updates),
                     m.prize_cost,
                     m.prize_cost_product,
+                    m.prize_cost_origin,
+                    m.po_definition,
+                    m.po_definition_fingerprint,
                     repr(m.play_pricing),
                     m.average,
                     m.sales,
@@ -446,7 +471,7 @@ class AnalyticsService:
         return self.cache[key]
 
 
-def history_series(owner, records, metric="average"):
+def history_series(owner, records, metric="sales"):
     """Only confirmed, disjoint periods and the same known product/method episode."""
     selected = {r["uid"] for r in records}
     machines = [m for m in owner.machines if m.uid in selected]
@@ -481,6 +506,26 @@ def history_series(owner, records, metric="average"):
             ):
                 continue
             value = r["values"].get(metric)
+            if metric in ("po_rate", "target_po_rate", "po_deviation", "excel_po_rate"):
+                draft = deepcopy(m)
+                draft.analysis = dict(
+                    values=r["values"],
+                    po_inputs=r.get("po_inputs", {}),
+                    po_definition=s.get("po_definition", "unknown"),
+                    fingerprint=s.get("fingerprint", ""),
+                    product_context=r.get("product_context"),
+                )
+                from .po_evaluation import evaluate_po
+
+                info = evaluate_po(draft, owner.analysis_settings)
+                value = info[
+                    {
+                        "po_rate": "actual",
+                        "target_po_rate": "target",
+                        "po_deviation": "deviation_points",
+                        "excel_po_rate": "raw_actual",
+                    }[metric]
+                ]
             if value is not None:
                 eligible.append((start, end, value, s))
         accepted = []
@@ -542,6 +587,15 @@ def validate_ui_state(value=None):
         detail_size=[1120, 800],
         overview_chart="horizontal",
         overview_methods=False,
+        tile_order=[
+            "ratio_bin",
+            "sales_bin",
+            "po_bin",
+            "cost_bin",
+            "days_bin",
+            "machine_type",
+            "method",
+        ],
         suspended_average_conditions=[],
     )
     if value is None:
@@ -549,6 +603,12 @@ def validate_ui_state(value=None):
     if not isinstance(value, dict) or set(value) - set(defaults):
         raise AppError("分析画面の保存形式が不正です。")
     s = defaults | deepcopy(value)
+    if (
+        not isinstance(s["tile_order"], list)
+        or len(s["tile_order"]) != 7
+        or set(s["tile_order"]) != set(defaults["tile_order"])
+    ):
+        raise AppError("分布タイルの表示順が不正です。")
     if "sort" not in value:
         s["sort"] = "descending" if s["descending"] else "ascending"
     if (
@@ -602,7 +662,10 @@ def validate_ui_state(value=None):
         or any(type(v) is not int or not 300 <= v <= 8000 for v in s["detail_size"])
     ):
         raise AppError("詳細画面サイズが不正です。")
-    if not isinstance(s["suspended_average_conditions"], list) or len(s["suspended_average_conditions"]) > 50:
+    if (
+        not isinstance(s["suspended_average_conditions"], list)
+        or len(s["suspended_average_conditions"]) > 50
+    ):
         raise AppError("休止中の分析条件が不正です。")
     if not isinstance(s["conditions"], list) or len(s["conditions"]) > 50:
         raise AppError("絞り込み条件は50件までです。")

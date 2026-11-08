@@ -436,7 +436,8 @@ class Window(QMainWindow):
                 "instructions": "入替指示書",
                 "floor": "売り場レイアウト",
                 "labels": "入荷ラベル",
-                "dashboard": "ダッシュボード",
+                "dashboard": "ホーム",
+                "arrivals": "入荷予定",
                 "settings": "設定",
                 "analysis": "売上分析",
                 "candidates": "入替候補",
@@ -631,7 +632,7 @@ class Window(QMainWindow):
             for r in range(self.proxy.rowCount())
         ]
         for p in products:
-            p.included = included
+            p.included = included and bool(p.name.strip())
         if products:
             self.mark_dirty()
             self.refresh()
@@ -668,6 +669,8 @@ class Window(QMainWindow):
                 )
 
     def print_products(self):
+        if any(p.included and not p.name.strip() for p in self.visible):
+            raise AppError("下書きの新しい商品名を入力してから印刷してください。")
         self.table.setFocus()
         if not any(p.included for p in self.visible):
             raise AppError("選択日に出力対象の商品がありません。")
@@ -975,5 +978,6 @@ def main():
     app.setApplicationName("PrizeSwapInstructionMaker")
     app.setStyle("Fusion")
     window = Window()
+    window.tabs.setCurrentWidget(window.dashboard_page)
     window.show()
     sys.exit(app.exec())

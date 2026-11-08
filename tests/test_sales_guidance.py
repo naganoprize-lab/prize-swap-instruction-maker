@@ -17,8 +17,8 @@ def test_sales_total_quartiles_zero_ties_missing_and_periods():
     colors = [
         filter_status(m, "sales_metric", DAY, settings=s | {"_sales_bounds": b})[0] for m in ms
     ]
-    assert colors == ["#F4A6A6", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#94D8A0", "#B8BEC6"]
-    assert "100円" in filter_legend("sales_metric", s, b)
+    assert colors == ["#F4A6A6", "#F8C88A", "#F3F4F6", "#94D8A0", "#FFE16A", "#AEB7C2"]
+    assert "80円" in filter_legend("sales_metric", s, b)
     for values in [[0], [0, 1], [2, 2, 2, 2], [0, 0, 10, 10]]:
         group = [Machine(sales=v) for v in values]
         bounds = sales_boundaries(group, s)
@@ -26,8 +26,8 @@ def test_sales_total_quartiles_zero_ties_missing_and_periods():
             filter_status(m, "sales_metric", DAY, settings=s | {"_sales_bounds": bounds})[0]
             for m in group
         ]
-        if len(values) < 4 or len(set(values)) == 1:
-            assert set(colors) == {"#FFFFFF"}
+        if len(set(values)) == 1:
+            assert set(colors) == {"#F3F4F6"}
         assert len(set((v, c) for v, c in zip(values, colors))) == len(set(values))
     ms[0].analysis = {
         "values": {"sales": 10000},
@@ -36,7 +36,7 @@ def test_sales_total_quartiles_zero_ties_missing_and_periods():
     }
     b = sales_boundaries(ms, s)
     assert (
-        filter_status(ms[0], "sales_metric", DAY, settings=s | {"_sales_bounds": b})[0] == "#FFFFFF"
+        filter_status(ms[0], "sales_metric", DAY, settings=s | {"_sales_bounds": b})[0] == "#F3F4F6"
     )
 
 
@@ -162,7 +162,8 @@ def test_discount_pricing_cost_priority_and_source_context():
     g = evaluate_po(m, validate_settings())
     assert g["target"] == pytest.approx(500 / 6 * 0.6 / 270)
     m.unit_price = 1000
-    assert evaluate_po(m, validate_settings())["cost_source"] == "レイアウト：景品単価"
+    assert "手動修正" in evaluate_po(m, validate_settings())["cost_source"]
+    assert evaluate_po(m, validate_settings())["prize_cost"] == 270
     m.analysis = {
         "values": {"unit_price": 500, "po_rate": 0.1},
         "product_context": {"product": "旧商品", "installed_on": None},
@@ -206,10 +207,10 @@ def test_sales_small_cohort_unrated_and_all_equal_neutral():
     s = validate_settings()
     ms = [Machine(sales=v) for v in [0, 100]]
     peers = [score_record(m, DAY, s) for m in ms]
-    assert evaluate(ms[0], DAY, s, peers)[1]["score"] is None
+    assert evaluate(ms[0], DAY, s, peers)[1]["score"] == 0
     ms[1].sales = 0
     peers = [score_record(m, DAY, s) for m in ms]
-    assert evaluate(ms[0], DAY, s, peers)[1]["score"] == 50
+    assert evaluate(ms[0], DAY, s, peers)[1]["score"] is None
 
 
 @pytest.mark.parametrize("amount,count", [("100%", 1), (None, 3)])

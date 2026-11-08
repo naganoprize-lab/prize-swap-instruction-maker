@@ -60,6 +60,9 @@ class Machine:
     prize_cost: float | None = None
     prize_cost_product: str = ""
     play_pricing: dict | None = None
+    prize_cost_origin: str = "manual"
+    po_definition: str = "prize_per_play"
+    po_definition_fingerprint: str = ""
 
     def __post_init__(self):
         if isinstance(self.installed_on, (date, datetime)):
@@ -155,6 +158,13 @@ def validate_machines(records):
             from .po_evaluation import validate_pricing, positive
 
             validate_pricing(m.play_pricing)
+            from .po_evaluation import validate_definition
+
+            validate_definition(m.po_definition)
+            if m.prize_cost_origin not in ("manual", "product_suffix") or not isinstance(
+                m.po_definition_fingerprint, str
+            ):
+                raise ValueError("原価・PO率の取得元が不正です")
             if m.prize_cost is not None and not positive(m.prize_cost):
                 raise ValueError("確認原価は正の金額で指定してください")
             if not isinstance(m.prize_cost_product, str):

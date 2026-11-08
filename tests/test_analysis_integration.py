@@ -99,17 +99,17 @@ def test_tolerance_and_legacy_snapshot_migration(tmp_path):
     "key,value,color",
     [
         ("po_rate", 0, "#8FC5F4"),
-        ("po_rate", 0.03999, "#8FC5F4"),
+        ("po_rate", 0.03999, "#C5E2FA"),
         ("po_rate", 0.04, "#94D8A0"),
         ("po_rate", 0.06, "#94D8A0"),
-        ("po_rate", 0.06001, "#F4A6A6"),
+        ("po_rate", 0.06001, "#F7C2C2"),
         ("po_rate", None, "#B8BEC6"),
         ("cost_rate", 0.3999, "#8FC5F4"),
         ("cost_rate", 0.4, "#C5E2FA"),
         ("cost_rate", 0.4999, "#C5E2FA"),
         ("cost_rate", 0.5, "#94D8A0"),
         ("cost_rate", 0.7, "#94D8A0"),
-        ("cost_rate", 0.7001, "#F4A6A6"),
+        ("cost_rate", 0.7001, "#F8C88A"),
         ("cost_rate", None, "#B8BEC6"),
     ],
 )
@@ -126,11 +126,11 @@ def test_sales_benchmark_is_independent_and_no_implicit_reference():
     from prize_swap.analysis_settings import validate_settings
 
     m = Machine(average=500, ratio=200)
-    assert filter_status(m, "sales_metric", date.today())[0] == "#B8BEC6"
+    assert filter_status(m, "sales_metric", date.today())[0] == "#AEB7C2"
     s = validate_settings(
         {"sales_mode": "fixed", "sales_low": 500, "sales_middle": 1000, "sales_high": 2000}
     )
-    for sales, color in [(499, "#F4A6A6"), (500, "#FFFFFF"), (1000, "#FFFFFF"), (2000, "#94D8A0")]:
+    for sales, color in [(499, "#F4A6A6"), (500, "#F8C88A"), (1000, "#F3F4F6"), (2000, "#FFE16A")]:
         m.sales = sales
         m.average = 999999  # Retained field never determines the sales color.
         assert filter_status(m, "sales_metric", date.today(), settings=s)[0] == color

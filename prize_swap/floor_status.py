@@ -80,15 +80,10 @@ def filter_status(machine, mode, reference, planned=False, priority=False, setti
                 + ("（仮設定料金）" if po["provisional"] else "")
             )
         elif mode == "cost_rate" and value is not None:
-            colour = (
-                "#8FC5F4"
-                if value < settings["cost_low"]
-                else (
-                    "#C5E2FA"
-                    if value < settings["cost_near"]
-                    else "#94D8A0" if value <= settings["cost_high"] else "#F4A6A6"
-                )
-            )
+            from .analysis_bands import cost_band
+
+            colour, category = cost_band(value, settings)
+            label += " / " + category
             if value < settings["cost_low"]:
                 label += " / 原価率要確認"
         elif mode == "sales_metric":
@@ -139,9 +134,13 @@ def filter_legend(mode, settings=None, sales_bounds=None):
         "planned": "青：投入予定地／白：投入予定なし／黄枠：優先入替",
         "age": "紫：設置10日以上／白：10日未満・未来／灰：設置日不明",
         "po_rate": f"原価・料金・目標原価率{s['cost_target']:.0%}から理論目安を計算／許容偏差±{s['po_tolerance']:.0%}／青：低い／緑：適正／赤：高い／灰：計算不可（仮設定を含む目安）",
-        "cost_rate": f"青：{s['cost_low']:.0%}未満（要確認）／薄青：{s['cost_near']:.0%}未満／緑：{s['cost_high']:.0%}以下／赤：超過／目標 {s['cost_target']:.0%}／灰：不明",
+        "cost_rate": f"青：{s['cost_low']:.0%}未満（要確認）／薄青：{s['cost_near']:.0%}未満／緑：{s['cost_high']:.0%}以下／橙：{s['cost_very_high']:.0%}以下／赤：超過／目標 {s['cost_target']:.0%}／灰：不明",
         "sales_metric": "売上金額・全台比較（異なる期間は分離）／"
-        + ("固定金額" if s["sales_mode"] == "fixed" else "上位25%：緑／中位50%：白／下位25%：赤")
+        + (
+            "固定金額"
+            if s["sales_mode"] == "fixed"
+            else "全台の売上金額・5段階（赤／薄橙／白／緑／黄）"
+        )
         + "／"
         + boundary_legend(sales_bounds, s["sales_mode"]),
         "machine_type": "機種ごとの固定色（略称と枠線でも識別）／灰：不明 "
@@ -154,7 +153,21 @@ def metric_text(machine, key, reference, settings=None):
     from .analysis_settings import machine_type, type_style
 
     if key in ("po_rate", "cost_rate"):
-        value = effective_stat(machine, key)
+        if key == "po_rate":
+            from .po_evaluation import evaluate_po
+            from .analysis_settings import validate_settings
+
+            po = evaluate_po(
+                machine,
+                validate_settings(
+                    {k: v for k, v in (settings or {}).items() if k != "_sales_bounds"}
+                ),
+            )
+            if po["actual"] is None and po["raw_actual"] is not None:
+                return f'Excel P/O {po["raw_actual"]:.2%}（{ "定義未確認" if po["definition"]=="unknown" else "別定義" }）'
+            value = po["actual"]
+        else:
+            value = effective_stat(machine, key)
         return ("PO率 " if key == "po_rate" else "原価率 ") + (
             "—" if value is None else f"{value*100:.1f}%"
         )

@@ -1,7 +1,7 @@
 """Current-file total-sales cohorts; no average-sales or invented benchmark."""
 
 import math
-from statistics import quantiles
+from .analysis_bands import SALES_LABELS, SALES_COLORS, UNKNOWN
 from .floor_status import effective_stat
 
 
@@ -26,14 +26,22 @@ class NeutralBounds(list):
     pass
 
 
-def quartiles(values):
+def quartiles(values, percentiles=None):
+    # Kept as the legacy function entry; default now has four quintile boundaries.
     values = sorted(v for v in values if type(v) in (int, float) and math.isfinite(v) and v >= 0)
     if not values:
         return None
-    # Interpolated inclusive quartiles; tied values always receive the same label.
-    if len(values) < 4 or values[0] == values[-1]:
-        return NeutralBounds([values[0], values[len(values) // 2], values[-1]])
-    return list(quantiles(values, n=4, method="inclusive"))
+    ps = percentiles or [0.2, 0.4, 0.6, 0.8]
+    if len(values) < 2 or values[0] == values[-1]:
+        return NeutralBounds([values[0]] * 4)
+
+    def percentile(p):
+        index = (len(values) - 1) * p
+        lo = int(index)
+        hi = min(len(values) - 1, lo + 1)
+        return values[lo] + (values[hi] - values[lo]) * (index - lo)
+
+    return [percentile(p) for p in ps]
 
 
 class SalesBounds(list):
@@ -47,42 +55,27 @@ class SalesBounds(list):
 
 def boundaries(machines, settings):
     if settings["sales_mode"] == "fixed":
-        return [settings[k] for k in ("sales_low", "sales_middle", "sales_high")]
+        return list(settings["sales_fixed_breaks"])
     groups = {}
     for m in machines:
         v = effective_stat(m, "sales")
         if type(v) in (int, float) and math.isfinite(v) and v >= 0:
             groups.setdefault(cohort(m), []).append(v)
-    return SalesBounds({k: quartiles(v) for k, v in groups.items()})
+    return SalesBounds({k: quartiles(v, settings["sales_percentiles"]) for k, v in groups.items()})
 
 
 def classify(value, bounds, mode="quantile"):
     if value is None or not math.isfinite(value) or value < 0:
-        return "#B8BEC6", "不明：売上データなし"
-    if not bounds or len(bounds) != 3:
-        return "#FFFFFF", "標準：比較対象不足"
-    low, middle, high = bounds
-    if isinstance(bounds, NeutralBounds) and mode != "fixed":
-        return "#FFFFFF", "標準：同額または比較対象不足"
-    if mode != "fixed":
-        if low == middle or middle == high:
-            # All-equal/small/tied quartile edge: avoid creating artificial winners/losers.
-            if low == high:
-                return "#FFFFFF", "標準：同額または比較対象不足"
-        return (
-            ("#F4A6A6", "低売上：下位25%")
-            if value < low
-            else (
-                ("#94D8A0", "高売上：上位25%")
-                if value > high
-                else ("#FFFFFF", "標準：中位50%（境界同額を含む）")
-            )
-        )
-    return (
-        ("#F4A6A6", "低売上")
-        if value < low
-        else (("#94D8A0", "高売上") if value >= high else ("#FFFFFF", "標準"))
-    )
+        return UNKNOWN, "不明：売上データなし"
+    if not bounds:
+        return SALES_COLORS[2], "中程度：比較対象不足"
+    if isinstance(bounds, NeutralBounds) or len(set(bounds)) == 1 and mode != "fixed":
+        return SALES_COLORS[2], "同額：同額のため相対比較不可"
+    # bisect_right assigns every identical amount to the same band, including tied cutoffs.
+    from bisect import bisect_right
+
+    i = min(4, bisect_right(bounds, value))
+    return SALES_COLORS[i], SALES_LABELS[i]
 
 
 def machine_sales_status(machine, settings, bounds):
@@ -101,7 +94,16 @@ def boundary_legend(bounds, mode="quantile"):
         bounds = next(iter(bounds.groups.values()), None)
     if not bounds:
         return "有効な売上金額なし"
-    low, middle, high = (f"{v:,.2f}".rstrip("0").rstrip(".") for v in bounds)
-    if isinstance(bounds, NeutralBounds) or bounds[0] == bounds[2]:
-        return f"同額・比較対象不足：{low}〜{high}円／標準（白）"
-    return f'低売上 < {low}円（赤）／標準 {low}円以上〜{high}円{"未満" if mode == "fixed" else "以下"}（白）／高売上 {">=" if mode == "fixed" else ">"} {high}円（緑）／不明（灰）'
+    if isinstance(bounds, NeutralBounds):
+        return f"同額のため相対比較不可：{bounds[0]:,.2f}円（中程度の単一色）"
+    amounts = [f"{v:,.2f}".rstrip("0").rstrip(".") for v in bounds]
+    ranges = (
+        [f"{amounts[0]}円未満"]
+        + [f"{a}円以上〜{b}円未満" for a, b in zip(amounts, amounts[1:])]
+        + [f"{amounts[-1]}円以上"]
+    )
+    return (
+        "売上金額の相対的な高さ（利益・良否の評価ではありません）／"
+        + "／".join(f"{label}：{span}" for label, span in zip(SALES_LABELS, ranges))
+        + "／不明：データなし"
+    )

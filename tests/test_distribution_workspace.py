@@ -81,8 +81,10 @@ def test_distribution_counts_ids_and_explicit_unknowns():
         assert sorted(uid for r in d["rows"] for uid in r["uids"]) == sorted(m.uid for m in ms)
     d = distribution(records, "sales_bin", s)
     assert {r["label"]: r["value"] for r in d["rows"]} == {
+        "特に高売上": 1,
         "高売上": 1,
-        "標準": 3,
+        "中程度": 1,
+        "やや低売上": 1,
         "低売上": 1,
         "不明": 1,
     }
@@ -232,7 +234,7 @@ def test_valid_recent_install_is_observation_not_missing_data(window):
     )
     a = assess(m, DAY)
     assert a["status"] == "判定保留" and a["trend"] is None
-    assert any("一時停止" in r for r in a["reasons"]) and not any(
+    assert any("未評価" in r for r in a["reasons"]) and not any(
         "履歴不足" in r for r in a["reasons"]
     )
     p = window.candidate_page

@@ -94,6 +94,7 @@ def run(output):
                         cost,
                     ]
                 )
+            sheet.append([None, "P/O率定義", "景品獲得数÷プレイ回数"])
             sheet.append([None, "期間(自)", f"2026/11/0{1+period_index*3}"])
             sheet.append([None, "期間(至)", f"2026/11/0{3+period_index*3}"])
             sheet.append([None, "検索日時: 2026/11/07 18:19:35"])
@@ -112,6 +113,51 @@ def run(output):
         window.show()
         window.tabs.setCurrentWidget(f)
         QTest.qWait(50)
+        # Home and shared selection are rendered at each CI DPI and in the packaged EXE.
+        from PySide6.QtGui import QMouseEvent
+
+        for theme in ("light", "dark"):
+            manager().set_mode(theme, persist=False)
+            window.tabs.setCurrentWidget(window.dashboard_page)
+            window.dashboard_page.refresh()
+            app.processEvents()
+            assert len(window.dashboard_page.tiles) == 8
+            assert window.dashboard_page.cards["total"].value.text() == "300"
+            window.grab().save(str(output / f"{theme}-home.png"))
+        manager().set_mode("light", persist=False)
+        window.tabs.setCurrentWidget(f)
+        f.set_zoom(100)
+        f.view.centerOn(350, 160)
+        app.processEvents()
+        f.selection_state.set_mode("range")
+        start = f.view.mapFromScene(QPointF(1, 1))
+        stop = f.view.mapFromScene(QPointF(470, 150))
+        QTest.mousePress(f.view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        move = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(stop),
+            QPointF(f.view.viewport().mapToGlobal(stop)),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        app.sendEvent(f.view.viewport(), move)
+        QTest.mouseRelease(f.view.viewport(), Qt.MouseButton.LeftButton, pos=stop)
+        assert f.selection_state.selected_machine_keys == {m.uid for m in f.machines[:2]}
+        window.navigation.activate("analysis")
+        p.refresh()
+        app.processEvents()
+        assert len(p.records) == 2 and p.selection_scope.currentData() == "selection"
+        assert sum(r["value"] for r in p.distributions.cards["sales_bin"][2].rows) == 2
+        window.grab().save(str(output / "selection-analysis.png"))
+        p.selection_scope.setCurrentIndex(0)
+        p.refresh()
+        assert len(p.records) == 300
+        f.selection_state.set([])
+        f.selection_state.set_mode("normal")
+        window.tabs.setCurrentWidget(f)
+        report["shared_selection_analysis"] = True
+        report["home_tiles"] = 8
         f.set_zoom(125)
         f.floor_search.setText("CHECK29")
         app.processEvents()
@@ -161,6 +207,33 @@ def run(output):
         assert c.table.rowCount() == 300
         window.grab().save(str(output / "replacement-candidates.png"))
         report["candidates_embedded"] = True
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QMessageBox
+
+        def confirm_draft():
+            boxes = [
+                widget
+                for widget in app.topLevelWidgets()
+                if isinstance(widget, QMessageBox) and widget.isVisible()
+            ]
+            assert len(boxes) == 1
+            assert "新規追加" in boxes[0].text()
+            boxes[0].button(QMessageBox.StandardButton.Yes).click()
+
+        QTimer.singleShot(30, confirm_draft)
+        result = c.add_to_instructions(uids={m.uid for m in f.machines[:3]})
+        assert result["added"] == 3 and len(window.products) == 3
+        assert all(
+            not product.name and not product.included and product.machines
+            for product in window.products
+        )
+        window.grab().save(str(output / "candidate-instruction-drafts.png"))
+        QTimer.singleShot(30, confirm_draft)
+        result = c.add_to_instructions(uids={m.uid for m in f.machines[:3]})
+        assert result["added"] == 0 and result["skipped"] == 3
+        f.history.undo()
+        assert not window.products
+        report["candidate_instruction_bulk"] = True
         window.navigation.buttons["analysis"].click()
         app.processEvents()
 

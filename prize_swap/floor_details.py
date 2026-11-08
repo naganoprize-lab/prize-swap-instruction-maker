@@ -111,7 +111,7 @@ class ProductPanel(QWidget):
         )
 
     def validate(self):
-        if not self.name.toPlainText().strip():
+        if not self.name.toPlainText().strip() and not self.draft.candidate_assignment:
             raise AppError("入替予定商品の商品名を入力してください。")
         self.draft.name = self.name.toPlainText().strip()
         self.draft.maker = self.maker.text().strip()
@@ -133,6 +133,8 @@ class ProductPanel(QWidget):
             "retired_machine_methods",
         ):
             setattr(self.source, field, deepcopy(getattr(self.draft, field)))
+        if self.source.candidate_assignment:
+            self.source.candidate_assignment["replacement_product_name"] = self.source.name
 
 
 class MachineDetailDialog(QDialog):
@@ -149,6 +151,11 @@ class MachineDetailDialog(QDialog):
             min(size[1], max(300, available.height() - 50)),
         )
         outer = QVBoxLayout(self)
+        self.shared_selection = QCheckBox("このマシンを選択（売上分析の選択対象と共通）")
+        self.shared_selection.setChecked(machine.uid in owner.selection_state.selected_machine_keys)
+        self.shared_selection.toggled.connect(self.toggle_shared_selection)
+        owner.selection_state.changed.connect(self.refresh_shared_selection)
+        outer.addWidget(self.shared_selection)
         tabs = QTabWidget()
         outer.addWidget(tabs, 1)
         scroll = QScrollArea()
@@ -258,6 +265,16 @@ class MachineDetailDialog(QDialog):
         from .po_evaluation import evaluate_po
 
         po = evaluate_po(machine, owner.analysis_settings)
+        from .po_evaluation import PO_DEFINITIONS, po_definition
+
+        self.po_definition = QComboBox()
+        for key, title in PO_DEFINITIONS.items():
+            self.po_definition.addItem(title, key)
+        self.po_definition.setCurrentIndex(self.po_definition.findData(po_definition(machine)))
+        form.addRow("このマシンのP/O率の定義", self.po_definition)
+        self.po_summary = QLabel()
+        self.po_summary.setWordWrap(True)
+        form.addRow("適正PO率との比較", self.po_summary)
         self.po_origin = QLabel()
         self.po_origin.setWordWrap(True)
         form.addRow("原価・料金の取得元", self.po_origin)
@@ -286,6 +303,8 @@ class MachineDetailDialog(QDialog):
                 == QMessageBox.StandardButton.Yes
             ):
                 self.confirmed_cost.setValue(candidate)
+                self.updated.prize_cost_origin = "product_suffix"
+                self.refresh_po_inputs()
 
         self.cost_candidate_button.clicked.connect(confirm_candidate)
         self.play_amount = QDoubleSpinBox()
@@ -367,9 +386,28 @@ class MachineDetailDialog(QDialog):
         for control in (self.confirmed_cost, self.play_amount, self.play_count):
             control.valueChanged.connect(self.refresh_po_inputs)
         self.price_confirmed.toggled.connect(self.refresh_po_inputs)
+        self.po_definition.currentIndexChanged.connect(self.change_po_definition)
+        self.confirmed_cost.valueChanged.connect(
+            lambda *_: setattr(self.updated, "prize_cost_origin", "manual")
+        )
         self.name.textChanged.connect(self.po_product_changed)
         self.refresh_po_inputs()
         self.update_responsive_layout()
+
+    def toggle_shared_selection(self, checked):
+        keys = set(self.owner.selection_state.selected_machine_keys)
+        if checked:
+            keys.add(self.original.uid)
+        else:
+            keys.discard(self.original.uid)
+        self.owner.selection_state.set(keys)
+
+    def refresh_shared_selection(self):
+        self.shared_selection.blockSignals(True)
+        self.shared_selection.setChecked(
+            self.original.uid in self.owner.selection_state.selected_machine_keys
+        )
+        self.shared_selection.blockSignals(False)
 
     def refresh_overview(self, *_):
         from .detail_widgets import refresh_overview
@@ -447,7 +485,7 @@ class MachineDetailDialog(QDialog):
             ):
                 self.values[key].setText(missing(value))
             for key in NUMERIC:
-                if key not in ("ratio", "days"):
+                if key not in ("ratio", "days") and key in self.values:
                     self.values[key].setText(formatted(key, effective_stat(draft, key)))
                     info = metric_info(draft, key)
                     self.values[key].setToolTip(
@@ -460,6 +498,13 @@ class MachineDetailDialog(QDialog):
         self.confirmed_cost.blockSignals(True)
         self.confirmed_cost.setValue(0)
         self.confirmed_cost.blockSignals(False)
+        self.refresh_po_inputs()
+
+    def change_po_definition(self, *_):
+        self.updated.po_definition = self.po_definition.currentData()
+        self.updated.po_definition_fingerprint = (self.updated.analysis or {}).get(
+            "fingerprint", ""
+        )
         self.refresh_po_inputs()
 
     def refresh_po_inputs(self, *_):
@@ -479,6 +524,22 @@ class MachineDetailDialog(QDialog):
         from .po_evaluation import evaluate_po
 
         po = evaluate_po(self.updated, self.owner.analysis_settings)
+        from .analytics_data import formatted
+
+        self.values["po_rate"].setText(formatted("po_rate", po["actual"]))
+        self.po_summary.setText(
+            "実際PO率："
+            + formatted("po_rate", po["actual"])
+            + " ／ 適正PO率："
+            + formatted("po_rate", po["target"])
+            + (
+                f" ／ 差 {po['deviation_points']:+.2f}pt"
+                if po["deviation_points"] is not None
+                else " ／ 差 —"
+            )
+            + f"\n目標原価率：{self.owner.analysis_settings['cost_target']:.1%} ／ Excel P/O原値："
+            + formatted("po_rate", po["raw_actual"])
+        )
         self.po_origin.setText(
             po["cost_source"]
             + " / "

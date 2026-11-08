@@ -128,9 +128,13 @@ class FloorDashboard(QWidget):
         o = self.owner
         self.groups = distribution(o.machines)
         data = import_summary(o.machines, o.analysis_state)
+        from .candidate_page import candidate_key
+
+        excluded = o.candidate_ui["exclusions"]
         candidates = sum(
             assess(m, o.reference_day(), o.analysis_settings)["status"] in ("要確認", "入替検討")
             for m in o.machines
+            if candidate_key(m) not in excluded
         )
         plans = sum(bool(o.assignments().get(machine_key(m))) for m in o.machines)
         self.metrics = dict(

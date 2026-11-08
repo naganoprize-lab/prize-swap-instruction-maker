@@ -19,6 +19,11 @@ def period_key(machine):
 
 
 def totals(machines, settings=None, type_filter="", method_filter=""):
+    from .po_evaluation import evaluate_po
+
+    def stat(m, key):
+        return evaluate_po(m, settings)["actual"] if key == "po_rate" else effective_stat(m, key)
+
     groups = defaultdict(list)
     for m in machines:
         kind = machine_type(m, settings)
@@ -32,14 +37,14 @@ def totals(machines, settings=None, type_filter="", method_filter=""):
     for (period, method), group in sorted(groups.items(), key=lambda item: str(item[0])):
 
         def values(key):
-            return [effective_stat(m, key) for m in group]
+            return [stat(m, key) for m in group]
 
         def total(key):
             vals = [v for v in values(key) if v is not None]
             return sum(vals) if vals else None
 
         def weighted(key):
-            pairs = [(effective_stat(m, key), effective_stat(m, "sales")) for m in group]
+            pairs = [(stat(m, key), effective_stat(m, "sales")) for m in group]
             pairs = [(v, s) for v, s in pairs if v is not None and s is not None and s > 0]
             denominator = sum(s for _, s in pairs)
             return (

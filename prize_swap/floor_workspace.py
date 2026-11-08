@@ -116,6 +116,10 @@ class FullscreenHost(QDialog):
         self.buttons["close"] = close
         self.clear_analysis.setVisible(floor.analysis_highlight_uids is not None)
         layout.addWidget(self.toolbar)
+        from .selection import selection_controls
+
+        self.selection_toolbar = selection_controls(floor)
+        layout.addWidget(self.selection_toolbar)
         layout.addWidget(floor, 1)
         floor.show()
         self.resize(self.screen().availableGeometry().size())
@@ -617,7 +621,7 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
             self.message.emit("マシンを選択してください。")
 
     def open_details(self, uid):
-        if self._detail_open or not self.isVisible():
+        if self._detail_open:
             return
         from .floor_details import MachineDetailDialog, DetailCommand
 

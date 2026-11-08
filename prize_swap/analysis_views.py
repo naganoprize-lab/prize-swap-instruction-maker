@@ -196,6 +196,22 @@ def propose_assignments(owner, numbers, parent=None):
     if not ok:
         return False
     product = products[labels.index(label)]
+    conflicts = [
+        (p.name, sorted(set(p.machines) & set(numbers)))
+        for p in products
+        if p is not product and set(p.machines) & set(numbers)
+    ]
+    if conflicts:
+        QMessageBox.warning(
+            parent or owner,
+            "投入予定の重複",
+            "他の商品に割当済みです。商品一覧で確認・解除してから追加してください。\n"
+            + "\n".join(name + "：" + "、".join(ids) for name, ids in conflicts),
+        )
+        return False
+    if set(numbers) <= set(product.machines):
+        owner.message.emit("選択マシンはこの商品に登録済みです。")
+        return False
     if (
         QMessageBox.question(
             parent or owner,
@@ -271,6 +287,7 @@ class MethodAnalysisPanel(QWidget):
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
+        self.target_uids = None
         self.build(owner)
 
     def build(self, owner):
@@ -317,7 +334,14 @@ class MethodAnalysisPanel(QWidget):
         def refresh():
             nonlocal table
             records = totals(
-                owner.machines, owner.analysis_settings, kinds.currentData(), methods.currentData()
+                [
+                    m
+                    for m in owner.machines
+                    if self.target_uids is None or m.uid in self.target_uids
+                ],
+                owner.analysis_settings,
+                kinds.currentData(),
+                methods.currentData(),
             )
             rows = []
             for r in records:

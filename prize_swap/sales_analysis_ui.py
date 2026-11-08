@@ -43,12 +43,16 @@ class SalesAnalysisMixin:
 
         matches = resolve_matches(self.machines, snapshot["records"])
         by_number = {matches[m.uid].number: m for m in self.machines if matches[m.uid].matched}
+        if existing and snapshot.get("po_definition", "unknown") == "unknown":
+            snapshot["po_definition"] = existing.get("po_definition", "unknown")
         for number, record in snapshot["records"].items():
             if existing:
                 record["product_context"] = deepcopy(
                     existing["records"].get(number, {}).get("product_context")
                 )
-                record["operation_context"] = existing["records"].get(number, {}).get("operation_context")
+                record["operation_context"] = (
+                    existing["records"].get(number, {}).get("operation_context")
+                )
             elif number in by_number:
                 record["product_context"] = episode(by_number[number])
                 record["operation_context"] = by_number[number].operation_method

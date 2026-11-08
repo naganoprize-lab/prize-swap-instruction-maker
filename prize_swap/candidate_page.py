@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from datetime import datetime, timezone
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QEvent, QItemSelectionModel
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import (
     QWidget,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QMenu,
+    QToolButton,
 )
 from .analysis_views import make_table, ValueItem, propose_assignments
 from .analytics_page import fill_table
@@ -102,6 +103,35 @@ class CandidatePage(QWidget):
         )
         note.setWordWrap(True)
         outer.addWidget(note)
+        bulk = QHBoxLayout()
+        outer.addLayout(bulk)
+        self.transfer_buttons = {}
+        for title, statuses in [
+            ("選択候補を追加", None),
+            ("要確認を一括追加", {"要確認"}),
+            ("入替検討を一括追加", {"入替検討"}),
+        ]:
+            b = QPushButton(title)
+            b.clicked.connect(lambda checked=False, s=statuses: self.add_to_instructions(s))
+            bulk.addWidget(b)
+            self.transfer_buttons[title] = b
+        menu_button = QToolButton()
+        menu_button.setText("一括追加")
+        menu = QMenu(menu_button)
+        for title, statuses in [
+            ("要確認", {"要確認"}),
+            ("入替検討", {"入替検討"}),
+            ("要確認＋入替検討", {"要確認", "入替検討"}),
+            ("現在選択中の候補", None),
+        ]:
+            menu.addAction(title, lambda checked=False, s=statuses: self.add_to_instructions(s))
+        menu_button.setMenu(menu)
+        menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        bulk.addWidget(menu_button)
+        open_button = QPushButton("入替指示書を開く")
+        open_button.clicked.connect(lambda: window.tabs.setCurrentWidget(window.instruction_page))
+        bulk.addWidget(open_button)
+        self._syncing_selection = False
         row = QHBoxLayout()
         outer.addLayout(row)
         self.search = QLineEdit()
@@ -119,6 +149,10 @@ class CandidatePage(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.context_menu)
         self.table.cellClicked.connect(lambda *_: self.highlight(False))
+        self.table.itemChanged.connect(self.checked_changed)
+        self.table.viewport().installEventFilter(self)
+        self.table.selectionModel().selectionChanged.connect(self.table_selection_changed)
+        self.owner.selection_state.changed.connect(self.sync_selection_widgets)
         self.table.cellDoubleClicked.connect(lambda *_: self.open_detail())
         actions = QHBoxLayout()
         outer.addLayout(actions)
@@ -158,10 +192,53 @@ class CandidatePage(QWidget):
         self.refresh()
 
     def selected_uids(self):
-        return [
-            self.table.item(i.row(), 0).data(Qt.ItemDataRole.UserRole)[0]
-            for i in self.table.selectionModel().selectedRows()
-        ]
+        return list(self.owner.selection_state.selected_machine_keys)
+
+    def eventFilter(self, obj, event):
+        if (
+            obj is self.table.viewport()
+            and event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            index = self.table.indexAt(event.position().toPoint())
+            if index.isValid() and index.column() == 0:
+                ids = self.table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole)
+                keys = set(self.selected_uids())
+                keys.symmetric_difference_update(ids)
+                self.owner.selection_state.set(keys)
+                return True
+        return super().eventFilter(obj, event)
+
+    def table_selection_changed(self, *_):
+        if self._building or self._syncing_selection:
+            return
+        visible = {
+            self.table.item(i, 0).data(Qt.ItemDataRole.UserRole)[0]
+            for i in range(self.table.rowCount())
+        }
+        selected = {
+            self.table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole)[0]
+            for index in self.table.selectionModel().selectedRows()
+        }
+        self.owner.selection_state.set((set(self.selected_uids()) - visible) | selected)
+
+    def sync_selection_widgets(self):
+        if self._building or self._syncing_selection:
+            return
+        self._syncing_selection = True
+        keys = self.owner.selection_state.selected_machine_keys
+        self.table.clearSelection()
+        for i in range(self.table.rowCount()):
+            item = self.table.item(i, 0)
+            uid = item.data(Qt.ItemDataRole.UserRole)[0]
+            item.setCheckState(Qt.CheckState.Checked if uid in keys else Qt.CheckState.Unchecked)
+            if uid in keys:
+                self.table.selectionModel().select(
+                    self.table.model().index(i, 0),
+                    QItemSelectionModel.SelectionFlag.Select
+                    | QItemSelectionModel.SelectionFlag.Rows,
+                )
+        self._syncing_selection = False
 
     def selected_machines(self):
         ids = set(self.selected_uids())
@@ -188,6 +265,9 @@ class CandidatePage(QWidget):
         self._building = True
         s = self.owner.candidate_ui
         selection = set(self.selected_uids())
+        from .candidate_transfer import registered_ids
+
+        added_ids = registered_ids(self.owner)
         rs = self.owner.analytics.records()
         byuid = {r["uid"]: r for r in rs}
         for control, key, label, values in (
@@ -233,7 +313,8 @@ class CandidatePage(QWidget):
                     counts[status] += 1
                 if planned:
                     counts["入替予定登録済み"] += 1
-            shown = "除外" if excluded else "入替予定登録済み" if planned else status
+            added = m.uid in added_ids
+            shown = "除外" if excluded else "入替予定登録済み" if planned or added else status
             reason = " / ".join(a["reasons"])
             if excluded:
                 reason = f'除外理由：{excluded["reason"]} / ' + reason
@@ -274,8 +355,8 @@ class CandidatePage(QWidget):
                     (formatted("cost_rate", r["cost_rate"]), r["cost_rate"]),
                     (formatted("days", r["days"]), r["days"]),
                     reason,
-                    shown,
-                    "詳細 / 配置 / 登録 / 除外",
+                    "✓ 追加済み" if added else shown,
+                    "指示書へ追加",
                 ]
             )
             identities.append(m.uid)
@@ -300,6 +381,18 @@ class CandidatePage(QWidget):
         )
         for i, (uid, color) in enumerate(zip(identities, colors)):
             self.table.item(i, 0).setData(Qt.ItemDataRole.UserRole, [uid])
+            self.table.item(i, 0).setFlags(
+                self.table.item(i, 0).flags() | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            self.table.item(i, 0).setCheckState(
+                Qt.CheckState.Checked
+                if uid in self.owner.selection_state.selected_machine_keys
+                else Qt.CheckState.Unchecked
+            )
+            add = QPushButton("✓ 追加済み" if uid in added_ids else "指示書へ追加")
+            add.setEnabled(uid not in added_ids)
+            add.clicked.connect(lambda checked=False, u=uid: self.add_to_instructions(uids={u}))
+            self.table.setCellWidget(i, 11, add)
             for j in (0, 10):
                 self.table.item(i, j).setBackground(QBrush(QColor(analysis_color(color))))
                 self.table.item(i, j).setForeground(
@@ -330,6 +423,48 @@ class CandidatePage(QWidget):
         )
         self._building = False
 
+    def checked_changed(self, item):
+        if self._building or self._syncing_selection or item.column() != 0:
+            return
+        ids = item.data(Qt.ItemDataRole.UserRole)
+        if not ids:
+            return
+        keys = set(self.selected_uids())
+        if item.checkState() == Qt.CheckState.Checked:
+            keys.update(ids)
+        else:
+            keys.difference_update(ids)
+        self.owner.selection_state.set(keys)
+
+    def add_to_instructions(self, statuses=None, uids=None):
+        from .candidate_transfer import transfer
+
+        if uids is None:
+            if statuses is None:
+                uids = set(self.selected_uids())
+            else:
+                records = self.owner.analytics.records()
+                uids = {r["uid"] for r in records if r["assessment"] in statuses}
+                uids -= {
+                    m.uid
+                    for m in self.owner.machines
+                    if candidate_key(m) in self.owner.candidate_ui["exclusions"]
+                }
+        machines = [m for m in self.owner.machines if m.uid in uids]
+        result = transfer(
+            self.owner,
+            machines,
+            self,
+            category="＋".join(sorted(statuses)) if statuses else "選択候補",
+        )
+        if result["cancelled"]:
+            return result
+        self.refresh()
+        self.summary.setText(
+            f"入替指示書に{result['added']}台追加しました。追加済みのためスキップ：{result['skipped']}台 ／ 機械番号未取得：{result['missing_number']}台 ／ エラー：{result['errors']}台"
+        )
+        return result
+
     def highlight(self, activate=True):
         ids = self.selected_uids()
         if not ids:
@@ -342,10 +477,7 @@ class CandidatePage(QWidget):
     def open_detail(self):
         selected = self.selected_machines()
         if selected:
-            from .floor_details import MachineDetailDialog
-
-            d = MachineDetailDialog(self.owner, selected[0])
-            d.exec()
+            self.owner.open_details(selected[0].uid)
             self.refresh()
 
     def register(self):

@@ -139,38 +139,81 @@ class DashboardPage(QScrollArea):
         self.updated.setWordWrap(True)
         box.addWidget(self.updated)
         layout.addWidget(info)
-        chart = QFrame()
-        chart.setObjectName("card")
-        c = QVBoxLayout(chart)
-        title = QLabel("アベ比分布")
-        title.setObjectName("section")
-        c.addWidget(title)
-        hint = QLabel(
-            "割合は不明を含む全管理ブースが分母です。区分をクリックすると配置を保って対象を強調します。"
-        )
-        hint.setObjectName("muted")
-        hint.setWordWrap(True)
-        c.addWidget(hint)
-        self.bars = RatioBars()
-        self.bars.activated.connect(self.locate)
-        c.addWidget(self.bars, 1)
-        layout.addWidget(chart, 1)
-        row = QHBoxLayout()
-        layout.addLayout(row)
-        for text, callback in [
-            ("売上分析Excel読込", window.floor.import_analysis_dialog),
-            ("管理ナンバー照合", window.floor.show_matching),
-            ("入替候補を確認", window.floor.show_candidates),
-            ("売り場レイアウトを開く", lambda: window.tabs.setCurrentWidget(window.floor)),
+        title = QLabel("プライズ景品 入替指示書メーカー")
+        title.setObjectName("pageTitle")
+        layout.insertWidget(0, title)
+        note = QLabel("売り場の管理・分析・入替指示をまとめて行えます。")
+        note.setObjectName("muted")
+        layout.insertWidget(1, note)
+        self.feature_grid = QGridLayout()
+        self.feature_grid.setSpacing(9)
+        layout.addLayout(self.feature_grid)
+        self.tiles = {}
+        for key, name, description, icon in [
+            ("floor", "売り場レイアウト", "マシン配置と稼働状況を確認", "floor"),
+            ("analysis", "売上分析", "全台の売上・アベ比・原価率を分析", "chart"),
+            ("candidates", "入替候補", "確認が必要なマシンと判定理由", "file"),
+            ("instructions", "入替指示書", "商品・予定ブース数・割当を編集", "file"),
+            ("arrivals", "入荷予定", "登録済み商品の予定日と一覧を確認", "file"),
+            ("matching", "データ照合", "管理ナンバーと実績の対応を確認", "file"),
+            ("labels", "入荷ラベル", "商品名ラベルの枚数・印刷", "file"),
+            ("settings", "設定", "テーマ・目標原価率・分析基準", "settings"),
         ]:
-            b = QPushButton(text)
-            b.clicked.connect(callback)
-            row.addWidget(b)
+            button = QToolButton()
+            button.setText(name + "\n" + description)
+            button.setIcon(line_icon(icon))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            button.setMinimumHeight(92)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.clicked.connect(lambda checked=False, k=key: window.navigation.activate(k))
+            self.tiles[key] = button
+        self.bars = RatioBars()
+        self.bars.setFixedHeight(240)
+        self.bars.activated.connect(self.locate)
+        self.bars.hide()
+        summary = QPushButton("アベ比分布の概要を表示")
+        summary.setCheckable(True)
+        summary.toggled.connect(self.bars.setVisible)
+        layout.addWidget(summary)
+        layout.addWidget(self.bars)
+        import_button = QPushButton("売上分析Excel読込")
+        import_button.clicked.connect(window.floor.import_analysis_dialog)
+        layout.addWidget(import_button)
+        layout.addStretch()
+        manager().changed.connect(self.refresh_tile_icons)
+        self.reflow()
+
+    def refresh_tile_icons(self, *_):
+        for key, button in self.tiles.items():
+            button.setIcon(
+                line_icon(
+                    "floor"
+                    if key == "floor"
+                    else (
+                        "chart"
+                        if key == "analysis"
+                        else "settings" if key == "settings" else "file"
+                    )
+                )
+            )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "tiles"):
+            self.reflow()
+
+    def reflow(self):
+        cols = 3 if self.viewport().width() >= 1100 else 2 if self.viewport().width() >= 650 else 1
+        if getattr(self, "_tile_columns", None) == cols:
+            return
+        self._tile_columns = cols
+        for i, button in enumerate(self.tiles.values()):
+            self.feature_grid.removeWidget(button)
+            self.feature_grid.addWidget(button, i // cols, i % cols)
 
     def refresh(self):
         floor = self.window.floor
-        if not hasattr(floor.dashboard, "metrics"):
-            floor.dashboard.refresh()
+        floor.dashboard.refresh()
         for key, card in self.cards.items():
             card.set_value(floor.dashboard.metrics[key])
         self.period.setText(period_text(floor.analysis_state))
@@ -249,12 +292,13 @@ class Navigation(QWidget):
         layout.setContentsMargins(6, 8, 6, 6)
         layout.setSpacing(5)
         for key, label, icon in [
-            ("dashboard", "ダッシュボード", "dashboard"),
+            ("dashboard", "ホーム", "dashboard"),
             ("floor", "売り場レイアウト", "floor"),
             ("instructions", "入替指示書", "file"),
             ("candidates", "入替候補", "file"),
             ("analysis", "売上分析", "chart"),
             ("matching", "データ照合", "file"),
+            ("arrivals", "入荷予定", "file"),
             ("labels", "入荷ラベル", "file"),
             ("settings", "設定", "settings"),
         ]:
@@ -274,6 +318,7 @@ class Navigation(QWidget):
                     "settings",
                     "analysis",
                     "candidates",
+                    "arrivals",
                 )
             )
             b.clicked.connect(lambda checked=False, k=key: self.activate(k))
@@ -336,10 +381,11 @@ class Navigation(QWidget):
 
 
 def build_shell(window, outer, header, footer):
+    window.selection_state = window.floor.selection_state
     window.instruction_page = window.tabs.widget(0)
     window.dashboard_page = DashboardPage(window)
     window.settings_page = SettingsPage(window)
-    window.tabs.addTab(window.dashboard_page, "ダッシュボード")
+    window.tabs.addTab(window.dashboard_page, "ホーム")
     window.tabs.addTab(window.settings_page, "設定")
     from .analytics_page import SalesPage
 
@@ -351,6 +397,10 @@ def build_shell(window, outer, header, footer):
     window.candidate_page = CandidatePage(window)
     window.floor.candidate_page = window.candidate_page
     window.tabs.addTab(window.candidate_page, "入替候補")
+    from .arrivals_page import ArrivalsPage
+
+    window.arrivals_page = ArrivalsPage(window)
+    window.tabs.addTab(window.arrivals_page, "入荷予定")
     window.pages = {
         "instructions": window.instruction_page,
         "floor": window.floor,
@@ -359,6 +409,7 @@ def build_shell(window, outer, header, footer):
         "settings": window.settings_page,
         "analysis": window.analysis_page,
         "candidates": window.candidate_page,
+        "arrivals": window.arrivals_page,
     }
     window.tabs.tabBar().hide()
     body = QWidget()
