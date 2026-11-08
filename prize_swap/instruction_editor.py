@@ -241,6 +241,11 @@ class InstructionEditorMixin:
         edit.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         controls.addWidget(edit)
         self.instruction_edit_button = edit
+        from PySide6.QtWidgets import QPushButton
+
+        self.work_set_button = QPushButton("作業指示セット印刷")
+        self.work_set_button.clicked.connect(self.show_work_set)
+        controls.addWidget(self.work_set_button)
         self.table.installEventFilter(self)
         self.table.viewport().installEventFilter(self)
         self.instruction_autosave_path = self.floor.storage.with_name(

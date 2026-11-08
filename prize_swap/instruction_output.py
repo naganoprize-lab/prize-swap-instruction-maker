@@ -26,31 +26,48 @@ def validate_options(value=None):
     return s
 
 
+def validate_job(value):
+    keys = {"include_instruction", "include_map", "include_checklist"}
+    if (
+        not isinstance(value, dict)
+        or set(value) != keys
+        or any(type(v) is not bool for v in value.values())
+        or not any(value.values())
+    ):
+        raise AppError("出力する書類を1種類以上選択してください。")
+    return dict(value)
+
+
 @dataclass
 class OutputPlan:
     instruction: object
     mapping: object
     pages: list
     base_layout: object
+    checklist: object = None
 
     @property
     def reason(self):
-        return " / ".join(p.reason for p in (self.instruction, self.mapping) if p)
+        return " / ".join(p.reason for p in (self.instruction, self.mapping, self.checklist) if p)
 
     def page_layout(self, index):
         kind, n = self.pages[index]
-        return (
-            self.base_layout
-            if kind == "instructions"
-            else map_layout(self.mapping.paper, self.mapping.pages[n].orientation)
-        )
+        if kind == "instructions":
+            return self.base_layout
+        if kind == "checklist":
+            return self.checklist.layout
+        return map_layout(self.mapping.paper, self.mapping.pages[n].orientation)
 
     def draw(self, painter, index, day):
         kind, n = self.pages[index]
         if kind == "instructions":
             draw_page(painter, self.instruction, n, day)
-        else:
+        elif kind == "map":
             draw_map_page(painter, self.mapping, n)
+        else:
+            from .work_checklist import draw_checklist_page
+
+            draw_checklist_page(painter, self.checklist, n)
 
 
 def output_plan(
@@ -63,12 +80,14 @@ def output_plan(
     layout="column",
     mode="auto",
     options=None,
+    job_config=None,
 ):
     s = validate_options(options)
+    job = validate_job(job_config) if job_config is not None else None
     area = printer.pageRect(QPrinter.Unit.Point)
     p = (
         plan_pages(products, area.width(), area.height(), rows, layout, mode)
-        if s["mode"] != "map"
+        if (job["include_instruction"] if job else s["mode"] != "map")
         else None
     )
     mapping = (
@@ -79,15 +98,21 @@ def output_plan(
             day,
             s["paper"],
             s["orientation"],
-            all_entries=s["all_entries"] and s["mode"] == "map",
+            all_entries=s["all_entries"] and s["mode"] == "map" and job is None,
         )
-        if s["mode"] != "instructions"
+        if (job["include_map"] if job else s["mode"] != "instructions")
         else None
     )
     pages = [("instructions", i) for i in range(len(p.pages) if p else 0)] + [
         ("map", i) for i in range(len(mapping.pages) if mapping else 0)
     ]
-    return OutputPlan(p, mapping, pages, QPageLayout(printer.pageLayout()))
+    checklist = None
+    if job and job["include_checklist"]:
+        from .work_checklist import checklist_plan
+
+        checklist = checklist_plan(products, machines, references, day)
+        pages += [("checklist", i) for i in range(len(checklist.pages))]
+    return OutputPlan(p, mapping, pages, QPageLayout(printer.pageLayout()), checklist)
 
 
 def render_output(
@@ -100,11 +125,14 @@ def render_output(
     layout="column",
     mode="auto",
     options=None,
+    job_config=None,
 ):
     s = validate_options(options)
-    if s["mode"] == "instructions":
+    if s["mode"] == "instructions" and job_config is None:
         return render_document(printer, products, day, rows, layout, mode)
-    plan = output_plan(printer, products, machines, references, day, rows, layout, mode, s)
+    plan = output_plan(
+        printer, products, machines, references, day, rows, layout, mode, s, job_config
+    )
     if printer.outputFormat() != QPrinter.OutputFormat.PdfFormat:
         from PySide6.QtPrintSupport import QPrinterInfo
 

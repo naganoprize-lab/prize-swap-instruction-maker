@@ -118,7 +118,10 @@ class ProductFilter(QSortFilterProxyModel):
 from .instruction_editor import InstructionEditorMixin
 
 
-class Window(InstructionEditorMixin, QMainWindow):
+from .work_set_ui import WorkSetMixin
+
+
+class Window(WorkSetMixin, InstructionEditorMixin, QMainWindow):
     def __init__(self, layout_storage=None):
         super().__init__()
         self.setWindowTitle("プライズ景品 入替指示書メーカー")
@@ -550,6 +553,13 @@ class Window(InstructionEditorMixin, QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if hasattr(self, "work_set_button"):
+            self.work_set_button.setText(
+                "作業セット" if self.width() < 1300 else "作業指示セット印刷"
+            )
+            self.work_set_button.setToolTip(
+                "作業指示セット印刷：指示書・入替予定地図・チェックリスト"
+            )
         if hasattr(self, "navigation") and not self.navigation.manual:
             self.navigation.set_compact(self.width() < 1280)
 

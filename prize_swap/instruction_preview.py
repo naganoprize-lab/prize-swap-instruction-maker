@@ -19,10 +19,11 @@ from .printing import configured_printer, save_rendered_pdf
 
 
 class InstructionPreview(QDialog):
-    def __init__(self, owner, map_page=None):
+    def __init__(self, owner, map_page=None, job_config=None):
         super().__init__(owner)
         self.owner = owner
         self.map_page = map_page
+        self.job_config = job_config
         self.runtime = TemporaryDirectory(prefix="prize-instruction-preview-")
         self.path = Path(self.runtime.name) / "preview.pdf"
         self.setWindowTitle("指示書・入替予定地図の印刷プレビュー")
@@ -41,6 +42,10 @@ class InstructionPreview(QDialog):
         self.scope.setCurrentIndex(
             self.scope.findData(owner.floor.instruction_print_options["mode"])
         )
+        if job_config is not None:
+            self.scope.addItem("作業指示セット", "workset")
+            self.scope.setCurrentIndex(self.scope.findData("workset"))
+            self.scope.setEnabled(False)
         if map_page:
             self.scope.setCurrentIndex(self.scope.findData("map"))
             self.scope.setEnabled(False)
@@ -74,10 +79,18 @@ class InstructionPreview(QDialog):
         buttons = QHBoxLayout()
         outer.addLayout(buttons)
         save = QPushButton("PDF保存")
-        save.clicked.connect(map_page.export_pdf if map_page else owner.export_pdf)
+        save.clicked.connect(
+            (lambda: owner.export_work_set(job_config))
+            if job_config is not None
+            else map_page.export_pdf if map_page else owner.export_pdf
+        )
         buttons.addWidget(save)
         direct = QPushButton("直接印刷")
-        direct.clicked.connect(map_page.print_direct if map_page else owner.print_direct)
+        direct.clicked.connect(
+            (lambda: owner.print_work_set(job_config))
+            if job_config is not None
+            else map_page.print_direct if map_page else owner.print_direct
+        )
         buttons.addWidget(direct)
         close = QPushButton("閉じる")
         close.clicked.connect(self.accept)
@@ -89,7 +102,7 @@ class InstructionPreview(QDialog):
     def refresh(self, *_):
         o = self.owner
         s = o.floor.instruction_print_options
-        if self.map_page is None:
+        if self.map_page is None and self.job_config is None:
             s["mode"] = self.scope.currentData()
         s.update(
             paper=self.paper.currentText(),
@@ -104,7 +117,11 @@ class InstructionPreview(QDialog):
             self.map_page.load_options()
         o.floor.schedule_save()
         self.document.close()
-        render = self.map_page.render if self.map_page else o.paint_printer
+        render = (
+            (lambda printer: o.render_work_set(printer, self.job_config))
+            if self.job_config is not None
+            else self.map_page.render if self.map_page else o.paint_printer
+        )
         plan = save_rendered_pdf(self.path, lambda temp: render(configured_printer(temp)))
         self.document.load(str(self.path))
         self.info.setText(plan.reason)
