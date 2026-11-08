@@ -75,6 +75,7 @@ class DetailDockController:
         self.panel = None
         self._restoring = False
         self._saving = False
+        self._context = None
         self.host = DetailHost(owner)
         self.host.controller = self
         self.host.setWindowFlags(Qt.WindowType.Widget)
@@ -249,6 +250,7 @@ class DetailDockController:
             self.panel.rejected.connect(self.cancel)
         elif self.panel.original.uid != uid or not self.panel.is_dirty():
             self.panel.load_machine(machine)
+        self._context = self.calculation_context()
         self.owner.capture_view(False)
         self.owner.detail_settings["machine_uid"] = uid
         was_hidden = self.dock.isHidden()
@@ -320,12 +322,24 @@ class DetailDockController:
         finally:
             self._saving = False
 
+    def calculation_context(self):
+        return deepcopy(self.owner.analysis_settings), self.owner.reference_day()
+
     def refresh_current(self, *_):
         if self._saving or self._restoring or self.panel is None:
             return
         machine = next((m for m in self.owner.machines if m.uid == self.panel.original.uid), None)
-        if machine and asdict(machine) != asdict(self.panel.baseline) and not self.panel.is_dirty():
+        context = self.calculation_context()
+        if (
+            machine
+            and (asdict(machine) != asdict(self.panel.baseline) or context != self._context)
+            and not self.panel.is_dirty()
+        ):
+            self._context = context
             self.panel.load_machine(machine)
+        elif machine and context != self._context:
+            self._context = context
+            self.panel.refresh_po_inputs()
 
     def restore(self):
         s = deepcopy(self.owner.detail_settings)

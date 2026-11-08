@@ -151,3 +151,16 @@ def test_opening_existing_unassigned_instruction_does_not_create_dirty_edits(win
     p = w.floor.detail_controller.panel
     assert p.products and not p.is_dirty()
     assert w.floor.detail_controller.dock.close()
+
+
+def test_target_changes_refresh_existing_panel_without_discarding_cost_draft(window):
+    w=window;f=w.floor;c=f.detail_controller
+    f.open_details(f.machines[0].uid);p=c.panel
+    p.confirmed_cost.setValue(300)
+    before=p.radar.axes[4]["score"]
+    f.analysis_settings["cost_target"]=.5
+    f.changed.emit()
+    assert c.panel is p and p.confirmed_cost.value()==300 and p.is_dirty()
+    assert p.radar.axes[4]["score"] != before
+    assert "50.0%" in p.po_summary.text()
+    p.load_machine(f.machines[0])

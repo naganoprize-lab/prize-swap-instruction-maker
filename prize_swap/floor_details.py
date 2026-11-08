@@ -312,6 +312,7 @@ class MachineDetailPanel(QWidget):
                 )
                 == QMessageBox.StandardButton.Yes
             ):
+                self._cost_was_edited = True
                 self.confirmed_cost.setValue(candidate)
                 self.updated.prize_cost_origin = "product_suffix"
                 self.refresh_po_inputs()
