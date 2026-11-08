@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from math import ceil, sqrt
 from PySide6.QtCore import QRectF, Qt, QMarginsF
-from PySide6.QtGui import QPageLayout, QPageSize, QColor, QPen
+from PySide6.QtGui import QPageLayout, QPageSize, QColor, QPen, QFontMetricsF
 from .instructions import booths
 from .instruction_badges import draw_badge
 from .fonts import print_font
@@ -27,6 +27,7 @@ class MapPage:
     bounds: QRectF
     orientation: str
     unresolved: list = None
+    context: list = None
 
 
 @dataclass
@@ -61,7 +62,7 @@ def map_bounds(groups):
     rect = QRectF()
     for g in groups:
         rect = rect.united(g.rect)
-    pad = max(8, min(rect.width(), rect.height()) * 0.035)
+    pad = max(15, max((max(g.rect.width(), g.rect.height()) for g in groups), default=40) * 0.65)
     return rect.adjusted(-pad, -pad, pad, pad)
 
 
@@ -109,10 +110,13 @@ def plan_map(
     orientation="auto",
     all_entries=False,
     min_number_size=11,
+    context=True,
+    settings=None,
+    entries=None,
 ):
     if orientation not in ("auto", "portrait", "landscape") or not 7 <= min_number_size <= 40:
         raise AppError("地図の印刷設定が不正です。")
-    entries = booths(products, machines, references, all_entries)
+    entries = booths(products, machines, references, all_entries) if entries is None else entries
     groups = grouped_booths(entries)
     pages = []
     if orientation == "auto":
@@ -165,7 +169,22 @@ def plan_map(
         )
     if not pages:
         pages = [MapPage([], QRectF(), orientation if orientation != "auto" else "portrait", [])]
-    return MapPlan(pages, paper, day, entries, min_number_size)
+    if context:
+        targets = {g.machine.uid for g in groups}
+        for page in pages:
+            page.context = (
+                [
+                    m
+                    for m in machines
+                    if m.uid not in targets
+                    and page.bounds.intersects(QRectF(m.x, m.y, m.width, m.height))
+                ]
+                if page.groups
+                else []
+            )
+    plan = MapPlan(pages, paper, day, entries, min_number_size)
+    plan.settings = settings or {}
+    return plan
 
 
 def marker_rects(rect, count):
@@ -182,6 +201,41 @@ def marker_rects(rect, count):
         )
         for i in range(count)
     ]
+
+
+def draw_context_card(painter, rect, machine, settings=None, screen=False):
+    from .machine_matching import display_identity
+    from .analysis_settings import machine_type, type_style
+    from .theme import manager
+
+    dark = screen and manager().dark
+    background = "#475569" if dark else "#B8C6D8" if screen else "#E2E8F0"
+    ink = "#F1F5F9" if dark else "#1F2937"
+    painter.save()
+    painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)
+    painter.setBrush(QColor(background))
+    painter.setPen(QPen(QColor("#94A3B8" if dark else "#64748B"), 1))
+    painter.drawRect(rect)
+    painter.setPen(QColor(ink))
+    size = max(5, min(14 if screen else 10, rect.width() * 0.075, rect.height() * 0.23))
+    font = print_font(size)
+    painter.setFont(font)
+    name = machine_type(machine, settings)
+    labels = [
+        display_identity(machine),
+        type_style(name, settings)["short"] if name else "機種不明",
+    ]
+    inset = max(1, min(5, rect.width() * 0.03))
+    area = rect.adjusted(inset, inset, -inset, -inset)
+    metrics = QFontMetricsF(font, painter.device())
+    for i, label in enumerate(labels):
+        line = QRectF(area.x(), area.y() + i * area.height() / 2, area.width(), area.height() / 2)
+        painter.drawText(
+            line,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            metrics.elidedText(label, Qt.TextElideMode.ElideRight, area.width()),
+        )
+    painter.restore()
 
 
 def draw_map_card(painter, rect, group, selected=None):
@@ -212,6 +266,20 @@ def draw_map_page(painter, plan, index):
         scale = min(area.width() / page.bounds.width(), area.height() / page.bounds.height())
         x = area.x() + (area.width() - page.bounds.width() * scale) / 2 - page.bounds.x() * scale
         y = area.y() + (area.height() - page.bounds.height() * scale) / 2 - page.bounds.y() * scale
+        painter.save()
+        painter.setClipRect(area, Qt.ClipOperation.IntersectClip)
+        for machine in page.context or []:
+            draw_context_card(
+                painter,
+                QRectF(
+                    x + machine.x * scale,
+                    y + machine.y * scale,
+                    machine.width * scale,
+                    machine.height * scale,
+                ),
+                machine,
+                getattr(plan, "settings", None),
+            )
         for group in page.groups:
             r = group.rect
             draw_map_card(
@@ -219,6 +287,7 @@ def draw_map_page(painter, plan, index):
                 QRectF(x + r.x() * scale, y + r.y() * scale, r.width() * scale, r.height() * scale),
                 group,
             )
+        painter.restore()
     else:
         painter.setFont(print_font(11))
         painter.drawText(0, 45, "位置未特定（架空の配置は作成しません）")

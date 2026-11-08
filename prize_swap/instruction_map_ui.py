@@ -34,6 +34,8 @@ from .instruction_map import (
     plan_map,
     map_layout,
     draw_map_page,
+    draw_context_card,
+    map_bounds,
 )
 from .instruction_output import validate_options
 from .printing import configured_printer, render_pages, save_rendered_pdf
@@ -73,6 +75,36 @@ class MapItem(QGraphicsItem):
         event.accept()
 
 
+class ContextMapItem(QGraphicsItem):
+    def __init__(self, page, machine):
+        super().__init__()
+        self.page = page
+        self.machine = machine
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.setZValue(-1)
+        self.setPos(machine.x, machine.y)
+        from .machine_matching import display_identity
+        from .analysis_settings import machine_type
+
+        self.setToolTip(
+            display_identity(machine)
+            + " / "
+            + machine_type(machine, page.owner.floor.analysis_settings)
+        )
+
+    def boundingRect(self):
+        return QRectF(0, 0, self.machine.width, self.machine.height)
+
+    def paint(self, painter, option, widget=None):
+        draw_context_card(
+            painter,
+            self.boundingRect(),
+            self.machine,
+            self.page.owner.floor.analysis_settings,
+            screen=True,
+        )
+
+
 class MapView(QGraphicsView):
     def wheelEvent(self, event):
         scale = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
@@ -86,6 +118,8 @@ class InstructionMapPage(QWidget):
         self.owner = window
         self.selected_entries = set()
         self.items = {}
+        self.context_items = {}
+        self.target_bounds = QRectF()
         self._building = False
         self.entries = []
         outer = QVBoxLayout(self)
@@ -101,7 +135,10 @@ class InstructionMapPage(QWidget):
         tools.addWidget(self.orientation)
         self.all_entries = QCheckBox("全登録指示")
         tools.addWidget(self.all_entries)
-        self.context = QCheckBox("周辺を薄く表示")
+        self.context = QCheckBox("周辺マシンを表示")
+        self.context.setToolTip(
+            "番号と機種名を中間色で表示。自動フィットは対象マシンだけを基準にします。"
+        )
         tools.addWidget(self.context)
         self.buttons = {}
         for name, callback in [
@@ -191,47 +228,57 @@ class InstructionMapPage(QWidget):
         entries = booths(
             w.visible, w.floor.machines, w.floor.number_references, self.all_entries.isChecked()
         )
-        signature = (
-            tuple(
-                (
-                    b.key,
-                    b.number,
-                    b.token,
-                    b.machine.uid if b.machine else None,
-                    (
-                        (b.machine.x, b.machine.y, b.machine.width, b.machine.height)
-                        if b.machine
-                        else None
-                    ),
-                )
-                for b in entries
-            ),
-            self.context.isChecked(),
-            (
-                tuple((m.uid, m.x, m.y, m.width, m.height) for m in w.floor.machines)
-                if self.context.isChecked()
-                else ()
-            ),
+        groups = grouped_booths(entries)
+        target_signature = tuple(
+            (g.machine.uid, g.machine.x, g.machine.y, g.machine.width, g.machine.height)
+            for g in groups
         )
+        changed_targets = target_signature != getattr(self, "_target_signature", None)
+        self._target_signature = target_signature
+        self.target_bounds = map_bounds(groups) if groups else QRectF()
+        targets = {g.machine.uid for g in groups}
+        for uid in set(self.items) - targets:
+            self.scene.removeItem(self.items.pop(uid))
+        for group in groups:
+            uid = group.machine.uid
+            if uid not in self.items:
+                self.items[uid] = MapItem(self, group)
+                self.scene.addItem(self.items[uid])
+            else:
+                item = self.items[uid]
+                item.prepareGeometryChange()
+                item.group = group
+                item.setPos(group.machine.x, group.machine.y)
+                item.update()
+        neighbors = (
+            {m.uid: m for m in w.floor.machines if m.uid not in targets}
+            if self.context.isChecked() and groups
+            else {}
+        )
+        for uid in set(self.context_items) - set(neighbors):
+            self.scene.removeItem(self.context_items.pop(uid))
+        for uid, machine in neighbors.items():
+            if uid not in self.context_items:
+                self.context_items[uid] = ContextMapItem(self, machine)
+                self.scene.addItem(self.context_items[uid])
+            else:
+                item = self.context_items[uid]
+                item.prepareGeometryChange()
+                item.machine = machine
+                item.setPos(machine.x, machine.y)
+                item.update()
+        # Keep the scrollable scene stable when neighbors are toggled. Only the
+        # target rectangle controls fitting; no surrounding machine changes zoom.
+        physical = QRectF()
+        for machine in w.floor.machines:
+            physical = physical.united(QRectF(machine.x, machine.y, machine.width, machine.height))
+        scene_bounds = physical.united(self.target_bounds).adjusted(-40, -40, 40, 40)
+        if self.scene.sceneRect() != scene_bounds:
+            self.scene.setSceneRect(scene_bounds)
         self.entries = entries
-        if signature != getattr(self, "signature", None):
-            self.signature = signature
-            self.scene.clear()
-            self.items = {}
-            groups = grouped_booths(entries)
-            if self.context.isChecked():
-                targets = {g.machine.uid for g in groups}
-                for m in w.floor.machines:
-                    if m.uid in targets:
-                        continue
-                    item = self.scene.addRect(QRectF(m.x, m.y, m.width, m.height))
-                    item.setOpacity(0.15)
-            for group in groups:
-                item = MapItem(self, group)
-                self.scene.addItem(item)
-                self.items[group.machine.uid] = item
-            self.scene.setSceneRect(self.scene.itemsBoundingRect().adjusted(-20, -20, 20, 20))
+        if changed_targets:
             self.fit()
+            QTimer.singleShot(0, self.fit)
         self.unresolved_rows = [b for b in entries if not b.machine]
         self.unresolved.setRowCount(len(self.unresolved_rows))
         self.unresolved.setVisible(bool(self.unresolved_rows))
@@ -255,12 +302,15 @@ class InstructionMapPage(QWidget):
             s["paper"],
             s["orientation"],
             s["all_entries"],
+            context=s["context"],
+            settings=w.floor.analysis_settings,
+            entries=self.entries,
         )
 
     def fit(self, *_):
-        if self.scene.items():
+        if not self.target_bounds.isEmpty():
             self.view.fitInView(
-                self.scene.itemsBoundingRect().adjusted(-15, -15, 15, 15),
+                self.target_bounds,
                 Qt.AspectRatioMode.KeepAspectRatio,
             )
 

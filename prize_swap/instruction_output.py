@@ -8,7 +8,7 @@ from .instruction_map import plan_map, map_layout, draw_map_page
 from .core import AppError
 
 DEFAULTS = dict(
-    mode="instructions", paper="A4", orientation="auto", all_entries=False, context=False
+    mode="instructions", paper="A4", orientation="auto", all_entries=False, context=True
 )
 
 
@@ -99,6 +99,7 @@ def output_plan(
             s["paper"],
             s["orientation"],
             all_entries=s["all_entries"] and s["mode"] == "map" and job is None,
+            context=s["context"],
         )
         if (job["include_map"] if job else s["mode"] != "instructions")
         else None
