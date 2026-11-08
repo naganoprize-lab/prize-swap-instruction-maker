@@ -351,7 +351,11 @@ class DashboardPage(QScrollArea):
             poor = sum(r["assessment"] == "要確認" for r in records)
             consider = sum(r["assessment"] == "入替検討" for r in records)
             name, description, icon = self.tile_descriptions["candidates"]
-            self.tiles["candidates"].setText(f"{name}\n要確認 {poor}台 ／ 入替検討 {consider}台")
+            provisional = sum(r["assessment"] == "暫定判定" for r in records)
+            self.tiles["candidates"].setText(
+                f"{name}\n要確認 {poor}台 ／ 入替検討 {consider}台"
+                + (f" ／ 暫定 {provisional}台" if provisional else "")
+            )
             self.bars.groups = floor.dashboard.groups
             self.bars.update()
         finally:

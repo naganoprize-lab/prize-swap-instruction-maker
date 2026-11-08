@@ -146,6 +146,9 @@ def assess(machine, reference, settings=None, history=(), sales_bounds=None):
     sales = evaluation(
         machine, s, sales_bounds if sales_bounds is not None else boundaries([machine], s)
     )
+    if sales["label"] == "対象期間外":
+        status, priority = "判定保留", 3
+        reasons.append("現在の売上Excelと集計期間が一致しないため判定保留。")
     provisional = status == "暫定判定" or sales["provisional"]
     display_status = reasons[0].split("：")[0] if status == "暫定判定" else status
     if status in ("要確認", "入替検討") and sales["index"] in (3, 4):

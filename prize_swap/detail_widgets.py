@@ -226,10 +226,15 @@ def refresh_overview(d):
         from .radar import evaluate, score_record, AGE_EXPLANATION
         from PySide6.QtWidgets import QTableWidgetItem
 
-        peers = [
-            r | {"score_comparable": r.get("match_method") != "照合要確認"} for r in population
-        ]
-        d.scores = evaluate(m, o.reference_day(), o.analysis_settings, peers, o.assignments())
+        peers = population
+        d.scores = evaluate(
+            m,
+            o.reference_day(),
+            o.analysis_settings,
+            peers,
+            o.assignments(),
+            o.analytics.sales_bounds,
+        )
         d.radar.set_axes(d.scores)
         d.evaluation_note.setText(
             AGE_EXPLANATION + "\n" + "\n".join(a["warning"] for a in d.scores if a["warning"])

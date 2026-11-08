@@ -183,11 +183,16 @@ def machine_record(machine, reference, settings, assignments=None, history=None,
     record["cost_details"] = po["cost_details"]
     from .sales_evaluation import evaluation, boundaries
 
-    if sales_bounds is None:
-        sales_bounds = boundaries([m], settings)
-    record["sales_evaluation"] = evaluation(m, settings, sales_bounds)
+    if sales_bounds is not None:
+        record["sales_evaluation"] = evaluation(m, settings, sales_bounds)
     record["assessment_detail"] = assess(m, reference, settings, history or [], sales_bounds)
     record["assessment"] = record["assessment_detail"]["status"]
+    record["score_comparable"] = not (
+        (m.analysis or {}).get("quality_issues")
+        or (m.analysis or {}).get("product_context") is not None
+        and m.analysis["product_context"] != episode(m)
+        or m.match_method == "review"
+    )
     record["sales_cohort"] = cohort(m)
     return record
 
@@ -375,6 +380,7 @@ class AnalyticsService:
                     m.source_key,
                     m.product,
                     m.kind,
+                    m.font_size,
                     m.operation_method,
                     m.installed_on,
                     m.ratio,
@@ -404,7 +410,13 @@ class AnalyticsService:
                 for m in o.machines
             ),
             tuple(
-                (key, tuple(p.name for p in products)) for key, products in o.assignments().items()
+                (
+                    key,
+                    tuple(
+                        (p.entry_id, p.name, p.priority, repr(p.machine_methods)) for p in products
+                    ),
+                )
+                for key, products in o.assignments().items()
             ),
             tuple(
                 (
@@ -432,6 +444,11 @@ class AnalyticsService:
                 )
                 for m in o.machines
             ]
+            from .sales_evaluation import boundary_legend
+
+            legend = boundary_legend(self.sales_bounds, o.analysis_settings["sales_mode"])
+            for r in self._records:
+                r["sales_legend"] = legend
             self.signature = signature
             self.cache.clear()
             self.builds += 1

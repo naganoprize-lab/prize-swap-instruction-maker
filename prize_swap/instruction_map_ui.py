@@ -47,6 +47,7 @@ from .theme import manager, tokens
 class MapItem(QGraphicsItem):
     def __init__(self, page, group):
         super().__init__()
+        self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
         self.page = page
         self.group = group
         self.setPos(group.machine.x, group.machine.y)
@@ -78,6 +79,7 @@ class MapItem(QGraphicsItem):
 class ContextMapItem(QGraphicsItem):
     def __init__(self, page, machine):
         super().__init__()
+        self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
         self.page = page
         self.machine = machine
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
@@ -185,6 +187,8 @@ class InstructionMapPage(QWidget):
 
     def theme_changed(self, *_):
         self.view.setBackgroundBrush(QColor(tokens()["canvas"]))
+        for item in [*self.items.values(), *self.context_items.values()]:
+            item.update()
         self.scene.update()
 
     def load_options(self):
@@ -246,10 +250,18 @@ class InstructionMapPage(QWidget):
                 self.scene.addItem(self.items[uid])
             else:
                 item = self.items[uid]
-                item.prepareGeometryChange()
-                item.group = group
+                key = (
+                    group.machine.width,
+                    group.machine.height,
+                    tuple((b.number, b.product.entry_id, b.token) for b in group.booths),
+                )
+                if key != getattr(item, "_content_key", None):
+                    item.prepareGeometryChange()
+                    item.group = group
+                    item._content_key = key
+                    item.setToolTip(" / ".join(f"{b.number}：{b.token}" for b in group.booths))
+                    item.update()
                 item.setPos(group.machine.x, group.machine.y)
-                item.update()
         neighbors = (
             {m.uid: m for m in w.floor.machines if m.uid not in targets}
             if self.context.isChecked() and groups
@@ -263,10 +275,29 @@ class InstructionMapPage(QWidget):
                 self.scene.addItem(self.context_items[uid])
             else:
                 item = self.context_items[uid]
-                item.prepareGeometryChange()
-                item.machine = machine
+                key = (
+                    machine.width,
+                    machine.height,
+                    machine.number,
+                    machine.source_key,
+                    machine.kind,
+                    repr(w.floor.analysis_settings.get("types")),
+                    repr(w.floor.analysis_settings.get("aliases")),
+                )
+                if key != getattr(item, "_content_key", None):
+                    item.prepareGeometryChange()
+                    item.machine = machine
+                    item._content_key = key
+                    from .machine_matching import display_identity
+                    from .analysis_settings import machine_type
+
+                    item.setToolTip(
+                        display_identity(machine)
+                        + " / "
+                        + machine_type(machine, w.floor.analysis_settings)
+                    )
+                    item.update()
                 item.setPos(machine.x, machine.y)
-                item.update()
         # Keep the scrollable scene stable when neighbors are toggled. Only the
         # target rectangle controls fitting; no surrounding machine changes zoom.
         physical = QRectF()
@@ -316,6 +347,8 @@ class InstructionMapPage(QWidget):
 
     def highlight_selection(self, *_):
         self.selected_entries = {p.entry_id for p in self.owner.selected_products()}
+        for item in self.items.values():
+            item.update()
         self.scene.update()
 
     def select_instruction(self, entry_id):

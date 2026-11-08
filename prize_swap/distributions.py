@@ -146,7 +146,10 @@ def distribution(records, axis, settings, population=None):
         info += " ｜ 異なる期間・取得元の平均は合算しません"
     legend = " / ".join(f'{v["label"]}：{v["value"]}台' for v in output)
     if axis == "sales_bin":
-        legend += "\n" + boundary_legend(bounds, settings["sales_mode"])
+        legend += "\n" + next(
+            (r["sales_legend"] for r in population if r.get("sales_legend")),
+            boundary_legend(bounds, settings["sales_mode"]),
+        )
         current = next(
             (
                 r.get("sales_evaluation")

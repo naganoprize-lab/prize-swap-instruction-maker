@@ -163,6 +163,7 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
 
         self.presentation.update(
             mode=self.layout_mode.currentData(),
+            render_mode=self.render_mode.currentData(),
             sort=self.sort_by.currentData(),
             descending=self.descending.isChecked(),
             search=self.floor_search.text(),
@@ -201,6 +202,7 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         self._building_view = True
         for control, key in (
             (self.layout_mode, "mode"),
+            (self.render_mode, "render_mode"),
             (self.sort_by, "sort"),
             (self.filter_by, "filter"),
         ):
@@ -231,7 +233,25 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
 
         records = self.analytics.records()
         self._metric_records = {r["uid"]: r for r in records}
-        self._card_context_cache = {}
+        context_signature = (
+            self.analytics.builds,
+            self.reference_day(),
+            repr(self.analysis_settings),
+            self.presentation["mode"],
+            self.presentation["font"],
+            self.display_mode.currentData(),
+            self.show_methods.isChecked(),
+            tuple(sorted(self.overlaps)),
+        )
+        if context_signature != getattr(self, "_context_signature", None):
+            self._card_context_cache = {}
+            self._context_signature = context_signature
+        from PySide6.QtGui import QPainter
+
+        hints = QPainter.RenderHint.TextAntialiasing | QPainter.RenderHint.Antialiasing
+        self.view.setRenderHints(
+            QPainter.RenderHint(0) if self.presentation["render_mode"] == "light" else hints
+        )
         self._effective_metric_settings = self.analysis_settings | {
             "_sales_bounds": self.analytics.sales_bounds
         }

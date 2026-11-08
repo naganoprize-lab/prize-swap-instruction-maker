@@ -63,10 +63,23 @@ def score_record(machine, reference, settings, assignments=None):
     return r
 
 
-def evaluate(machine, reference, settings=None, peers=(), assignments=None):
+def evaluate(machine, reference, settings=None, peers=(), assignments=None, sales_bounds=None):
     s = validate_settings(settings)
     r = score_record(machine, reference, s, assignments)
     sales, comparison = sales_score(r, peers, s)
+    if sales_bounds is not None and getattr(sales_bounds, "snapshot", None):
+        from .sales_evaluation import evaluation
+
+        ranked = evaluation(machine, s, sales_bounds)
+        sales = (
+            100 - ranked["top_percent"]
+            if r["score_comparable"] and ranked["top_percent"] is not None
+            else None
+        )
+        comparison = ranked["basis"]
+        if s["radar_sales_method"] == "linear_range" and sales is not None:
+            values = sales_bounds.primary.values
+            sales = min(100.0, max(0.0, (r["sales"] - values[0]) / (values[-1] - values[0]) * 100))
     target = s["cost_target"]
     cost_points = list(zip([target * k for k in s["radar_cost_knots"]], [0, 50, 75, 100, 75, 0]))
     from .po_evaluation import evaluate_po

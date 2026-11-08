@@ -130,7 +130,7 @@ def test_sales_benchmark_is_independent_and_no_implicit_reference():
     s = validate_settings(
         {"sales_mode": "fixed", "sales_low": 500, "sales_middle": 1000, "sales_high": 2000}
     )
-    for sales, color in [(499, "#F4A6A6"), (500, "#F8C88A"), (1000, "#F3F4F6"), (2000, "#FFE16A")]:
+    for sales, color in [(499, "#F4A6A6"), (500, "#F6BE78"), (1000, "#FFFFFF"), (2000, "#FFE16A")]:
         m.sales = sales
         m.average = 999999  # Retained field never determines the sales color.
         assert filter_status(m, "sales_metric", date.today(), settings=s)[0] == color

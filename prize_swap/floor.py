@@ -189,32 +189,37 @@ class MachineNode(QGraphicsObject):
 
     def paint(self, painter, option, widget=None):
         background, status, priority, fields, font, methods = self.owner.card_context(self.machine)
-        layout = self.owner.renderer.plan(
-            self.machine,
-            self.boundingRect().width(),
-            self.boundingRect().height(),
-            font,
-            fields,
-            self.owner.reference_day(),
-            status,
-            methods,
-            summary=self.owner.display_mode.currentData() == "compact",
-            truncate=True,
-            settings=self.owner.analysis_settings,
-        )
-        draw_card(
-            painter,
-            self.boundingRect(),
-            layout,
-            background,
-            priority,
-            self.isSelected(),
-            self.machine.uid in self.owner.overlaps,
-            screen=True,
-            search_match=getattr(self, "search_match", False)
-            or self.machine.uid in getattr(self.owner, "_highlight_uids", set())
-            or self.machine.uid in (self.owner.analysis_highlight_uids or set()),
-        )
+        if self.owner.presentation["render_mode"] == "light":
+            from .light_render import paint_light
+
+            paint_light(self, painter, background, priority)
+        else:
+            layout = self.owner.renderer.plan(
+                self.machine,
+                self.boundingRect().width(),
+                self.boundingRect().height(),
+                font,
+                fields,
+                self.owner.reference_day(),
+                status,
+                methods,
+                summary=self.owner.display_mode.currentData() == "compact",
+                truncate=True,
+                settings=self.owner.metric_settings(),
+            )
+            draw_card(
+                painter,
+                self.boundingRect(),
+                layout,
+                background,
+                priority,
+                self.isSelected(),
+                self.machine.uid in self.owner.overlaps,
+                screen=True,
+                search_match=getattr(self, "search_match", False)
+                or self.machine.uid in getattr(self.owner, "_highlight_uids", set())
+                or self.machine.uid in (self.owner.analysis_highlight_uids or set()),
+            )
         if self.isSelected():
             painter.save()
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -437,7 +442,7 @@ class FloorView(QGraphicsView):
 
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
-        if self.transform().m11() < 0.3:
+        if self.owner.presentation["render_mode"] == "light" or self.transform().m11() < 0.3:
             return
         painter.setPen(QPen(QColor(theme_tokens()["grid"]), 0))
         step = GRID
@@ -749,12 +754,21 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def rebuild(self):
         self._syncing_selection = True
         self.refresh_assignments()
-        self.scene.clear()
-        self.nodes = {}
-        for m in self.machines:
-            node = MachineNode(self, m)
-            self.nodes[m.uid] = node
-            self.scene.addItem(node)
+        previous = getattr(self, "nodes", {})
+        current = {m.uid for m in self.machines}
+        for uid in set(previous) - current:
+            self.scene.removeItem(previous.pop(uid))
+        self._projecting = True
+        try:
+            for m in self.machines:
+                if m.uid in previous:
+                    previous[m.uid].machine = m
+                else:
+                    previous[m.uid] = MachineNode(self, m)
+                    self.scene.addItem(previous[m.uid])
+        finally:
+            self._projecting = False
+        self.nodes = previous
         self._syncing_selection = False
         self.selection_state.set(self.selection_state.selected_machine_keys & set(self.nodes))
         self.apply_shared_selection()
@@ -936,7 +950,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         return getattr(self, "_effective_metric_settings", self.analysis_settings)
 
     def card_context(self, m):
-        cached = getattr(self, "_card_context_cache", {}).get(m.uid)
+        cache_key = (m.uid, self.presentation["color_filter"])
+        cached = getattr(self, "_card_context_cache", {}).get(cache_key)
         if cached is not None:
             return cached
         plans = self.assignments().get(machine_key(m), [])
@@ -976,7 +991,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             * (1.35 if mode == "product" else 1.1 if mode == "analysis" else 1),
             methods,
         )
-        self._card_context_cache[m.uid] = result
+        self._card_context_cache[cache_key] = result
         return result
 
     def apply_shared_selection(self):

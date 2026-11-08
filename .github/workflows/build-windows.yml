@@ -14,6 +14,8 @@ jobs:
       PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -163,6 +165,38 @@ jobs:
               throw "Workflow validation failed ($scale)"
             }
           }
+      - name: Native Windows ranked sales light rendering and map context
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+        run: |
+          foreach ($scale in @('1', '1.25', '1.5')) {
+            $env:QT_SCALE_FACTOR = $scale
+            $outputPath = "build-visual/filters-$scale"
+            python -m prize_swap.filter_visual_check $outputPath
+            $code = $LASTEXITCODE
+            if (!(Test-Path "$outputPath/report.json")) { throw "Filter/map report missing ($scale)" }
+            $report = Get-Content "$outputPath/report.json" -Raw | ConvertFrom-Json
+            if ($code -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+              Write-Output "::error::$($report.error -replace "`n", ' | ')"
+              throw "Filter/map validation failed ($scale)"
+            }
+          }
+      - name: Comparable Windows 300 booth performance baseline and modes
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+          QT_SCALE_FACTOR: '1'
+        run: |
+          git worktree add --detach ../prize-baseline 84849c491d78fb148fc7a96cbb6783ee0350c042
+          python scripts/benchmark_workflow.py --repo ../prize-baseline --output build-visual/performance/before-normal.json --mode normal
+          if ($LASTEXITCODE -ne 0) { throw "Baseline benchmark failed" }
+          python scripts/benchmark_workflow.py --output build-visual/performance/after-normal.json --mode normal
+          if ($LASTEXITCODE -ne 0) { throw "Normal benchmark failed" }
+          python scripts/benchmark_workflow.py --output build-visual/performance/after-light.json --mode light
+          if ($LASTEXITCODE -ne 0) { throw "Light benchmark failed" }
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-visual/**') != '' }}
         with:
@@ -275,6 +309,22 @@ jobs:
           if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
             Write-Output "::error::$($report.error -replace "`n", ' | ')"
             throw "Packaged workflow validation failed"
+          }
+      - name: Native packaged EXE ranked filters and light mode at 150 percent DPI
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+          QT_SCALE_FACTOR: '1.5'
+        run: |
+          $exe = (Resolve-Path dist/PrizeSwapInstructionMaker.exe).Path
+          $process = Start-Process -FilePath $exe -ArgumentList @('--filter-visual-test', 'build-smoke/filters-150') -PassThru
+          if (!$process.WaitForExit(180000)) { $process.Kill(); throw "Packaged filter/map validation timed out" }
+          $process.Refresh()
+          if (!(Test-Path build-smoke/filters-150/report.json)) { throw "Packaged filter/map report missing" }
+          $report = Get-Content build-smoke/filters-150/report.json -Raw | ConvertFrom-Json
+          if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+            Write-Output "::error::$($report.error -replace "`n", ' | ')"
+            throw "Packaged filter/map validation failed"
           }
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-smoke/**') != '' }}

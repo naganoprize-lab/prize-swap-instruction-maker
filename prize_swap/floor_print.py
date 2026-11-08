@@ -596,6 +596,7 @@ def save_floor_pdf(
             selected,
             loaded_at,
             population,
+            snapshot,
         ),
         sources,
     )

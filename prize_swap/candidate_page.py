@@ -459,7 +459,7 @@ class CandidatePage(QWidget):
                     (
                         "✓ 追加済み"
                         if added
-                        else a.get("display_status", shown) if shown == status else shown
+                        else a.get("display_status", shown) if shown == a["status"] else shown
                     ),
                     "指示書へ追加",
                     "理由を見る",

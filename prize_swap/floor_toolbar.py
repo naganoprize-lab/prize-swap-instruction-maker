@@ -107,6 +107,14 @@ def build_toolbar(owner, layout):
     for label, key in (("実配置", "actual"), ("見やすさ優先", "readable"), ("一覧", "list")):
         owner.layout_mode.addItem(label, key)
     top.addWidget(owner.layout_mode)
+    owner.render_mode = QComboBox()
+    for label, key in (("ノーマル", "normal"), ("軽量", "light")):
+        owner.render_mode.addItem(label, key)
+    owner.render_mode.setToolTip(
+        "軽量は番号・色・選択だけを描画します。計算・印刷品質は変わりません。"
+    )
+    owner.render_mode.currentIndexChanged.connect(owner.presentation_changed)
+    top.addWidget(owner.render_mode)
     from .floor_status import COLOR_FILTERS
 
     owner.color_filter = QComboBox()

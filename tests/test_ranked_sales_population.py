@@ -16,7 +16,10 @@ def snapshot(values):
         period_start="2026-11-06",
         period_end="2026-11-06",
         period_source="excel",
-        records={str(i): dict(values=dict(sales=v)) for i, v in enumerate(values)},
+        records={
+            str(i): dict(row=i + 2, reference_name="", values=dict(sales=v))
+            for i, v in enumerate(values)
+        },
     )
 
 
@@ -103,3 +106,49 @@ def test_unknown_age_without_ratio_or_sales_is_not_zero_day_or_confirmed():
         Machine(installed_on="2026-12-01", ratio=40, sales=100),
     ]:
         assert assess(m, DAY, s)["status"] == "判定保留"
+
+
+def test_snapshot_only_change_invalidates_floor_analysis_and_print_basis(tmp_path):
+    from PySide6.QtCore import QDate
+    from prize_swap.floor import FloorWidget
+    from prize_swap.floor_print import FloorPrintOptions, save_floor_pdf
+
+    f = FloorWidget(lambda: [], lambda: DAY, tmp_path / "floor.json")
+    try:
+        f.reference_date.setDate(QDate(DAY))
+        m = Machine(number="20111右", sales=100, analysis=overlay(100))
+        f.machines = [m]
+        f.analysis_state |= snapshot([0, 100, 200])
+        f.rebuild()
+        f.set_color_filter("sales_metric")
+        first = f.analytics.records()
+        builds = f.analytics.builds
+        assert f.card_context(m)[0] == "#FFFFFF"
+        f.analysis_state["records"] |= {
+            str(i + 3): dict(row=i + 5, reference_name="", values=dict(sales=10000))
+            for i in range(30)
+        }
+        f.apply_presentation()
+        assert f.analytics.builds > builds and f.analytics.records() is not first
+        assert f.card_context(m)[0] == "#F4A6A6"
+        f.print_options = FloorPrintOptions(
+            color_filter="sales_metric", analysis_settings=f.analysis_settings
+        )
+        plan = save_floor_pdf(
+            tmp_path / "full-population.pdf",
+            f.machines,
+            {},
+            f.print_options,
+            DAY,
+            population=f.machines,
+            snapshot=f.analysis_state,
+        )
+        assert plan.pages[0].cards[0].background == f.card_context(m)[0]
+        f.analysis_settings["sales_colors"] = ["#123456"] * 5
+        f.apply_presentation()
+        record = f.analytics.records()[0]
+        assert record["sales_evaluation"]["color"] == f.card_context(m)[0] == "#123456"
+    finally:
+        f.timer.stop()
+        f.day_timer.stop()
+        f.close()

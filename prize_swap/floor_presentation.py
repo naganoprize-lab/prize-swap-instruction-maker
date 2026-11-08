@@ -11,6 +11,7 @@ from .floor_status import ratio, days, COLOR_FILTERS
 
 DEFAULTS = dict(
     mode="actual",
+    render_mode="normal",
     color_filter="ratio",
     sort="number",
     descending=False,
@@ -30,6 +31,8 @@ def validate_presentation(value):
     if not isinstance(value, dict) or any(k not in DEFAULTS for k in value):
         raise AppError("売り場表示設定が不正です。")
     settings = DEFAULTS | value
+    if settings["render_mode"] not in ("normal", "light"):
+        raise AppError("描画モードが不正です。")
     if settings["color_filter"] not in COLOR_FILTERS:
         raise AppError("色フィルターが不正です。")
     if (
