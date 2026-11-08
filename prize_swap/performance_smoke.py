@@ -11,7 +11,7 @@ from .floor_data import Machine, save_layout
 from .floor_print import FloorPrintOptions, floor_printer
 from .floor_status import filter_status
 from .sales_analysis import HEADERS
-from .replacement import assess
+from .replacement import assess, comparable_trend
 from .method_analysis import totals
 from .pdf_validation import require_searchable_pdf, normalized_pdf_text
 
@@ -85,7 +85,9 @@ def run_analysis_checks(floor, output):
     a = assess(
         floor.machines[0], date(2026, 11, 7), floor.analysis_settings, floor.performance_history
     )
-    assert abs(a["trend"] - 0.75) < 1e-8
+    assert a["trend"] is None  # Average-sales candidate evaluation is intentionally paused.
+    raw_trend, raw_sources = comparable_trend(floor.machines[0], floor.performance_history)
+    assert abs(raw_trend - 0.75) < 1e-8 and len(raw_sources) == 2  # History is retained.
     before = [asdict(m) for m in floor.machines]
     ids = {k: id(n) for k, n in floor.nodes.items()}
     started = perf_counter()
@@ -130,7 +132,8 @@ def run_analysis_checks(floor, output):
         all_visible_during_search=True,
         node_identity_preserved=True,
         history_files=2,
-        trend=0.75,
+        trend=None,
+        average_history_preserved=True,
         method_groups=3,
         filter_pdf_pages=previews,
         search_seconds=duration,

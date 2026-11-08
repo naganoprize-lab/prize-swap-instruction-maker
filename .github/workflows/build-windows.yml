@@ -147,7 +147,13 @@ jobs:
             throw "Packaged EXE smoke test timed out"
           }
           $process.Refresh()
-          if ($process.ExitCode -ne 0) { throw "Packaged EXE smoke test failed: $($process.ExitCode)" }
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path build-smoke/report.json) {
+              $failedReport = Get-Content build-smoke/report.json -Raw | ConvertFrom-Json
+              Write-Output "::error::$($failedReport.error -replace "`n", ' | ')"
+            }
+            throw "Packaged EXE smoke test failed: $($process.ExitCode)"
+          }
           if (!(Test-Path build-smoke/report.json)) { throw "EXE did not create build-smoke/report.json" }
           $report = Get-Content build-smoke/report.json -Raw | ConvertFrom-Json
           if (!$report.ok) { throw "EXE validation failed" }
