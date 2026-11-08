@@ -332,9 +332,9 @@ class InstructionMapPage(QWidget):
         )
         return plan
 
-    def check_targets(self):
+    def check_targets(self, action=None):
         if not self.all_entries.isChecked():
-            self.owner.print_products()
+            self.owner.print_products(action)
         elif not self.owner.visible:
             raise AppError("現在の登録日に指示がありません。")
 
@@ -342,14 +342,14 @@ class InstructionMapPage(QWidget):
         from .instruction_preview import InstructionPreview
 
         try:
-            self.check_targets()
+            self.check_targets(self.preview)
             InstructionPreview(self.owner, map_page=self).exec()
         except Exception as exc:
             self.owner.error(exc)
 
     def export_pdf(self, *_):
         try:
-            self.check_targets()
+            self.check_targets(self.export_pdf)
             path = self.owner.save_path("入替予定地図PDF", "PDF (*.pdf)", ".pdf")
             if path:
                 save_rendered_pdf(
@@ -362,7 +362,7 @@ class InstructionMapPage(QWidget):
 
     def print_direct(self, *_):
         try:
-            self.check_targets()
+            self.check_targets(self.print_direct)
             printer = configured_printer()
             p = self.plan()
             printer.setPageLayout(map_layout(p.paper, p.pages[0].orientation))

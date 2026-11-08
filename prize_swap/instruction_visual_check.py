@@ -202,6 +202,9 @@ def run(output):
 
         QPrintDialog.exec = accept_direct
         page.print_direct()
+        if w.preflight.pending:
+            assert not w.preflight.counts["error"]
+            w.preflight.continue_output()
 
         def pdf_text(path):
             return normalized_pdf_text(

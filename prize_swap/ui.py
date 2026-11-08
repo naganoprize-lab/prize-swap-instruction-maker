@@ -367,6 +367,10 @@ class Window(InstructionEditorMixin, QMainWindow):
 
         build_shell(self, outer, header, footer)
         self.setup_instruction_map(list_layout)
+        from .preflight_ui import PreflightPanel
+
+        self.preflight = PreflightPanel(self)
+        self.instruction_tabs.addTab(self.preflight, "印刷前チェック")
         self.themes.load(self.appearance_path)
         self.theme_changed()
         self.restore_instruction_autosave()
@@ -548,6 +552,8 @@ class Window(InstructionEditorMixin, QMainWindow):
         self.update_allocation_notice()
         if hasattr(self, "instruction_map"):
             self.instruction_map.refresh()
+        if hasattr(self, "preflight"):
+            self.preflight.invalidate()
 
     def update_count(self):
         self.count.setText(
@@ -696,7 +702,7 @@ class Window(InstructionEditorMixin, QMainWindow):
                     | QItemSelectionModel.SelectionFlag.Rows,
                 )
 
-    def print_products(self):
+    def print_products(self, action=None):
         self.table.setFocus()
         if (
             self.floor.instruction_print_options["mode"] == "map"
@@ -709,23 +715,12 @@ class Window(InstructionEditorMixin, QMainWindow):
             self.set_all(True)
             if not any(p.included for p in self.visible):
                 raise AppError("現在の登録日・表示範囲に指示がありません。")
-        if not self.confirm_method_allocations():
-            raise AppError("運営方法の台数を確認してから再実行してください。")
-        if self.floor.initialized:
-            from .instructions import booths
+        if hasattr(self, "preflight"):
+            self.preflight.refresh()
+            if action is not None and not self.preflight.request(action):
+                from .preflight_ui import PreflightPending
 
-            refs = booths(self.visible, self.floor.machines, self.floor.number_references)
-            missing = sorted({b.token for b in refs if b.machine is None and b.token})
-            if missing:
-                answer = QMessageBox.question(
-                    self,
-                    "入替予定のマシン番号を確認",
-                    "配置にないマシン番号が入替予定に残っています：\n"
-                    + "、".join(missing)
-                    + "\n印刷・保存を続けますか？",
-                )
-                if answer != QMessageBox.StandardButton.Yes:
-                    raise AppError("マシン番号を確認してから再実行してください。")
+                raise PreflightPending("印刷前チェックで内容を確認してください。")
         return list(self.visible)
 
     def paint_printer(self, printer):
@@ -754,7 +749,7 @@ class Window(InstructionEditorMixin, QMainWindow):
         if self.tabs.currentWidget() is self.labels:
             return self.labels.preview()
         try:
-            self.print_products()
+            self.print_products(self.preview)
             if self.floor.instruction_print_options["mode"] != "instructions":
                 from .instruction_preview import InstructionPreview
 
@@ -802,7 +797,7 @@ class Window(InstructionEditorMixin, QMainWindow):
         if self.tabs.currentWidget() is self.labels:
             return self.labels.print_direct()
         try:
-            self.print_products()
+            self.print_products(self.print_direct)
             printer = configured_printer()
             area = printer.pageRect(QPrinter.Unit.Point)
             from .instruction_output import output_plan
@@ -836,7 +831,7 @@ class Window(InstructionEditorMixin, QMainWindow):
         if self.tabs.currentWidget() is self.labels:
             return self.labels.export_pdf()
         try:
-            products = self.print_products()
+            products = self.print_products(self.export_pdf)
             path = self.save_path("PDF保存", "PDF (*.pdf)", ".pdf")
             if path:
                 from .printing import save_rendered_pdf
@@ -856,6 +851,10 @@ class Window(InstructionEditorMixin, QMainWindow):
             self.instruction_save_timer.start(800)
 
     def error(self, exc):
+        from .preflight_ui import PreflightPending
+
+        if isinstance(exc, PreflightPending):
+            return
         if str(exc) == "出力対象の選択をキャンセルしました。":
             return
         QMessageBox.warning(self, "処理できませんでした", str(exc))

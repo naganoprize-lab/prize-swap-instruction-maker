@@ -174,6 +174,9 @@ def test_ui_export_preview_pdf_and_session(window, tmp_path, monkeypatch):
     pdf = tmp_path / "画面から.pdf"
     monkeypatch.setattr(window, "save_path", lambda *a: str(pdf))
     window.export_pdf()
+    if window.preflight.pending:
+        assert not window.preflight.counts["error"]
+        window.preflight.continue_output()
     assert pdf.read_bytes().startswith(b"%PDF")
 
     # Exercise the real modal preview and its paintRequested rendering, closing
@@ -230,7 +233,10 @@ def test_registered_floor_machine_is_available_in_cell(window, monkeypatch):
 
     monkeypatch.setattr(QMessageBox, "question", capture)
     window.print_products()
-    assert warnings and "20085右" in warnings[0]
+    assert any(
+        "20085右" in i.message and i.issue_type == "position_unknown"
+        for i in window.preflight.issues
+    )
 
 
 def test_excel_export_cannot_overwrite_floor_source(window, tmp_path, monkeypatch):

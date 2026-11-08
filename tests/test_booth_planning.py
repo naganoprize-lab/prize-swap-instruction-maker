@@ -386,7 +386,10 @@ def test_direct_print_dialog_uses_same_machine_and_plan_renderer(window, tmp_pat
 
     monkeypatch.setattr(ui, "configured_printer", lambda: configured_printer(path))
     monkeypatch.setattr(QPrintDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
-    window.print_direct()  # Dialog acceptance -> real common QPrinter/QPainter.
+    window.print_direct()  # Embedded preflight -> dialog acceptance -> common renderer.
+    if window.preflight.pending:
+        assert not window.preflight.counts["error"]
+        window.preflight.continue_output()
     text = compact(require_searchable_pdf(path)["pages"][0]["text"])
     assert "橋渡し2ブース" in text and "リング1ブース" in text
     assert text.count(compact(window.products[0].name)) == 1
