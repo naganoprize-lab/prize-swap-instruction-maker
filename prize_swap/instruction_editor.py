@@ -506,7 +506,15 @@ class InstructionEditorMixin:
 
             self.products = products
             self.source = data.get("source", "")
+            self.file_label.setText(Path(self.source).name or "自動保存から復元")
+            self.file_label.setToolTip(self.source)
+            self.layout_choice.setCurrentIndex(1 if data.get("layout") == "row" else 0)
+            self.page_rows.setValue(data.get("rows_per_page", 20))
+            self.print_mode.setCurrentIndex(
+                self.print_mode.findData(data.get("print_mode", "auto"))
+            )
             self.labels.store = LabelStore.restore(data.get("label_printing"), products)
+            self.labels.apply_options()
             self.update_dates()
             self.day.setDate(QDate(day.year, day.month, day.day))
             self.refresh()

@@ -114,7 +114,7 @@ class ProductModel(QAbstractTableModel):
 
                 return "、".join(
                     (display_badge(self._number_cache[(p.entry_id, v)]) + " " + v).strip()
-                    for v in (value or p.management_numbers or [""])
+                    for v in (machine_numbers("\n".join(value)) or p.management_numbers or [""])
                 )
             return ", ".join(value) if col == 6 else value
         if role == Qt.ItemDataRole.CheckStateRole and col in (0, 8):

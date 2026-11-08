@@ -156,3 +156,18 @@ def test_map_preview_changes_paper_without_changing_main_output_scope(window):
     assert w.instruction_map.paper.currentText() == "A3"
     assert w.floor.instruction_print_options["mode"] == "instructions"
     dialog.reject()
+
+
+def test_map_zero_output_uses_the_same_current_scope_selection(window, tmp_path, monkeypatch):
+    w = window
+    for p in w.products:
+        p.included = False
+    w.refresh()
+    target = tmp_path / "selected-map.pdf"
+    monkeypatch.setattr(w, "save_path", lambda *_: str(target))
+    monkeypatch.setattr(w, "ask_output_selection", lambda: False)
+    w.instruction_map.export_pdf()
+    assert not target.exists()
+    monkeypatch.setattr(w, "ask_output_selection", lambda: True)
+    w.instruction_map.export_pdf()
+    assert target.exists() and all(p.included for p in w.products)

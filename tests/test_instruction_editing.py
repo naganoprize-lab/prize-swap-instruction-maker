@@ -91,6 +91,9 @@ def test_autosave_restart_and_old_blank_data_migration(window, tmp_path):
     w = window
     w.products = [Product(DAY, "", machines=["R_168"], notes="未定メモ", source_type="manual")]
     w.refresh()
+    w.layout_choice.setCurrentIndex(1)
+    w.page_rows.setValue(12)
+    w.print_mode.setCurrentIndex(w.print_mode.findData("compact"))
     w.autosave_instructions()
     other = Window(layout_storage=tmp_path / "auto.json")
     try:
@@ -100,6 +103,8 @@ def test_autosave_restart_and_old_blank_data_migration(window, tmp_path):
             and other.products[0].notes == "未定メモ"
         )
         assert other.products[0].entry_id == w.products[0].entry_id
+        assert other.layout_name() == "row" and other.page_rows.value() == 12
+        assert other.print_mode.currentData() == "compact"
     finally:
         other.dirty = False
         other.instruction_save_timer.stop()
@@ -163,3 +168,11 @@ def test_candidate_duplicate_uses_manual_management_and_reference_links(window, 
     result = transfer(f, f.machines, w.candidate_page)
     assert result["added"] == 0 and result["skipped"] == 2
     assert len(w.products) == 2
+
+
+def test_table_number_badges_normalize_legacy_number_aliases(window):
+    w = window
+    w.products = [Product(DAY, "", machines=["20088-01", "20088左", "R_168"])]
+    w.refresh()
+    display = w.model.data(w.model.index(0, 6), Qt.ItemDataRole.DisplayRole)
+    assert display == "① 20088左、② R_168"
