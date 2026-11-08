@@ -4,7 +4,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QTimer
 from PySide6.QtGui import QUndoStack
 from .core import AppError
 
@@ -116,6 +116,37 @@ class WorkflowStore(QObject):
         self.watch(owner.floor.history, "floor", self.floor_snapshot)
         self._last_import = self.import_marker()
         owner.floor.changed.connect(self.detect_import)
+        self._reason_build = -1
+        self.reason_timer = QTimer(self)
+        self.reason_timer.setSingleShot(True)
+        self.reason_timer.setInterval(200)
+        self.reason_timer.timeout.connect(self.capture_assessments)
+        owner.floor.changed.connect(lambda: self.reason_timer.start())
+
+    def capture_assessments(self, force=False):
+        if getattr(self.owner, "_loading_instructions", False):
+            return
+        floor = self.owner.floor
+        records = floor.analytics.records()
+        if not force and self._reason_build == floor.analytics.builds:
+            return
+        self._reason_build = floor.analytics.builds
+        from .candidate_evidence import evidence
+
+        byuid = {m.uid: m for m in floor.machines}
+        latest = {r["machine_key"]: r for r in self.data["candidate_evaluations"]}
+        added = []
+        for record in records:
+            row = evidence(
+                byuid[record["uid"]], record, floor.reference_day(), floor.analysis_settings
+            )
+            if latest.get(row["machine_key"], {}).get("signature") != row["signature"]:
+                added.append(row)
+        if added:
+            self.data["candidate_evaluations"] = (self.data["candidate_evaluations"] + added)[
+                -10000:
+            ]
+            self.changed.emit()
 
     def floor_snapshot(self):
         result = {}
@@ -162,6 +193,7 @@ class WorkflowStore(QObject):
             watcher["index"] = watcher["stack"].index()
             watcher["count"] = watcher["stack"].count()
         self._last_import = self.import_marker()
+        self._reason_build = -1
         self.changed.emit()
 
     def append(self, kind, description, target_type="", target_id="", before=None, after=None):

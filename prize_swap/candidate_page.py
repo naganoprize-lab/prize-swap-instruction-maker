@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QToolButton,
     QAbstractItemView,
+    QSplitter,
 )
 from .analysis_views import make_table, ValueItem, propose_assignments
 from .analytics_page import fill_table
@@ -183,7 +184,16 @@ class CandidatePage(QWidget):
         self.show_excluded = QCheckBox("除外済みも表示")
         row.addWidget(self.show_excluded)
         self.table = make_table([], [])
-        outer.addWidget(self.table, 1)
+        from .candidate_evidence import CandidateReasonPanel
+
+        self.reason_panel = CandidateReasonPanel(self)
+        self.reason_panel.hide()
+        self.reason_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.reason_splitter.addWidget(self.table)
+        self.reason_splitter.addWidget(self.reason_panel)
+        self.reason_splitter.setStretchFactor(0, 3)
+        self.reason_splitter.setStretchFactor(1, 1)
+        outer.addWidget(self.reason_splitter, 1)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.context_menu)
         self.table.cellClicked.connect(lambda *_: self.highlight(False))
@@ -206,6 +216,7 @@ class CandidatePage(QWidget):
         outer.addLayout(actions)
         self.buttons = {}
         for label, callback in [
+            ("理由を見る", self.show_reasons),
             ("マシン詳細", self.open_detail),
             ("売り場で場所を確認", lambda: self.highlight(True)),
             ("入替予定へ登録", self.register),
@@ -381,12 +392,7 @@ class CandidatePage(QWidget):
         counts = {k: 0 for k in self.cards}
         for m in self.owner.machines:
             r = byuid[m.uid]
-            a = assess(
-                m,
-                self.owner.reference_day(),
-                self.owner.analysis_settings,
-                self.owner.performance_history,
-            )
+            a = r["assessment_detail"]
             status = a["status"]
             if status == "判定保留":
                 status = (
@@ -451,6 +457,7 @@ class CandidatePage(QWidget):
                     reason,
                     "✓ 追加済み" if added else shown,
                     "指示書へ追加",
+                    "理由を見る",
                 ]
             )
             identities.append(m.uid)
@@ -470,6 +477,7 @@ class CandidatePage(QWidget):
                 "判定理由",
                 "状態",
                 "操作",
+                "判定根拠",
             ],
             rows,
         )
@@ -491,6 +499,9 @@ class CandidatePage(QWidget):
                 )
             )
             self.table.setCellWidget(i, 11, add)
+            reason_button = QPushButton("理由を見る")
+            reason_button.clicked.connect(lambda checked=False, u=uid: self.show_reasons(u))
+            self.table.setCellWidget(i, 12, reason_button)
             for j in (0, 10):
                 self.table.item(i, j).setBackground(QBrush(QColor(analysis_color(color))))
                 self.table.item(i, j).setForeground(
@@ -518,6 +529,8 @@ class CandidatePage(QWidget):
             f'表示 {len(rows)} / {len(rs)}台 ｜ 除外 {len(s["exclusions"])}件 ｜ ダブルクリックで詳細、場所確認で配置へ移動します。'
         )
         self._building = False
+        if hasattr(self.host_window, "workflow"):
+            self.host_window.workflow.capture_assessments()
 
     def checked_changed(self, item):
         if self._building or self._syncing_selection or item.column() != 0:
@@ -571,11 +584,23 @@ class CandidatePage(QWidget):
         else:
             self.owner.set_analysis_highlight(ids)
 
+    def current_uid(self):
+        row = self.table.currentRow()
+        if row >= 0 and self.table.item(row, 0):
+            return self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)[0]
+        return next(iter(self.selected_uids()), None)
+
+    def show_reasons(self, uid=None):
+        if not isinstance(uid, str):
+            uid = self.current_uid()
+        if uid:
+            self.reason_panel.show_uid(uid)
+
     def open_detail(self):
-        selected = self.selected_machines()
-        if selected:
-            self.owner.open_details(selected[0].uid)
-            self.refresh()
+        uid = self.current_uid()
+        if uid:
+            self.host_window.navigation.activate("floor")
+            self.owner.open_details(uid)
 
     def register(self):
         selected = self.selected_machines()
