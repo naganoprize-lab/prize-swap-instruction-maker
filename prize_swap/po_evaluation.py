@@ -102,57 +102,14 @@ def evaluate_po(machine, settings=None):
 
     settings = settings or validate_settings()
     official = (machine.analysis or {}).get("po_inputs") or {}
-    unit = official.get("prize_cost")
-    source = "景品運営分析表：景品原価"
-    if unit is None:
-        unit = effective_stat(machine, "unit_price")
-        source = "景品運営分析表：景品単価" if machine.analysis else "レイアウト：景品単価"
-    candidate = cost_candidate(machine.product)
-    warning = []
-    context = (machine.analysis or {}).get("product_context")
-    changed = context is not None and (
-        context.get("product") != machine.product
-        or context.get("installed_on") != machine.installed_on
-    )
-    if changed:
-        unit = None
-        warning.append(
-            "商品・設置日が実績読込時から変わっています。旧商品の原価やPO評価は使いません。"
-        )
-    if (
-        unit is not None
-        and candidate is not None
-        and not math.isclose(unit, candidate, abs_tol=0.01)
-    ):
-        warning.append(
-            f"正式単価{unit:,.2f}円と末尾原価候補{candidate:,.2f}円が相違します。正式な値を優先しています。"
-        )
-    if unit is None:
-        manual = getattr(machine, "prize_cost", None)
-        context = getattr(machine, "prize_cost_product", "")
-        if manual is not None and context == machine.product:
-            unit, source = manual, (
-                "商品名末尾からユーザーが確認した原価"
-                if getattr(machine, "prize_cost_origin", "manual") == "product_suffix"
-                else "ユーザー確認原価"
-            )
-        elif candidate is not None:
-            source = "商品名末尾の原価候補（未確認）"
-            warning.append(
-                f"原価候補 {candidate:,.0f}円は型番・数量の可能性があります。確認が必要です。"
-            )
-        else:
-            source = "原価不明"
-    manual = getattr(machine, "prize_cost", None)
-    if positive(manual) and getattr(machine, "prize_cost_product", "") == machine.product:
-        if unit is not None and not math.isclose(unit, manual, abs_tol=0.01):
-            warning.append("手動確認原価とExcel景品単価が相違します。手動修正を優先しています。")
-        unit = manual
-        source = (
-            "商品名末尾からユーザーが確認した原価"
-            if machine.prize_cost_origin == "product_suffix"
-            else "ユーザー確認原価（手動修正）"
-        )
+    from .costing import cost_profile
+
+    profile = cost_profile(machine)
+    unit = profile["effective"]
+    source = profile["source"]
+    candidate = profile["candidate"]
+    warning = list(profile["warnings"])
+    changed = profile["changed"]
     pricing = official.get("pricing")
     price_source = "Excel正式料金"
     if pricing is None:
@@ -243,14 +200,14 @@ def evaluate_po(machine, settings=None):
             (actual - expected) * 100 if actual is not None and expected is not None else None
         ),
         target_cost_ratio=target,
-        cost_confidence=(
-            "confirmed"
-            if unit is not None
-            else "candidate" if candidate is not None else "unavailable"
-        ),
+        cost_confidence=profile["confidence"],
+        cost_details=profile,
         confidence=(
             "confirmed"
-            if unit is not None and valid_pricing and not provisional
+            if unit is not None
+            and profile["confidence"] == "confirmed"
+            and valid_pricing
+            and not provisional
             else (
                 "estimated"
                 if unit is not None and play_price is not None

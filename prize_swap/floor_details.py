@@ -279,9 +279,16 @@ class MachineDetailDialog(QDialog):
         self.confirmed_cost = QDoubleSpinBox()
         self.confirmed_cost.setRange(0, 10000000)
         self.confirmed_cost.setSpecialValueText("未設定")
+        from .costing import cost_profile
+
+        profile = cost_profile(machine)
+        self._cost_was_edited = profile["confirmed"] is not None
         self.confirmed_cost.setValue(
-            (machine.prize_cost or 0) if machine.prize_cost_product == machine.product else 0
+            profile["confirmed"] or (profile["candidate"] if profile["candidate_safe"] else 0) or 0
         )
+        self.cost_values = QLabel()
+        self.cost_values.setWordWrap(True)
+        form.addRow("使用原価・元の実績", self.cost_values)
         form.addRow("確認済み景品原価（円）", self.confirmed_cost)
         self.cost_candidate_button = QPushButton("商品名の原価候補を確認して設定")
         form.addRow(self.cost_candidate_button)
@@ -381,6 +388,7 @@ class MachineDetailDialog(QDialog):
         from .detail_widgets import build_overview
 
         build_overview(self, tabs, scroll, panel)
+        self.confirmed_cost.valueChanged.connect(self.cost_edited)
         for control in (self.confirmed_cost, self.play_amount, self.play_count):
             control.valueChanged.connect(self.refresh_po_inputs)
         self.price_confirmed.toggled.connect(self.refresh_po_inputs)
@@ -505,8 +513,14 @@ class MachineDetailDialog(QDialog):
         )
         self.refresh_po_inputs()
 
+    def cost_edited(self, *_):
+        self._cost_was_edited = True
+        self.updated.prize_cost_origin = "manual"
+
     def refresh_po_inputs(self, *_):
-        self.updated.prize_cost = self.confirmed_cost.value() or None
+        self.updated.prize_cost = (
+            (self.confirmed_cost.value() or None) if self._cost_was_edited else None
+        )
         self.updated.prize_cost_product = (
             self.name.toPlainText().strip() if self.updated.prize_cost is not None else ""
         )
@@ -538,6 +552,19 @@ class MachineDetailDialog(QDialog):
             + f"\n目標原価率：{self.owner.analysis_settings['cost_target']:.1%} ／ Excel P/O原値："
             + formatted("po_rate", po["raw_actual"])
         )
+        c = po["cost_details"]
+
+        def currency(value):
+            return "—" if value is None else f"{value:,.0f}円"
+
+        self.cost_values.setText(
+            f"使用原価：{currency(c['effective'])} ／ 取得元：{c['source']}\n末尾候補：{currency(c['candidate'])} ／ 正式単価：{currency(c['official'])} ／ 確認済み：{currency(c['confirmed'])}\n景品原価総額：{currency(c['calculated_cost'])} ／ 再計算原価率：{formatted('cost_rate',c['calculated_cost_rate']) if c['calculated_cost_rate'] is not None else '算出不可（'+c['reason']+'）'} ／ Excel原価率：{formatted('cost_rate',c['excel_cost_rate'])}"
+        )
+        self.values["cost_rate"].setText(
+            formatted("cost_rate", effective_stat(self.updated, "cost_rate"))
+            if effective_stat(self.updated, "cost_rate") is not None
+            else "算出不可"
+        )
         self.po_origin.setText(
             po["cost_source"]
             + " / "
@@ -551,6 +578,9 @@ class MachineDetailDialog(QDialog):
 
     def accept(self):
         try:
+            if not self._cost_was_edited and self.confirmed_cost.value() > 0:
+                self.updated.prize_cost_origin = "product_suffix"
+                self._cost_was_edited = True
             self.refresh_po_inputs()
             if self.updated.number != self.original.number:
                 self.updated.resolved_number = ""

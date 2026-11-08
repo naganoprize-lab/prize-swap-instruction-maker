@@ -35,6 +35,7 @@ MANUAL_FIELDS = (
     "limit",
     "operation_method",
     "number",
+    "prize_cost",
 )
 
 
@@ -247,6 +248,20 @@ def resolve_matches(machines, records):
 
 
 def value_source(machine, key):
+    if key in ("cost_rate", "cost"):
+        from .costing import cost_profile
+
+        profile = cost_profile(machine)
+        if profile["overridden"]:
+            return (
+                "再計算："
+                + profile["source"]
+                + (
+                    "（算出不可：" + profile["reason"] + "）"
+                    if profile["reason"]
+                    else "×獲得個数÷売上" if key == "cost_rate" else "×獲得個数"
+                )
+            )
     if key == "ratio":
         from .floor_status import effective_stat, reference_average
 

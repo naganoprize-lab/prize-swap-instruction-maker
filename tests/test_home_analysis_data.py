@@ -41,16 +41,19 @@ def test_quintile_edges_zero_unknown_same_value_same_band():
 def test_cost_suffix_is_candidate_not_automatic_fact(text, value):
     assert cost_candidate(text) == value
     m = Machine(product=text)
-    assert evaluate_po(m, validate_settings())["target"] is None
+    g = evaluate_po(m, validate_settings())
+    assert g["target"] == (pytest.approx(60 / value) if value is not None else None)
+    if value is not None:
+        assert g["cost_confidence"] == "estimated"
 
 
 def test_po_pt_source_confidence_cost_mismatch_and_raw_definition():
     s = validate_settings()
     m = Machine(product="堅あげ 020", unit_price=270, po_rate=0.2)
     g = evaluate_po(m, s)
-    assert g["target"] == pytest.approx(2 / 9) and g["deviation_points"] == pytest.approx(-2.222222)
+    assert g["target"] == 3 and g["deviation_points"] == pytest.approx(-280)
     assert (
-        g["cost_confidence"] == "confirmed"
+        g["cost_confidence"] == "estimated"
         and g["provisional"]
         and any("相違" in w for w in g["warnings"])
     )

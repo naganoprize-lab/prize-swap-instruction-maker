@@ -177,6 +177,10 @@ def machine_record(machine, reference, settings, assignments=None, history=None)
         )
         record["metric_periods"][key] = record["period"] if m.analysis else (None, None, "layout")
 
+    if po["cost_details"]["overridden"]:
+        for key in ("cost_rate", "cost"):
+            record["metric_periods"][key] = record["period"]
+    record["cost_details"] = po["cost_details"]
     record["assessment_detail"] = assess(m, reference, settings, history or [])
     record["assessment"] = record["assessment_detail"]["status"]
     record["sales_cohort"] = cohort(m)

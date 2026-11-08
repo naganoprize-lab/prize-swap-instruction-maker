@@ -216,7 +216,7 @@ def percent(value, number_format="General"):
     return number * 100 if "%" in fmt and not is_string else number
 
 
-def effective_stat(machine, key):
+def raw_stat(machine, key):
     overlay = getattr(machine, "analysis", None)
     value = overlay.get("values", {}).get(key) if overlay else getattr(machine, key, None)
     if value is not None and (
@@ -228,6 +228,16 @@ def effective_stat(machine, key):
     ):
         return None
     return value
+
+
+def effective_stat(machine, key):
+    if key in ("cost_rate", "cost"):
+        from .costing import cost_profile
+
+        profile = cost_profile(machine)
+        if profile["overridden"]:
+            return profile["calculated_cost_rate" if key == "cost_rate" else "calculated_cost"]
+    return raw_stat(machine, key)
 
 
 def reference_average(machine):
