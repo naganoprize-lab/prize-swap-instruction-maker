@@ -182,3 +182,28 @@ def test_short_window_keeps_detail_save_controls_inside_the_dock(window):
     point = buttons.mapTo(c.host, buttons.rect().bottomRight())
     assert c.host.rect().contains(point)
     assert c.dock.height() <= c.host.height()
+
+
+def test_fullscreen_dock_and_save_controls_fit_small_200_percent_monitor(tmp_path):
+    import json, os, subprocess, sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    (tmp_path / "screen.json").write_text(
+        json.dumps(
+            {"screens": [{"name": "DPI200", "width": 1280, "height": 720, "logicalDpi": 96}]}
+        )
+    )
+    output = tmp_path / "native-small"
+    result = subprocess.run(
+        [sys.executable, str(root / "main.py"), "--floor-visual-test", str(output)],
+        cwd=tmp_path,
+        env=os.environ
+        | {"QT_QPA_PLATFORM": "offscreen:configfile=screen.json", "QT_SCALE_FACTOR": "2"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert result.returncode == 0 and report["ok"], report.get("error", result.stderr)
+    assert report["detail_geometry"]["controls_fit"] and report["details_opened"] == 1

@@ -162,9 +162,46 @@ def run(output):
                 floor.detail_controller.panel if floor.detail_controller.dock.isVisible() else None
             )
             if dialog is not None:
-                available = dialog.screen().availableGeometry()
-                detail_fits.append(
-                    dialog.width() <= available.width() and dialog.height() <= available.height()
+                from PySide6.QtWidgets import QDialogButtonBox
+
+                controller = floor.detail_controller
+                controller.host.layout().activate()
+                controller.container.layout().activate()
+                dialog.layout().activate()
+                dock = controller.dock
+                buttons = dialog.findChild(QDialogButtonBox)
+                # The editor is now an embedded widget: its visible dock and controls
+                # must fit their host. Fullscreen uses screen.geometry(), including
+                # the area normally reserved for the Windows taskbar.
+                area = (
+                    dock.screen().geometry()
+                    if floor._fullscreen_host
+                    else dock.screen().availableGeometry()
+                )
+                bounds = (
+                    dock.frameGeometry()
+                    if dock.isFloating()
+                    else dock.rect().translated(dock.mapTo(controller.host, dock.rect().topLeft()))
+                )
+                fits = (
+                    area.contains(dock.frameGeometry())
+                    if dock.isFloating()
+                    else controller.host.rect().contains(bounds)
+                )
+                controls_fit = (
+                    controller.host.rect().contains(
+                        buttons.mapTo(controller.host, buttons.rect().bottomRight())
+                    )
+                    if not dock.isFloating()
+                    else dock.rect().contains(buttons.mapTo(dock, buttons.rect().bottomRight()))
+                )
+                detail_fits.append(fits and controls_fit)
+                report["detail_geometry"] = dict(
+                    screen=list(area.getRect()),
+                    host=list(controller.host.rect().getRect()),
+                    dock=list(bounds.getRect()),
+                    editor=list(dialog.rect().getRect()),
+                    controls_fit=controls_fit,
                 )
                 dialog.grab().save(str(output / "details.png"))
                 opened.append(dialog.name.toPlainText())
@@ -172,14 +209,16 @@ def run(output):
 
         timer = QTimer()
         timer.timeout.connect(close_detail)
-        timer.start(10)
+        timer.start(30)
         point = floor.view.mapFromScene(floor.nodes[uid].sceneBoundingRect().center())
         QTest.mouseClick(floor.view.viewport(), Qt.MouseButton.LeftButton, pos=point)
         app.processEvents()
         QTest.qWait(60)
         timer.stop()
         assert len(opened) == 1, "Click did not open machine details"
-        assert all(detail_fits), "Details do not fit the DPI-scaled screen"
+        assert all(
+            detail_fits
+        ), f"Details or save controls do not fit the DPI-scaled host: {report.get('detail_geometry')}"
         QTest.mouseClick(host.edit, Qt.MouseButton.LeftButton)
         app.processEvents()
         assert floor.presentation["edit"]
