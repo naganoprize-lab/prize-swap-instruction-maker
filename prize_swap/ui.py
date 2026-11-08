@@ -119,9 +119,10 @@ from .instruction_editor import InstructionEditorMixin
 
 
 from .work_set_ui import WorkSetMixin
+from .excel_import_ui import ExcelImportMixin
 
 
-class Window(WorkSetMixin, InstructionEditorMixin, QMainWindow):
+class Window(ExcelImportMixin, WorkSetMixin, InstructionEditorMixin, QMainWindow):
     def __init__(self, layout_storage=None):
         super().__init__()
         self.setWindowTitle("プライズ景品 入替指示書メーカー")

@@ -29,6 +29,12 @@ class SalesAnalysisMixin:
                 relative=self.analysis_settings["tolerance_relative"],
             ),
         )  # Parse before changing any current state.
+        return self.apply_analysis_snapshot(snapshot)
+
+    def apply_analysis_snapshot(self, snapshot):
+        from .sales_analysis import validate_snapshot
+
+        snapshot = deepcopy(validate_snapshot(snapshot))
         before = self.state()
         from .replacement import episode
         from .performance_history import archive, identity

@@ -53,6 +53,14 @@ def build_toolbar(owner, layout):
         top,
         "ファイル",
         [
+            (
+                "Excel自動判別読込",
+                lambda: (
+                    owner.app_window.import_excel_auto(preferred="layout")
+                    if hasattr(owner.app_window, "import_excel_auto")
+                    else owner.import_dialog()
+                ),
+            ),
             ("レイアウトExcel読込", owner.import_dialog),
             ("配置JSON読込", owner.open_dialog),
             ("保存", owner.save_dialog),

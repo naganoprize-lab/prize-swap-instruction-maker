@@ -259,6 +259,9 @@ def reference_average(machine):
 
 def ratio(machine):
     if getattr(machine, "analysis", None):
+        explicit = machine.analysis.get("imported_ratio")
+        if type(explicit) in (int, float) and math.isfinite(explicit) and explicit >= 0:
+            return explicit
         average = effective_stat(machine, "average")
         reference = reference_average(machine)
         if average is None or reference is None:

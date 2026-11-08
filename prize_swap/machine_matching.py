@@ -263,6 +263,8 @@ def value_source(machine, key):
                 )
             )
     if key == "ratio":
+        if (machine.analysis or {}).get("imported_ratio") is not None:
+            return "景品運営分析表（明示アベ比）"
         from .floor_status import effective_stat, reference_average
 
         if (

@@ -140,6 +140,12 @@ def validate_snapshot(value):
             or type(record.get("row")) is not int
         ):
             raise AppError("売上分析の照合情報が不正です。")
+        if record.get("imported_ratio") is not None and (
+            type(record["imported_ratio"]) not in (int, float)
+            or not math.isfinite(record["imported_ratio"])
+            or record["imported_ratio"] < 0
+        ):
+            raise AppError("Excelアベ比が不正です。")
         from .po_evaluation import validate_inputs
 
         validate_inputs(record.get("po_inputs"))
@@ -236,6 +242,11 @@ def validate_overlay(value):
 
     validate_definition(value.get("po_definition", "unknown"))
     validate_values(value.get("values"))
+    imported = value.get("imported_ratio")
+    if imported is not None and (
+        type(imported) not in (int, float) or not math.isfinite(imported) or imported < 0
+    ):
+        raise AppError("Excelアベ比が不正です。")
 
 
 def load_analysis(path, tolerance=None):
@@ -498,6 +509,7 @@ def apply_snapshot(machines, snapshot):
                 po_inputs=deepcopy(record.get("po_inputs", {})) if record else {},
                 po_definition=snapshot.get("po_definition", "unknown"),
                 machine_name=record.get("machine_name", "") if record else "",
+                imported_ratio=record.get("imported_ratio") if record else None,
                 file_name=snapshot["file_name"],
                 loaded_at=snapshot["loaded_at"],
                 period_source=snapshot.get("period_source", "unknown"),

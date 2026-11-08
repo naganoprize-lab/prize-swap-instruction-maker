@@ -381,6 +381,7 @@ class SettingsPage(QScrollArea):
             (
                 "データと照合",
                 [
+                    ("Excel自動判別・列対応", window.import_excel_auto),
                     ("管理ナンバー照合・手動確認", window.floor.show_matching),
                     ("実績読込結果・異常一覧", window.floor.show_analysis_report),
                     ("分析・判定・機種色・許容差", window.floor.analysis_settings_dialog),

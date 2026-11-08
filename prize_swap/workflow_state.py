@@ -72,6 +72,10 @@ def validate_workflow(value=None):
         or any(type(v) is not bool for v in s["print_job"].values())
     ):
         raise AppError("作業セット設定が不正です。")
+    from .excel_profiles import validate_profile
+
+    for profile in s["import_profiles"]:
+        validate_profile(profile)
     return s
 
 

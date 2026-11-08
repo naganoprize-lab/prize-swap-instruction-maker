@@ -38,9 +38,18 @@ def issue(
 
 def metadata(rows):
     result = dict(period_start=None, period_end=None, period_source="unknown", extracted_at=None)
+    ranges = []
     for row in rows:
         values = [str(c.value).strip() for c in row if c.value is not None]
         text = " ".join(values)
+        period_match = re.search(
+            r"(?:対象期間|集計期間)\s*[:：]?\s*(\d{4}[/-]\d{1,2}[/-]\d{1,2})\s*[~～〜]\s*(\d{4}[/-]\d{1,2}[/-]\d{1,2})",
+            text,
+        )
+        if period_match:
+            start, end = (parse_date(v) for v in period_match.groups())
+            if start and end and start <= end:
+                ranges.append((start.isoformat(), end.isoformat()))
         for label, key in (
             ("期間(自)", "period_start"),
             ("期間(至)", "period_end"),
@@ -64,6 +73,15 @@ def metadata(rows):
                 datetime.strptime(" ".join(match.groups()), "%Y/%m/%d %H:%M:%S").isoformat()
                 + "+09:00"
             )
+    if ranges:
+        unique = set(ranges)
+        if len(unique) == 1 and all(
+            result[k] is None or result[k] == ranges[0][i]
+            for i, k in enumerate(("period_start", "period_end"))
+        ):
+            result["period_start"], result["period_end"] = ranges[0]
+        else:
+            result["period_start"] = result["period_end"] = None
     if result["period_start"] and result["period_end"]:
         if result["period_start"] <= result["period_end"]:
             result["period_source"] = "excel"

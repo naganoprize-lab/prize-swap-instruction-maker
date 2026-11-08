@@ -1341,6 +1341,13 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
     def import_path(self, path, preserve=False):
         machines, warnings, references = import_layout(path, with_references=True)
+        return self.apply_layout_import(path, machines, warnings, references, preserve)
+
+    def apply_layout_import(self, path, machines, warnings, references, preserve=False):
+        validate_machines([asdict(m) for m in machines])
+        from .machine_matching import validate_references
+
+        validate_references(references)
         before = self.state()
         self.number_references = references
         self.initialized = True
