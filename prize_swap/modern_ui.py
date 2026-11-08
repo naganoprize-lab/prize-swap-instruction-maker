@@ -108,53 +108,62 @@ class DashboardPage(QScrollArea):
     def __init__(self, window):
         super().__init__()
         self.window = window
+        self._refreshing = False
         self.setWidgetResizable(True)
         page = QWidget()
         self.setWidget(page)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        layout.addLayout(row)
+        layout.setSpacing(8)
+        title = QLabel("売り場管理ホーム")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+        note = QLabel("今日の作業と売り場の状況。目的から操作を選べます。")
+        note.setObjectName("muted")
+        layout.addWidget(note)
+        self.metrics_grid = QGridLayout()
+        self.metrics_grid.setSpacing(7)
+        layout.addLayout(self.metrics_grid)
         self.cards = {}
-        for key, label in (
+        for key, label in [
             ("total", "管理ブース数"),
             ("candidates", "入替候補数"),
-            ("planned", "投入予定数"),
+            ("instructions", "指示書登録件数"),
+            ("output", "出力対象件数"),
             ("unmatched", "データ未照合件数"),
-        ):
-            card = StatCard(label)
+            ("preflight", "印刷前の要修正"),
+            ("planned", "投入予定数"),
+        ]:
+            card = StatCard(label, compact=True)
+            card.setFixedHeight(62)
+            font = card.value.font()
+            font.setPointSizeF(18)
+            card.value.setFont(font)
             self.cards[key] = card
-            row.addWidget(card, 1)
-        info = QFrame()
-        info.setObjectName("card")
-        box = QVBoxLayout(info)
-        box.setContentsMargins(12, 10, 12, 10)
-        self.period = QLabel()
-        self.period.setObjectName("section")
-        box.addWidget(self.period)
-        self.updated = QLabel()
-        self.updated.setObjectName("muted")
-        self.updated.setWordWrap(True)
-        box.addWidget(self.updated)
-        layout.addWidget(info)
-        title = QLabel("プライズ景品 入替指示書メーカー")
-        title.setObjectName("pageTitle")
-        layout.insertWidget(0, title)
-        note = QLabel("売り場の管理・分析・入替指示をまとめて行えます。")
-        note.setObjectName("muted")
-        layout.insertWidget(1, note)
+        attention = QFrame()
+        attention.setObjectName("card")
+        self.attention_layout = QVBoxLayout(attention)
+        self.attention_layout.setContentsMargins(10, 7, 10, 7)
+        self.attention_title = QLabel("注意・お知らせ")
+        self.attention_title.setObjectName("section")
+        self.attention_layout.addWidget(self.attention_title)
+        self.attention_buttons = []
+        layout.addWidget(attention)
+        label = QLabel("何をしたいですか？")
+        label.setObjectName("section")
+        layout.addWidget(label)
         self.feature_grid = QGridLayout()
-        self.feature_grid.setSpacing(9)
+        self.feature_grid.setSpacing(8)
         layout.addLayout(self.feature_grid)
         self.tiles = {}
+        self.tile_descriptions = {}
         for key, name, description, icon in [
-            ("floor", "売り場レイアウト", "マシン配置と稼働状況を確認", "floor"),
-            ("analysis", "売上分析", "全台の売上・アベ比・原価率を分析", "chart"),
-            ("candidates", "入替候補", "確認が必要なマシンと判定理由", "file"),
-            ("instructions", "入替指示書", "商品・予定ブース数・割当を編集", "file"),
-            ("arrivals", "入荷予定", "登録済み商品の予定日と一覧を確認", "file"),
+            ("update", "売上データを更新", "Excelを読み込み、実績と照合結果を更新", "file"),
+            ("floor", "売り場レイアウトを見る", "マシン配置と稼働状況を確認", "floor"),
+            ("candidates", "入替候補を確認", "要確認・入替検討の根拠を見る", "file"),
+            ("instructions", "入替指示書を作成", "編集・印刷前チェック・作業セット", "file"),
+            ("analysis", "売上分析を見る", "全台・選択した台の分布を確認", "chart"),
+            ("arrivals", "入荷予定を確認", "登録済み商品の予定日と一覧", "file"),
             ("matching", "データ照合", "管理ナンバーと実績の対応を確認", "file"),
             ("labels", "入荷ラベル", "商品名ラベルの枚数・印刷", "file"),
             ("settings", "設定", "テーマ・目標原価率・分析基準", "settings"),
@@ -163,10 +172,35 @@ class DashboardPage(QScrollArea):
             button.setText(name + "\n" + description)
             button.setIcon(line_icon(icon))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setMinimumHeight(92)
+            button.setMinimumHeight(78)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            button.clicked.connect(lambda checked=False, k=key: window.navigation.activate(k))
+            button.clicked.connect(lambda checked=False, k=key: self.navigate(k))
             self.tiles[key] = button
+            self.tile_descriptions[key] = (name, description, icon)
+        recent = QFrame()
+        recent.setObjectName("card")
+        box = QVBoxLayout(recent)
+        box.setContentsMargins(10, 7, 10, 7)
+        title = QLabel("最近の作業")
+        title.setObjectName("section")
+        box.addWidget(title)
+        self.period = QLabel()
+        self.period.setTextFormat(Qt.TextFormat.PlainText)
+        self.period.setObjectName("section")
+        box.addWidget(self.period)
+        self.updated = QLabel()
+        self.updated.setTextFormat(Qt.TextFormat.PlainText)
+        self.updated.setWordWrap(True)
+        self.updated.setObjectName("muted")
+        box.addWidget(self.updated)
+        self.recent_edits = QLabel()
+        self.recent_edits.setTextFormat(Qt.TextFormat.PlainText)
+        self.recent_edits.setWordWrap(True)
+        box.addWidget(self.recent_edits)
+        history = QPushButton("編集履歴を見る")
+        history.clicked.connect(self.show_history)
+        box.addWidget(history)
+        layout.addWidget(recent)
         self.bars = RatioBars()
         self.bars.setFixedHeight(240)
         self.bars.activated.connect(self.locate)
@@ -176,52 +210,158 @@ class DashboardPage(QScrollArea):
         summary.toggled.connect(self.bars.setVisible)
         layout.addWidget(summary)
         layout.addWidget(self.bars)
-        import_button = QPushButton("売上分析Excel読込")
-        import_button.clicked.connect(window.floor.import_analysis_dialog)
-        layout.addWidget(import_button)
         layout.addStretch()
         manager().changed.connect(self.refresh_tile_icons)
         self.reflow()
 
+    def navigate(self, key):
+        w = self.window
+        if key == "update":
+            if hasattr(w, "import_excel_auto"):
+                w.import_excel_auto(preferred="sales")
+            else:
+                w.floor.import_analysis_dialog()
+        else:
+            w.navigation.activate(key)
+
+    def show_history(self):
+        w = self.window
+        w.navigation.activate("instructions")
+        w.instruction_tabs.setCurrentWidget(w.operation_history)
+
     def refresh_tile_icons(self, *_):
         for key, button in self.tiles.items():
-            button.setIcon(
-                line_icon(
-                    "floor"
-                    if key == "floor"
-                    else (
-                        "chart"
-                        if key == "analysis"
-                        else "settings" if key == "settings" else "file"
-                    )
-                )
-            )
+            button.setIcon(line_icon(self.tile_descriptions[key][2]))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, "tiles"):
             self.reflow()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh()
+
     def reflow(self):
         cols = 3 if self.viewport().width() >= 1100 else 2 if self.viewport().width() >= 650 else 1
-        if getattr(self, "_tile_columns", None) == cols:
-            return
         self._tile_columns = cols
-        for i, button in enumerate(self.tiles.values()):
-            self.feature_grid.removeWidget(button)
-            self.feature_grid.addWidget(button, i // cols, i % cols)
-
-    def refresh(self):
-        floor = self.window.floor
-        floor.dashboard.refresh()
-        for key, card in self.cards.items():
-            card.set_value(floor.dashboard.metrics[key])
-        self.period.setText(period_text(floor.analysis_state))
-        self.updated.setText(
-            f'抽出日時：{floor.analysis_state.get("extracted_at") or "不明"}　読込日時：{floor.analysis_state["loaded_at"] or "未読込"}\nファイル：{floor.analysis_state["file_name"] or "未読込"}'
+        for i, b in enumerate(self.tiles.values()):
+            self.feature_grid.removeWidget(b)
+            self.feature_grid.addWidget(b, i // cols, i % cols)
+        metric_cols = (
+            4 if self.viewport().width() >= 1000 else 3 if self.viewport().width() >= 650 else 2
         )
-        self.bars.groups = floor.dashboard.groups
-        self.bars.update()
+        for i, card in enumerate(self.cards.values()):
+            self.metrics_grid.removeWidget(card)
+            self.metrics_grid.addWidget(card, i // metric_cols, i % metric_cols)
+
+    def refresh(self, validate=True):
+        if self._refreshing:
+            return
+        self._refreshing = True
+        try:
+            w = self.window
+            floor = w.floor
+            floor.dashboard.refresh()
+            metrics = dict(floor.dashboard.metrics)
+            issues = []
+            if hasattr(w, "preflight"):
+                if validate:
+                    w.preflight.refresh()
+                issues = w.preflight.issues
+            metrics.update(
+                instructions=len(w.visible),
+                output=sum(p.included for p in w.visible),
+                preflight=sum(i.severity == "error" for i in issues),
+            )
+            for key, card in self.cards.items():
+                card.set_value(metrics[key])
+            self.period.setText(period_text(floor.analysis_state))
+            recent = w.workflow.data["recent"] if hasattr(w, "workflow") else {}
+            from pathlib import Path
+
+            def file_line(key, label):
+                r = recent.get(key)
+                if r:
+                    return f"{label}：{Path(r['file']).name} ｜ {r['timestamp'].replace('T',' ')}"
+                if key == "excel" and floor.analysis_state.get("file_name"):
+                    return f"{label}：{floor.analysis_state['file_name']} ｜ {floor.analysis_state.get('loaded_at') or '読込日時不明'}"
+                return label + "：記録なし"
+
+            self.updated.setText(
+                "\n".join(
+                    [
+                        file_line("excel", "最後のExcel"),
+                        file_line("saved", "最後の保存"),
+                        file_line("output", "最後の出力"),
+                    ]
+                )
+            )
+            audit = w.workflow.data["audit_log"] if hasattr(w, "workflow") else []
+            edits = [r for r in reversed(audit) if r["operation_type"] in ("edit", "undo", "redo")][
+                :3
+            ]
+            self.recent_edits.setText(
+                "最近の編集："
+                + " ／ ".join(r["timestamp"][11:19] + " " + r["description"] for r in edits)
+                if edits
+                else "最近の編集：記録なし"
+            )
+            for b in self.attention_buttons:
+                self.attention_layout.removeWidget(b)
+                b.deleteLater()
+            self.attention_buttons = []
+
+            def attention(text, callback):
+                b = QPushButton(text)
+                b.setStyleSheet("text-align: left;")
+                b.clicked.connect(callback)
+                self.attention_layout.addWidget(b)
+                self.attention_buttons.append(b)
+
+            errors = [i for i in issues if i.severity == "error"]
+            warnings = [i for i in issues if i.severity == "warning"]
+            for kinds, title in [
+                ({"contradictory_instruction", "duplicate_machine"}, "同一マシンへの複数指示"),
+                (
+                    {"ambiguous_reference", "reference_mismatch", "management_unmatched"},
+                    "管理ナンバーの照合",
+                ),
+                ({"unassigned_booths"}, "未割当ブース"),
+            ]:
+                found = [i for i in issues if i.issue_type in kinds]
+                if found:
+                    attention(
+                        f"{title}：{len(found)}件",
+                        lambda checked=False, i=found[0]: w.preflight.go_to_issue(i),
+                    )
+            if errors or warnings:
+                attention(
+                    f"印刷前の確認：エラー{len(errors)}件 ／ 警告{len(warnings)}件",
+                    lambda: self.show_preflight(),
+                )
+            if floor.analysis_state.get("loaded_at") and metrics["unmatched"]:
+                attention(
+                    f"売上実績の未照合：{metrics['unmatched']}件",
+                    lambda: w.navigation.activate("matching"),
+                )
+            if not self.attention_buttons:
+                attention("重大な問題は検出されていません", lambda: self.show_preflight())
+            records = floor.analytics.records()
+            poor = sum(r["assessment"] == "要確認" for r in records)
+            consider = sum(r["assessment"] == "入替検討" for r in records)
+            name, description, icon = self.tile_descriptions["candidates"]
+            self.tiles["candidates"].setText(f"{name}\n要確認 {poor}台 ／ 入替検討 {consider}台")
+            self.bars.groups = floor.dashboard.groups
+            self.bars.update()
+        finally:
+            self._refreshing = False
+
+    def show_preflight(self):
+        w = self.window
+        w.navigation.activate("instructions")
+        w.preflight.refresh()
+        w.instruction_tabs.setCurrentWidget(w.preflight)
 
     def locate(self, key):
         self.window.floor.highlight_group(self.window.floor.dashboard.groups[key]["uids"])

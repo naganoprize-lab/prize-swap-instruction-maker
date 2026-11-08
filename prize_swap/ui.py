@@ -379,6 +379,20 @@ class Window(InstructionEditorMixin, QMainWindow):
         self.operation_history = OperationHistoryPanel(self)
         self.instruction_tabs.addTab(self.operation_history, "編集履歴")
         self.shortcuts = AppShortcuts(self)
+        self.preflight.validated.connect(
+            lambda: (
+                self.dashboard_page.refresh(False)
+                if self.tabs.currentWidget() is self.dashboard_page
+                else None
+            )
+        )
+        self.workflow.changed.connect(
+            lambda: (
+                self.dashboard_page.refresh(False)
+                if self.tabs.currentWidget() is self.dashboard_page
+                else None
+            )
+        )
         self.workflow.changed.connect(
             lambda: (
                 self.instruction_save_timer.start(800) if not self._loading_instructions else None

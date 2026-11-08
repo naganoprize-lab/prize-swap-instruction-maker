@@ -121,7 +121,7 @@ def run(output):
             window.tabs.setCurrentWidget(window.dashboard_page)
             window.dashboard_page.refresh()
             app.processEvents()
-            assert len(window.dashboard_page.tiles) == 8
+            assert len(window.dashboard_page.tiles) == 9
             assert window.dashboard_page.cards["total"].value.text() == "300"
             window.grab().save(str(output / f"{theme}-home.png"))
         manager().set_mode("light", persist=False)
