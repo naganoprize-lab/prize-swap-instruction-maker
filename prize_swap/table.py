@@ -56,14 +56,17 @@ class ProductModel(QAbstractTableModel):
     edited = Signal()
     invalid = Signal(str)
     allocation_warning = Signal(str)
+    edit_requested = Signal(object, object, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.products = []
+        self._number_cache = None
 
     def replace(self, products):
         self.beginResetModel()
         self.products = products
+        self._number_cache = None
         self.endResetModel()
 
     def rowCount(self, parent=QModelIndex()):
@@ -97,13 +100,22 @@ class ProductModel(QAbstractTableModel):
                 return (
                     editor_state(p) if role == Qt.ItemDataRole.EditRole else format_cell_status(p)
                 )
-            if (
-                col == 3
-                and role == Qt.ItemDataRole.DisplayRole
-                and p.candidate_assignment
-                and not value
-            ):
-                return "新商品未設定（現在の商品はツールチップで確認）"
+            if col == 3 and role == Qt.ItemDataRole.DisplayRole and not value:
+                return "商品未定"
+            if col == 6 and role == Qt.ItemDataRole.DisplayRole:
+                if self._number_cache is None:
+                    from .instructions import booths
+
+                    self._number_cache = {
+                        (b.product.entry_id, b.token): b.number
+                        for b in booths(self.products, all_entries=True)
+                    }
+                from .instructions import display_badge
+
+                return "、".join(
+                    (display_badge(self._number_cache[(p.entry_id, v)]) + " " + v).strip()
+                    for v in (value or p.management_numbers or [""])
+                )
             return ", ".join(value) if col == 6 else value
         if role == Qt.ItemDataRole.CheckStateRole and col in (0, 8):
             return Qt.CheckState.Checked if value else Qt.CheckState.Unchecked
@@ -138,9 +150,16 @@ class ProductModel(QAbstractTableModel):
             ):
                 return QColor(metric_colors(field)[1])
         if role == Qt.ItemDataRole.ToolTipRole:
-            if p.candidate_assignment and col in (3, 6):
-                a = p.candidate_assignment
-                return f"現在の商品：{a['current_product_name']}\n新しい商品：{p.name or '未設定'}\n管理：{a['management_number'] or '—'}\n{a['source_candidate_status']}：{a['source_candidate_reason']}\n入替日は未確定です。選択中の日付に下書きを表示しています。"
+            from .instructions import SOURCE_LABELS
+
+            meta = f"追加元：{SOURCE_LABELS[p.source_type]} / {p.source_method}\n備考：{p.notes}"
+            if col in (2, 3, 6):
+                current = (p.candidate_assignment or {}).get("current_product_name", "")
+                text = meta + f"\n現在の商品：{current}\n新しい商品：{p.name or '商品未定'}"
+                if p.candidate_assignment:
+                    a = p.candidate_assignment
+                    text += f"\n管理：{a['management_number'] or '—'}\n{a['source_candidate_status']}：{a['source_candidate_reason']}\n入替日は未確定です。選択中の日付に下書きを表示しています。"
+                return text
             if col == 7:
                 return format_allocations(p, "\n") + "\n" + allocation_status(p).message
             return "\n".join(value) if col == 6 else str(value)
@@ -149,23 +168,25 @@ class ProductModel(QAbstractTableModel):
         flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
         if index.column() in (0, 8):
             return flags | Qt.ItemFlag.ItemIsUserCheckable
-        return flags if index.column() == 2 else flags | Qt.ItemFlag.ItemIsEditable
+        return flags | Qt.ItemFlag.ItemIsEditable
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         if not index.isValid():
             return False
         p, col = self.products[index.row()], index.column()
+        from copy import deepcopy
+
+        before = deepcopy(p)
         try:
             if col in (0, 8) and role == Qt.ItemDataRole.CheckStateRole:
                 value = value == Qt.CheckState.Checked or value == Qt.CheckState.Checked.value
-            elif role != Qt.ItemDataRole.EditRole or col in (0, 2, 8):
+            elif role != Qt.ItemDataRole.EditRole or col in (0, 8):
                 return False
             elif col == 1:
                 value = int(value)
             elif col == 3:
                 value = str(value).strip()
-                if not value:
-                    raise AppError("商品名は必須です。")
+
             elif col in (4, 5):
                 value = quantity(value)
             elif col == 6:
@@ -175,13 +196,16 @@ class ProductModel(QAbstractTableModel):
                 value = p.methods
             elif col == 9 and value not in LIMITS:
                 raise AppError("個数制限を選択してください。")
-            if col == 0 and value and not p.name.strip():
-                raise AppError("新しい商品名を入力してから出力対象にしてください。")
             setattr(p, ATTRS[col], value)
             if col == 3 and p.candidate_assignment:
                 p.candidate_assignment["replacement_product_name"] = value
             if col == 6:
                 sync_machine_methods(p)
+            from .instructions import mark_edited
+
+            mark_edited(p, [ATTRS[col]])
+            self._number_cache = None
+            self.edit_requested.emit(p, before, deepcopy(p))
             self.dataChanged.emit(
                 self.index(index.row(), 0), self.index(index.row(), len(COLUMNS) - 1)
             )

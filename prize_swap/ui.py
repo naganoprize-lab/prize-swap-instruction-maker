@@ -115,7 +115,10 @@ class ProductFilter(QSortFilterProxyModel):
         return str(left.data() or "").casefold() < str(right.data() or "").casefold()
 
 
-class Window(QMainWindow):
+from .instruction_editor import InstructionEditorMixin
+
+
+class Window(InstructionEditorMixin, QMainWindow):
     def __init__(self, layout_storage=None):
         super().__init__()
         self.setWindowTitle("プライズ景品 入替指示書メーカー")
@@ -287,6 +290,7 @@ class Window(QMainWindow):
         for i, width in enumerate([48, 60, 115, 340, 68, 68, 165, 240, 52, 160]):
             self.table.setColumnWidth(i, width)
         self.table.viewport().installEventFilter(self)
+        self.setup_instruction_editing(controls)
         center.addWidget(self.table, 1)
         hint = QLabel(
             "セルで直接編集 / マシン番号は複数可 / 印刷は検索に関係なく選択日の出力対象すべて"
@@ -362,8 +366,10 @@ class Window(QMainWindow):
         from .modern_ui import build_shell
 
         build_shell(self, outer, header, footer)
+        self.setup_instruction_map(list_layout)
         self.themes.load(self.appearance_path)
         self.theme_changed()
+        self.restore_instruction_autosave()
 
     def show_settings(self):
         if hasattr(self, "settings_page"):
@@ -517,6 +523,8 @@ class Window(QMainWindow):
             self.navigation.set_compact(self.width() < 1280)
 
     def eventFilter(self, obj, event):
+        if hasattr(self, "instruction_history") and self.instruction_key_event(obj, event):
+            return True
         if obj is self.table.viewport() and event.type() == QEvent.Type.MouseButtonRelease:
             index = self.table.indexAt(event.position().toPoint())
             if index.isValid() and index.column() in (7, 9):
@@ -538,6 +546,8 @@ class Window(QMainWindow):
         self.labels.sync()
         self.update_count()
         self.update_allocation_notice()
+        if hasattr(self, "instruction_map"):
+            self.instruction_map.refresh()
 
     def update_count(self):
         self.count.setText(
@@ -631,9 +641,18 @@ class Window(QMainWindow):
             self.model.products[self.proxy.mapToSource(self.proxy.index(r, 0)).row()]
             for r in range(self.proxy.rowCount())
         ]
+        from .instruction_editor import all_state, InstructionCommand
+
+        before = all_state(self)
         for p in products:
-            p.included = included and bool(p.name.strip())
+            p.included = included
+            from .instructions import mark_edited
+
+            mark_edited(p, ["included"])
         if products:
+            self.instruction_history.push(
+                InstructionCommand(self, before, all_state(self), "出力対象を変更", True)
+            )
             self.mark_dirty()
             self.refresh()
 
@@ -655,8 +674,17 @@ class Window(QMainWindow):
             neighbor = i + direction
             if id(products[i]) in selected and id(products[neighbor]) not in selected:
                 products[i], products[neighbor] = products[neighbor], products[i]
+        from .instruction_editor import all_state, InstructionCommand
+
+        before = all_state(self)
         for order, p in enumerate(products, 1):
             p.order = order
+            from .instructions import mark_edited
+
+            mark_edited(p, ["order"])
+        self.instruction_history.push(
+            InstructionCommand(self, before, all_state(self), "指示の順序変更", True)
+        )
         self.mark_dirty()
         self.refresh()
         for row, p in enumerate(self.model.products):
@@ -669,18 +697,25 @@ class Window(QMainWindow):
                 )
 
     def print_products(self):
-        if any(p.included and not p.name.strip() for p in self.visible):
-            raise AppError("下書きの新しい商品名を入力してから印刷してください。")
         self.table.setFocus()
+        if (
+            self.floor.instruction_print_options["mode"] == "map"
+            and self.floor.instruction_print_options["all_entries"]
+        ):
+            return list(self.visible)
         if not any(p.included for p in self.visible):
-            raise AppError("選択日に出力対象の商品がありません。")
+            if not self.ask_output_selection():
+                raise AppError("出力対象の選択をキャンセルしました。")
+            self.set_all(True)
+            if not any(p.included for p in self.visible):
+                raise AppError("現在の登録日・表示範囲に指示がありません。")
         if not self.confirm_method_allocations():
             raise AppError("運営方法の台数を確認してから再実行してください。")
         if self.floor.initialized:
-            registered = {machine_key(m) for m in self.floor.machines if machine_key(m)}
-            missing = sorted(
-                {n for p in self.visible if p.included for n in p.machines if n not in registered}
-            )
+            from .instructions import booths
+
+            refs = booths(self.visible, self.floor.machines, self.floor.number_references)
+            missing = sorted({b.token for b in refs if b.machine is None and b.token})
             if missing:
                 answer = QMessageBox.question(
                     self,
@@ -695,13 +730,18 @@ class Window(QMainWindow):
 
     def paint_printer(self, printer):
         try:
-            plan = render_document(
+            from .instruction_output import render_output
+
+            plan = render_output(
                 printer,
                 list(self.visible),
+                self.floor.machines,
+                self.floor.number_references,
                 self.selected_day(),
                 self.page_rows.value(),
                 self.layout_name(),
                 self.print_mode.currentData(),
+                self.floor.instruction_print_options,
             )
             self.statusBar().showMessage(plan.reason, 15000)
             return plan
@@ -715,6 +755,11 @@ class Window(QMainWindow):
             return self.labels.preview()
         try:
             self.print_products()
+            if self.floor.instruction_print_options["mode"] != "instructions":
+                from .instruction_preview import InstructionPreview
+
+                InstructionPreview(self).exec()
+                return
             printer = configured_printer()
             dialog = QPrintPreviewDialog(printer, self)
             dialog.setWindowTitle("印刷プレビュー — A4横向き")
@@ -760,13 +805,18 @@ class Window(QMainWindow):
             self.print_products()
             printer = configured_printer()
             area = printer.pageRect(QPrinter.Unit.Point)
-            plan = plan_pages(
+            from .instruction_output import output_plan
+
+            plan = output_plan(
+                printer,
                 self.visible,
-                area.width(),
-                area.height(),
+                self.floor.machines,
+                self.floor.number_references,
+                self.selected_day(),
                 self.page_rows.value(),
                 self.layout_name(),
                 self.print_mode.currentData(),
+                self.floor.instruction_print_options,
             )
             dialog = QPrintDialog(printer, self)
             dialog.setMinMax(1, len(plan.pages))
@@ -789,14 +839,12 @@ class Window(QMainWindow):
             products = self.print_products()
             path = self.save_path("PDF保存", "PDF (*.pdf)", ".pdf")
             if path:
-                plan = save_pdf(
+                from .printing import save_rendered_pdf
+
+                plan = save_rendered_pdf(
                     path,
-                    products,
-                    self.selected_day(),
-                    self.page_rows.value(),
-                    self.layout_name(),
-                    self.source,
-                    self.print_mode.currentData(),
+                    lambda temp: self.paint_printer(configured_printer(temp)),
+                    [self.source, self.floor.source],
                 )
                 self.statusBar().showMessage(f"PDFを保存しました：{path} {plan.reason}", 15000)
         except Exception as exc:
@@ -804,21 +852,30 @@ class Window(QMainWindow):
 
     def mark_dirty(self, *_):
         self.dirty = True
+        if hasattr(self, "instruction_save_timer") and not self._loading_instructions:
+            self.instruction_save_timer.start(800)
 
     def error(self, exc):
+        if str(exc) == "出力対象の選択をキャンセルしました。":
+            return
         QMessageBox.warning(self, "処理できませんでした", str(exc))
 
     def confirm_discard(self):
         return (
             not self.dirty
             or QMessageBox.question(
-                self, "編集中の内容", "未保存の編集内容があります。破棄して続けますか？"
+                self,
+                "編集中の内容",
+                "一時保存ファイルへ未保存の編集があります。自動保存を保持して続けますか？",
             )
             == QMessageBox.StandardButton.Yes
         )
 
     def closeEvent(self, event):
         if self.confirm_discard():
+            if hasattr(self, "instruction_save_timer") and self.instruction_save_timer.isActive():
+                self.instruction_save_timer.stop()
+                self.autosave_instructions()
             if self.floor.timer.isActive():
                 self.floor.timer.stop()
                 self.floor.autosave()
@@ -849,14 +906,57 @@ class Window(QMainWindow):
         self.day.setDate(QDate.fromString(self.dates.itemText(index), "yyyy-MM-dd"))
 
     def open_excel(self):
-        if not self.confirm_discard():
-            return
         path, _ = QFileDialog.getOpenFileName(self, "入力Excelを選択", "", "Excel (*.xlsx *.xlsm)")
         if not path:
             return
         try:
             products, warnings = read_products(path)
-            self.products, self.source = products, path
+            if self.products:
+                from PySide6.QtWidgets import QInputDialog
+
+                option, ok = QInputDialog.getItem(
+                    self,
+                    "Excel更新時の手動編集",
+                    "更新方針",
+                    ["手動編集を優先", "Excelの最新値を使用", "項目ごとに確認"],
+                    0,
+                    False,
+                )
+                if not ok:
+                    return
+                policy = {
+                    "手動編集を優先": "manual",
+                    "Excelの最新値を使用": "excel",
+                    "項目ごとに確認": "fields",
+                }[option]
+                choices = {}
+                if policy == "fields":
+                    from copy import deepcopy
+                    from .instructions import merge_import
+
+                    _, conflicts = merge_import(
+                        deepcopy(self.products), deepcopy(products), "manual"
+                    )
+                    for entry, key, new in conflicts:
+                        if key == "identity":
+                            continue
+                        choices[(entry, key)] = (
+                            QMessageBox.question(
+                                self,
+                                "更新項目を確認",
+                                f"{key} のExcel最新値：{new}\nこの項目をExcelの値へ更新しますか？",
+                            )
+                            == QMessageBox.StandardButton.Yes
+                        )
+                self.merge_instruction_excel(products, policy, choices)
+            else:
+                from .instructions import prepare_entry, import_values
+
+                for p in products:
+                    prepare_entry(p)
+                    p.import_snapshot = import_values(p)
+                self.products = products
+            self.source = path
             self.file_label.setText(Path(path).name)
             self.file_label.setToolTip(path)
             self.update_dates()
@@ -864,7 +964,7 @@ class Window(QMainWindow):
                 first = min(p.day for p in products)
                 self.day.setDate(QDate(first.year, first.month, first.day))
             self.refresh()
-            self.dirty = False
+            self.mark_dirty()
             self.notice.setText(
                 f"読込 {len(products)}件 ／ 警告 {len(warnings)}件。重複行は保持します。"
             )
@@ -925,6 +1025,7 @@ class Window(QMainWindow):
                     validate_state(data["floor_layout"])
                 label_store = LabelStore.restore(data.get("label_printing"), products)
                 self.products, self.source = products, data.get("source", "")
+                self.instruction_history.clear()
                 self.labels.store = label_store
                 self.labels.apply_options()
                 self.file_label.setText(Path(self.source).name or "JSONから復元")
@@ -945,10 +1046,10 @@ class Window(QMainWindow):
                 self.error(exc)
 
     def export(self):
-        if not any(p.included for p in self.visible):
-            self.error(AppError("選択日に出力対象の商品がありません。"))
-            return
-        if not self.confirm_method_allocations():
+        try:
+            self.print_products()
+        except AppError as exc:
+            self.error(exc)
             return
         path = self.save_path("Excel出力", "Excel (*.xlsx)", ".xlsx")
         if path:

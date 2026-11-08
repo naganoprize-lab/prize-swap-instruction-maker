@@ -6,6 +6,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+from uuid import uuid4
 from tempfile import NamedTemporaryFile
 
 from openpyxl import load_workbook
@@ -91,6 +92,16 @@ class Product:
     retired_machine_methods: dict[str, str | None] = field(default_factory=dict)
 
     candidate_assignment: dict | None = None
+    entry_id: str = field(default_factory=lambda: uuid4().hex)
+    source_type: str = "auto"
+    source_method: str = ""
+    notes: str = ""
+    management_numbers: list[str] = field(default_factory=list)
+    manually_edited_fields: list[str] = field(default_factory=list)
+    booth_assignments: list[dict] = field(default_factory=list)
+    import_snapshot: dict = field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
 
     @property
     def method_counts(self):
@@ -103,7 +114,7 @@ class Product:
     @property
     def assigned_machine_count(self):
         values = self.machines if isinstance(self.machines, str) else "\n".join(self.machines)
-        return len(machine_numbers(values))
+        return len(machine_numbers(values) or self.management_numbers)
 
 
 def read_products(path: str | Path) -> tuple[list[Product], list[str]]:
@@ -173,6 +184,8 @@ def atomic_json(path: Path, payload: dict):
 def save_session(path, products, selected_day, source, layout="column", rows_per_page=20, floor_layout=None, label_state=None, print_mode="auto"):
     if source and Path(path).resolve() == Path(source).resolve():
         raise AppError("入力Excelと同じ場所には保存できません。")
+    from .instructions import prepare_entry
+    for p in products: prepare_entry(p)
     records = [{**asdict(p), "day": p.day.isoformat(), "assigned_machine_count": p.assigned_machine_count} for p in products]
     data = dict(version=1, products=records, selected_day=selected_day.isoformat(), source=str(source or ""), layout=layout, rows_per_page=rows_per_page)
     data["print_mode"] = print_mode
@@ -204,7 +217,7 @@ def load_session(path):
             p = Product(**record)
             from .candidate_transfer import validate_assignment
             p.candidate_assignment=validate_assignment(p.candidate_assignment)
-            if not isinstance(p.name, str) or (not p.name.strip() and not p.candidate_assignment) or not isinstance(p.maker, str):
+            if not isinstance(p.name, str) or not isinstance(p.maker, str):
                 raise ValueError("品名・メーカーが不正")
             p.units, p.cases = quantity(p.units), quantity(p.cases)
             if not isinstance(p.machines, list) or any(not isinstance(x, str) for x in p.machines):
@@ -219,7 +232,13 @@ def load_session(path):
                 sync_machine_methods(p)
             if p.limit not in LIMITS or type(p.order) is not int or type(p.priority) is not bool or type(p.included) is not bool:
                 raise ValueError("商品設定が不正")
+            from .instructions import prepare_entry
+            prepare_entry(p)
             products.append(p)
+        if len({p.entry_id for p in products})!=len(products):
+            raise ValueError("指示IDが重複しています")
+        links=[link["assignment_id"] for p in products for link in p.booth_assignments]
+        if len(set(links))!=len(links):raise ValueError("ブース割当IDが重複しています")
         return products, selected, data
     except (ValueError, TypeError, KeyError, AttributeError) as exc:
         raise AppError(f"一時保存ファイルの形式が不正です：{exc}") from exc

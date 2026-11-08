@@ -66,6 +66,9 @@ def export_excel(path, products, selected_day, source=None, rows=20, layout="col
         raise AppError("出力先は.xlsx形式を指定してください。")
     if source and path.resolve() == Path(source).resolve():
         raise AppError("元のExcelには上書きできません。")
+    from .instructions import number_lookup, display_badge
+
+    numbers = number_lookup(products)
     wb = Workbook()
     ws = wb.active
     ws.title = "入れ替え指示書"
@@ -252,10 +255,17 @@ def export_excel(path, products, selected_day, source=None, rows=20, layout="col
                         values = product_values(group.product)
                         for offset, number in enumerate(group.machines):
                             machine_row = row + starts[offset]
-                            safe_value(ws.cell(machine_row, base + 1), number or "未割当")
+                            safe_value(
+                                ws.cell(machine_row, base + 1),
+                                (
+                                    display_badge(numbers[(group.product.entry_id, number)])
+                                    + " "
+                                    + number
+                                ).strip(),
+                            )
                             safe_value(
                                 ws.cell(machine_row, base + 2),
-                                assigned.get(number) or "未設定",
+                                assigned.get(number) or "",
                             )
                         for c in range(3, 8):
                             safe_value(ws.cell(row, base + c), values[c - 1])

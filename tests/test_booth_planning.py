@@ -246,7 +246,7 @@ def test_excel_real_vertical_merges_individual_methods_and_plans_once(tmp_path, 
     export_excel(path, [p], DAY, layout=layout)
     wb = load_workbook(path)
     ws = wb.active
-    assert [ws.cell(r, 1).value for r in (3, 4, 5)] == p.machines
+    assert [ws.cell(r, 1).value.split(" ", 1)[-1] for r in (3, 4, 5)] == p.machines
     assert [ws.cell(r, 2).value for r in (3, 4, 5)] == ["橋渡し", "リング", "橋渡し"]
     assert ws["C3"].value == "橋渡し 2ブース\nリング 3ブース"
     assert ws["D3"].value == "【優先入替】\n" + p.name
@@ -279,7 +279,7 @@ def test_excel_long_name_fits_without_exceeding_physical_row_limit(tmp_path):
     assert ws["C3"].value == "リング 3ブース"
     assert any(r.min_col == 4 and r.min_row == 3 and r.max_row > 3 for r in ws.merged_cells)
     assert all((r.height or 0) <= 409 for r in ws.row_dimensions.values())
-    assert sum(cell.value == "20085右" for row in ws for cell in row) == 1
+    assert sum(str(cell.value).endswith(" 20085右") for row in ws for cell in row) == 1
     wb.close()
 
 
@@ -297,7 +297,10 @@ def test_pdf_plans_are_once_per_product_and_merged_geometry_is_visible(tmp_path)
     group = row.groups[0]
     assert group.machines == p.machines
     assert len(group.machine_cells) == 3
-    assert group.cells[2].text == "橋渡し 2ブース\n済2 未0 超0\nリング 3ブース\n済1 未2 超0\n合計 5ブース\n済3 未2 超0"
+    assert (
+        group.cells[2].text
+        == "橋渡し 2ブース\n済2 未0 超0\nリング 3ブース\n済1 未2 超0\n合計 5ブース\n済3 未2 超0"
+    )
     # Actual painting: the machine-row separator stops before merged plan/name.
     image = QImage(round(plan.width), round(plan.height), QImage.Format.Format_ARGB32)
     image.fill(QColor("white"))
@@ -307,7 +310,7 @@ def test_pdf_plans_are_once_per_product_and_merged_geometry_is_visible(tmp_path)
     y = round(plan.title_height + plan.header_height + group.heights[0])
     # Measured fractional row heights can put an antialiased 1pt rule between
     # two pixels; inspect its immediate band instead of one rounded pixel.
-    assert min(image.pixelColor(3, yy).lightness() for yy in range(y-1, y+2)) < 150
+    assert min(image.pixelColor(3, yy).lightness() for yy in range(y - 1, y + 2)) < 150
     plan_left = sum(plan.widths[:2])
     assert image.pixelColor(round(plan_left + 2), y).lightness() > 200
     # Every measured text line fits its respective merged or individual cell.
@@ -394,6 +397,7 @@ def test_direct_print_dialog_uses_same_machine_and_plan_renderer(window, tmp_pat
     # Compare actual page rendering as well as text; metadata timestamps differ.
     from PySide6.QtPdf import QPdfDocument
     from PySide6.QtCore import QSize
+
     images = []
     for filename in (saved, path):
         document = QPdfDocument()
@@ -450,10 +454,11 @@ def test_excel_multipage_oversized_group_keeps_all_machine_rows(tmp_path, layout
     wb = load_workbook(path)
     ws = wb.active
     emitted = [
-        ws.cell(r, c).value
+        ws.cell(r, c).value.split(" ", 1)[-1]
         for r in range(3, ws.max_row + 1)
         for c in (1, 8)
-        if ws.cell(r, c).value in p.machines
+        if isinstance(ws.cell(r, c).value, str)
+        and ws.cell(r, c).value.split(" ", 1)[-1] in p.machines
     ]
     assert pages > 1
     assert sorted(emitted) == sorted(p.machines)

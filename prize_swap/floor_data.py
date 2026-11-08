@@ -200,6 +200,10 @@ def validate_machines(records):
 
 
 def validate_state(state):
+    from .instruction_output import validate_options
+
+    if isinstance(state, dict):
+        validate_options(state.get("instruction_print_options"))
     if (
         not isinstance(state, dict)
         or state.get("version") not in (1, 2, 3)

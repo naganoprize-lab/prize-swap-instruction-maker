@@ -49,19 +49,19 @@ def test_table_edit_date_retention_priority_and_validation(window):
     assert model.setData(model.index(0, 4), "36")
     assert model.setData(model.index(0, 5), "1.5")
     assert not model.setData(model.index(0, 4), "-1")
-    assert not model.setData(model.index(0, 3), "")
+    assert model.setData(model.index(0, 3), "")
     assert model.setData(model.index(0, 6), "20085右\n20098左")
     assert model.setData(model.index(0, 8), Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole)
     assert model.data(model.index(0, 0), Qt.ItemDataRole.BackgroundRole).name() == "#fce4ec"
     assert window.products[0].units == 36
     assert window.products[0].cases == 1.5
     assert window.products[0].machines == ["20085右", "20098左"]
-    assert "変更商品A" in model.data(model.index(0, 3), Qt.ItemDataRole.ToolTipRole)
+    assert "商品未定" in model.data(model.index(0, 3), Qt.ItemDataRole.ToolTipRole)
     window.day.setDate(QDate(2026, 11, 6))
     assert model.rowCount() == 0
     window.day.setDate(QDate(2026, 11, 5))
     assert model.rowCount() == 2
-    assert window.products[0].name == "変更商品A"
+    assert window.products[0].name == ""
 
 
 def test_real_delegates_inline_edit_and_dropdown(window):

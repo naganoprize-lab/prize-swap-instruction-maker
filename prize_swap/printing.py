@@ -207,8 +207,8 @@ def _measured_plan(products, page_width, page_height, rows, layout, profile):
         assigned = active_assignments(product)
         machine_cells = [
             [
-                text_block(number or "未割当", widths[0] - 2 * padding, font, device),
-                text_block(assigned.get(number) or "未設定", widths[1] - 2 * padding, font, device),
+                text_block(number or "", widths[0] - 2 * padding, font, device),
+                text_block(assigned.get(number) or "", widths[1] - 2 * padding, font, device),
             ]
             for number in ids
         ]
@@ -253,6 +253,9 @@ def plan_pages(products, page_width, page_height, rows=20, layout="column", mode
     ):
         raise AppError("ページ配置の設定が不正です。")
     products = ordered(products)
+    from .instructions import number_lookup
+
+    number_lookup(products)
     target = max(1, (len(products) + 19) // 20)
     profiles = {
         "standard": [(11, 14, 4, False)],
@@ -313,6 +316,18 @@ def draw_page(painter, plan, page_index, selected_day, printed_day=None):
                 painter.drawRect(rect)
                 block.draw(painter, QPointF(x + padding, plan.title_height + padding))
             x += width
+    from .instructions import number_lookup
+    from .instruction_badges import draw_badge
+
+    numbers = number_lookup(
+        [
+            g.product
+            for i in range(len(plan.pages))
+            for col in plan.columns(i)
+            for g in col
+            if not g.continuation
+        ]
+    )
     for side, column in enumerate(plan.columns(page_index)):
         y = plan.title_height + plan.header_height
         x0 = side * ((plan.width + GAP) / 2)
@@ -327,7 +342,40 @@ def draw_page(painter, plan, page_index, selected_day, printed_day=None):
                 for c in (0, 1):
                     painter.drawRect(QRectF(x, yy, plan.widths[c], height))
                     block = group.machine_cells[i][c]
-                    block.draw(painter, QPointF(x + padding, yy + (height - block.height) / 2))
+                    if c == 0:
+                        number = numbers.get((group.product.entry_id, group.machines[i]))
+                        if number:
+                            diameter = 10 if plan.compact else 12
+                            draw_badge(
+                                painter,
+                                QRectF(x + 1, yy + (height - diameter) / 2, diameter, diameter),
+                                number,
+                            )
+                            available = plan.widths[c] - diameter - 3
+                            size = plan.body_size
+                            font = print_font(size)
+                            while (
+                                size > 6
+                                and QFontMetricsF(font, plan.metrics_device).horizontalAdvance(
+                                    block.text
+                                )
+                                > available
+                            ):
+                                size -= 0.25
+                                font = print_font(size)
+                            badge_text = text_block(
+                                block.text, available, font, plan.metrics_device
+                            )
+                            badge_text.draw(
+                                painter,
+                                QPointF(x + diameter + 2, yy + (height - badge_text.height) / 2),
+                            )
+                        else:
+                            block.draw(
+                                painter, QPointF(x + padding, yy + (height - block.height) / 2)
+                            )
+                    else:
+                        block.draw(painter, QPointF(x + padding, yy + (height - block.height) / 2))
                     x += plan.widths[c]
                 yy += height
             x = x0 + sum(plan.widths[:2])
@@ -379,7 +427,7 @@ def render_document(printer, products, selected_day, rows=20, layout="column", m
     return plan
 
 
-def render_pages(printer, page_count, draw):
+def render_pages(printer, page_count, draw, page_layout=None):
     """Shared device/DPI transform, ranges, copy count and page order."""
     page = printer.pageRect(QPrinter.Unit.Point)
     first = max(1, printer.fromPage())
@@ -395,14 +443,28 @@ def render_pages(printer, page_count, draw):
     indexes = (
         indexes * copies if printer.collateCopies() else [i for i in indexes for _ in range(copies)]
     )
+    original_layout = QPageLayout(printer.pageLayout())
+
+    def set_layout(index):
+        desired = page_layout(index)
+        if printer.pageLayout() != desired and not printer.setPageLayout(desired):
+            raise AppError(
+                "このプリンターはページごとの用紙変更に対応していません。指示書と地図を分けて印刷してください。"
+            )
+
+    if page_layout:
+        set_layout(indexes[0])
     painter = QPainter()
     if not painter.begin(printer):
         raise AppError("プリンターまたはPDFを開けません。接続・保存先を確認してください。")
     try:
         for n, index in enumerate(indexes):
+            if n and page_layout:
+                set_layout(index)
             if n and not printer.newPage():
                 raise AppError("改ページに失敗しました。プリンターの状態を確認してください。")
             painter.save()
+            page = printer.pageRect(QPrinter.Unit.Point)
             pixels = printer.pageRect(QPrinter.Unit.DevicePixel)
             # The printer's default origin is already at the printable margin.
             painter.scale(pixels.width() / page.width(), pixels.height() / page.height())
@@ -410,6 +472,8 @@ def render_pages(printer, page_count, draw):
             painter.restore()
     finally:
         painter.end()
+        if page_layout and printer.pageLayout() != original_layout and not printer.paintingActive():
+            printer.setPageLayout(original_layout)
 
 
 def save_pdf(path, products, selected_day, rows=20, layout="column", source=None, mode="auto"):

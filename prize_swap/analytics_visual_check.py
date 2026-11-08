@@ -224,7 +224,7 @@ def run(output):
         result = c.add_to_instructions(uids={m.uid for m in f.machines[:3]})
         assert result["added"] == 3 and len(window.products) == 3
         assert all(
-            not product.name and not product.included and product.machines
+            not product.name and product.included and product.machines
             for product in window.products
         )
         window.grab().save(str(output / "candidate-instruction-drafts.png"))

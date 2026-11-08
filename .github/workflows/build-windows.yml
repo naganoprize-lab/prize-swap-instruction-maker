@@ -127,6 +127,24 @@ jobs:
               throw "Native analytics validation failed ($scale)"
             }
           }
+      - name: Native Windows editable instructions and plan maps
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+        run: |
+          foreach ($scale in @('1', '1.25', '1.5')) {
+            $env:QT_SCALE_FACTOR = $scale
+            $outputPath = "build-visual/instructions-$scale"
+            python -m prize_swap.instruction_visual_check $outputPath
+            $code = $LASTEXITCODE
+            if (!(Test-Path "$outputPath/report.json")) { throw "Instruction visual report missing ($scale)" }
+            $report = Get-Content "$outputPath/report.json" -Raw | ConvertFrom-Json
+            if ($code -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+              Write-Output "::error::$($report.error -replace "`n", ' | ')"
+              throw "Native instruction/map validation failed ($scale)"
+            }
+          }
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-visual/**') != '' }}
         with:
@@ -207,6 +225,22 @@ jobs:
           if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
             Write-Output "::error::$($report.error -replace "`n", ' | ')"
             throw "Packaged analytics validation failed"
+          }
+      - name: Native packaged EXE editable instructions and plan maps at 150 percent DPI
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+          QT_SCALE_FACTOR: '1.5'
+        run: |
+          $exe = (Resolve-Path dist/PrizeSwapInstructionMaker.exe).Path
+          $process = Start-Process -FilePath $exe -ArgumentList @('--instruction-visual-test', 'build-smoke/instructions-150') -PassThru
+          if (!$process.WaitForExit(180000)) { $process.Kill(); throw "Packaged instruction/map validation timed out" }
+          $process.Refresh()
+          if (!(Test-Path build-smoke/instructions-150/report.json)) { throw "Packaged instruction/map report missing" }
+          $report = Get-Content build-smoke/instructions-150/report.json -Raw | ConvertFrom-Json
+          if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+            Write-Output "::error::$($report.error -replace "`n", ' | ')"
+            throw "Packaged instruction/map validation failed"
           }
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-smoke/**') != '' }}

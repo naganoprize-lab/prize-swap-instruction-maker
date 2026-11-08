@@ -1,6 +1,5 @@
 """Explicit candidate-to-instruction drafts; current and replacement products stay separate."""
 
-from collections import Counter
 from copy import deepcopy
 from datetime import datetime, timezone
 from dataclasses import asdict
@@ -56,50 +55,18 @@ def display_number(machine):
 
 
 def registered_ids(floor):
-    """Use permanent UIDs; bridge old numbered assignments only if the number is unique."""
+    """Share the map's safe UID / number / reference / management reconciliation."""
+    from .instructions import booths
+
     products = [p for p in floor.products() if p.day == floor.selected_day()]
-    ids = {p.candidate_assignment["machine_key"] for p in products if p.candidate_assignment}
-    counts = Counter(machine_key(m) for m in floor.machines if machine_key(m))
-    oldnumbers = {
-        normalize_number(n, allow_bare=True)
-        for p in products
-        if not p.candidate_assignment
-        for n in p.machines
+    return {
+        b.machine.uid
+        for b in booths(products, floor.machines, floor.number_references, all_entries=True)
+        if b.machine is not None
     }
-    current_uids = {m.uid for m in floor.machines}
-    stale = [
-        p.candidate_assignment
-        for p in products
-        if p.candidate_assignment and p.candidate_assignment["machine_key"] not in current_uids
-    ]
-    oldnumbers.update(
-        normalize_number(a["machine_number"], allow_bare=True) for a in stale if a["machine_number"]
-    )
-    reference_counts = Counter(
-        normalize_reference(m.source_key)
-        for m in floor.machines
-        if normalize_reference(m.source_key)
-    )
-    oldrefs = {
-        normalize_reference(a["management_number"])
-        for a in stale
-        if a["management_number"] and not a["machine_number"]
-    }
-    ids.update(
-        m.uid
-        for m in floor.machines
-        if normalize_reference(m.source_key) in oldrefs
-        and reference_counts[normalize_reference(m.source_key)] == 1
-    )
-    ids.update(
-        m.uid
-        for m in floor.machines
-        if machine_key(m) in oldnumbers and counts[machine_key(m)] == 1
-    )
-    return ids
 
 
-def transfer(floor, machines, parent=None, category="選択候補"):
+def transfer(floor, machines, parent=None, category="選択候補", source_method=None):
     byid = {m.uid: m for m in machines}
     machines = list(byid.values())
     already = registered_ids(floor)
@@ -114,7 +81,7 @@ def transfer(floor, machines, parent=None, category="選択候補"):
     )
     if not machines:
         return result
-    text = f'対象：{category}\n追加対象：{len(machines)}台\n追加済み：{result["skipped"]}台\n新規追加：{len(fresh)}台\n\n新商品の名前・数量・入替日は未確定の下書きとして登録します。現在の商品は引継ぎ情報に保存します。追加しますか？'
+    text = f'対象：{category}\n追加対象：{len(machines)}台\n追加済み：{result["skipped"]}台\n新規追加：{len(fresh)}台\n\n商品名・数量・入替後の運営方法は空欄で登録します。出力チェックはONにし、空欄のメモとして印刷できます。追加しますか？'
     if (
         QMessageBox.question(parent or floor, "入替指示書へ追加の確認", text)
         != QMessageBox.StandardButton.Yes
@@ -152,13 +119,22 @@ def transfer(floor, machines, parent=None, category="選択候補"):
                 floor.selected_day(),
                 "",
                 machines=[number] if number else [],
-                included=False,
+                included=True,
+                source_type="candidate",
+                source_method=source_method or ("一括：" + category),
                 order=max([p.order for p in products] + [0]) + len(added) + 1,
                 candidate_assignment=assignment,
             )
         )
     if added:
         from PySide6.QtGui import QUndoCommand
+
+        host = parent.window() if parent else floor.window()
+        snapshot = None
+        if hasattr(host, "instruction_history"):
+            from .instruction_editor import all_state
+
+            snapshot = all_state(host)
 
         window = parent.window() if parent else floor.window()
 
@@ -176,18 +152,25 @@ def transfer(floor, machines, parent=None, category="選択候補"):
 
             def redo(self):
                 for p in added:
-                    if not any(existing is p for existing in products):
-                        products.append(p)
+                    if not any(existing.entry_id == p.entry_id for existing in floor.products()):
+                        floor.products().append(p)
                 self.refresh()
 
             def undo(self):
                 for p in added:
-                    for i, existing in enumerate(products):
-                        if existing is p:
-                            products.pop(i)
+                    for i, existing in enumerate(floor.products()):
+                        if existing.entry_id == p.entry_id:
+                            floor.products().pop(i)
                             break
                 self.refresh()
 
         floor.history.push(TransferCommand())
+        if snapshot is not None:
+            from .instruction_editor import InstructionCommand, all_state
+
+            host.instruction_history.push(
+                InstructionCommand(host, snapshot, all_state(host), "入替候補から指示へ追加", True)
+            )
+            host.mark_dirty()
         result["added"] = len(added)
     return result

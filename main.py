@@ -17,6 +17,10 @@ if __name__ == "__main__":
         from prize_swap.analytics_visual_check import run
 
         sys.exit(run(sys.argv[2]))
+    if len(sys.argv) == 3 and sys.argv[1] == "--instruction-visual-test":
+        from prize_swap.instruction_visual_check import run
+
+        sys.exit(run(sys.argv[2]))
     from prize_swap.ui import main
 
     main()

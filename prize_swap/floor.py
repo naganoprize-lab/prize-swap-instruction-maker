@@ -473,6 +473,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.renderer = CardRenderer()
         self.print_renderer = CardRenderer()
         self.print_options = FloorPrintOptions()
+        from .instruction_output import validate_options
+
+        self.instruction_print_options = validate_options()
         self.overlaps = set()
         self.page_frames = []
         self.loaded_at = ""
@@ -618,6 +621,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
     def state(self):
         return dict(
             version=3,
+            instruction_print_options=deepcopy(self.instruction_print_options),
             theme_mode=theme_manager().mode,
             analytics_ui=deepcopy(self.analytics_ui),
             candidate_ui=deepcopy(self.candidate_ui),
@@ -650,6 +654,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
         if "theme_mode" in state and not keep_history:
             manager().set_mode(state["theme_mode"], persist=False)
+        from .instruction_output import validate_options
+
+        self.instruction_print_options = validate_options(state.get("instruction_print_options"))
         self.number_references = deepcopy(state.get("number_references", []))
         from .analytics_data import validate_ui_state
 

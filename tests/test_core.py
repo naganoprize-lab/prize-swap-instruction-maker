@@ -7,8 +7,17 @@ import pytest
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill, Border, Side
 
-from prize_swap.core import (AppError, HEADERS, Product, for_day, load_session,
-                             machine_numbers, parse_date, read_products, save_session)
+from prize_swap.core import (
+    AppError,
+    HEADERS,
+    Product,
+    for_day,
+    load_session,
+    machine_numbers,
+    parse_date,
+    read_products,
+    save_session,
+)
 from prize_swap.exporter import PINK, export_excel
 
 DAY = date(2026, 11, 5)
@@ -60,7 +69,10 @@ def test_macro_enabled_package(source, tmp_path):
         for name in src.namelist():
             content = src.read(name)
             if name == "[Content_Types].xml":
-                content = content.replace(b"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml", b"application/vnd.ms-excel.sheet.macroEnabled.main+xml")
+                content = content.replace(
+                    b"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                    b"application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+                )
             dst.writestr(name, content)
         dst.writestr("xl/vbaProject.bin", b"synthetic-vba-fixture")
     before = digest(target)
@@ -73,7 +85,10 @@ def test_macro_enabled_package(source, tmp_path):
         assert b"macroEnabled" not in z.read("[Content_Types].xml")
 
 
-@pytest.mark.parametrize("raw", [datetime(2026, 11, 5, 23, 59), DAY, "2026/11/05", "2026年11月05日", "2026-11-05T12:34:00"])
+@pytest.mark.parametrize(
+    "raw",
+    [datetime(2026, 11, 5, 23, 59), DAY, "2026/11/05", "2026年11月05日", "2026-11-05T12:34:00"],
+)
 def test_parse_date(raw):
     assert parse_date(raw) == DAY
 
@@ -91,15 +106,24 @@ def test_machines():
 
 def test_export_style_values_and_source_unchanged(source, tmp_path):
     before = digest(source)
-    p = Product(DAY, "長い商品名", 12, 3, machines=["20085右", "20098左"], methods=["橋渡し", "自由入力"], priority=True, limit="トータル⑩")
+    p = Product(
+        DAY,
+        "長い商品名",
+        12,
+        3,
+        machines=["20085右", "20098左"],
+        methods=["橋渡し", "自由入力"],
+        priority=True,
+        limit="トータル⑩",
+    )
     normal = Product(DAY, "通常", order=1)
     out = tmp_path / "指示書 日本語.xlsx"
     assert export_excel(out, [p, normal], DAY, source) == 1
     wb = load_workbook(out)
     ws = wb.active
-    assert ws["A3"].value == "20085右"
-    assert ws["A4"].value == "20098左"
-    assert ws["B3"].value == "未設定"
+    assert ws["A3"].value == "① 20085右"
+    assert ws["A4"].value == "② 20098左"
+    assert ws["B3"].value is None
     assert ws["C3"].value == "橋渡し：予定未設定\n自由入力：予定未設定"
     assert ws["G3"].value == "トータル⑩"
     assert ws["E3"].value == 12 and ws["F3"].value == 3
@@ -115,7 +139,13 @@ def test_export_style_values_and_source_unchanged(source, tmp_path):
     wb.close()
 
 
-@pytest.mark.parametrize("layout, expected", [("column", {"D3": "商品0", "D4": "商品1", "K3": "商品2", "K4": "商品3", "D7": "商品4"}), ("row", {"D3": "商品0", "K3": "商品1", "D4": "商品2", "K4": "商品3", "D7": "商品4"})])
+@pytest.mark.parametrize(
+    "layout, expected",
+    [
+        ("column", {"D3": "商品0", "D4": "商品1", "K3": "商品2", "K4": "商品3", "D7": "商品4"}),
+        ("row", {"D3": "商品0", "K3": "商品1", "D4": "商品2", "K4": "商品3", "D7": "商品4"}),
+    ],
+)
 def test_layout_and_pages(tmp_path, layout, expected):
     products = [Product(DAY, f"商品{i}", order=i) for i in range(5)]
     out = tmp_path / "out.xlsx"
@@ -130,7 +160,11 @@ def test_layout_and_pages(tmp_path, layout, expected):
 
 
 def test_order_and_exclusion_and_text_injection(tmp_path):
-    products = [Product(DAY, "最後", order=10), Product(DAY, "除外", included=False), Product(DAY, "=1+1", order=-1)]
+    products = [
+        Product(DAY, "最後", order=10),
+        Product(DAY, "除外", included=False),
+        Product(DAY, "=1+1", order=-1),
+    ]
     out = tmp_path / "out.xlsx"
     export_excel(out, products, DAY)
     wb = load_workbook(out)
@@ -171,7 +205,9 @@ def test_session_round_trip(tmp_path, source):
     assert load_session(path)[0] == products
 
 
-@pytest.mark.parametrize("payload", ['{}', '{"version":99}', '[]', '{"version":1,"selected_day":"bad"}'])
+@pytest.mark.parametrize(
+    "payload", ["{}", '{"version":99}', "[]", '{"version":1,"selected_day":"bad"}']
+)
 def test_invalid_session(tmp_path, payload):
     path = tmp_path / "invalid.json"
     path.write_text(payload)

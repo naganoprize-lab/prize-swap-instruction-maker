@@ -111,8 +111,6 @@ class ProductPanel(QWidget):
         )
 
     def validate(self):
-        if not self.name.toPlainText().strip() and not self.draft.candidate_assignment:
-            raise AppError("入替予定商品の商品名を入力してください。")
         self.draft.name = self.name.toPlainText().strip()
         self.draft.maker = self.maker.text().strip()
         self.draft.units = quantity(self.units.text())

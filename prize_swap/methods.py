@@ -35,7 +35,7 @@ def legacy_names(value):
 
 def registered_machines(product):
     text = product.machines if isinstance(product.machines, str) else "\n".join(product.machines)
-    return machine_numbers(text)
+    return machine_numbers(text) or list(getattr(product, "management_numbers", []))
 
 
 def validate_assignments(value):

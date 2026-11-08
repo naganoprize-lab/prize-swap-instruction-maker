@@ -49,7 +49,14 @@ def validate_candidate_state(value=None):
     from .core import AppError
 
     default = dict(
-        version=1, exclusions={}, search="", kind="", method="", status="", show_excluded=False
+        version=1,
+        exclusions={},
+        manual_registrations={},
+        search="",
+        kind="",
+        method="",
+        status="",
+        show_excluded=False,
     )
     if value is None:
         return default
@@ -75,7 +82,34 @@ def validate_candidate_state(value=None):
             or any(not isinstance(v, str) or len(v) > 2000 for v in row.values())
         ):
             raise AppError("候補の除外理由が不正です。")
+    if (
+        not isinstance(s["manual_registrations"], dict)
+        or len(s["manual_registrations"]) > 10000
+        or any(
+            not isinstance(k, str) or not isinstance(v, str)
+            for k, v in s["manual_registrations"].items()
+        )
+    ):
+        raise AppError("手動候補の登録形式が不正です。")
     return s
+
+
+def register_selected_candidates(floor):
+    from .instructions import stamp
+
+    ids = set(floor.selection_state.selected_machine_keys) & {m.uid for m in floor.machines}
+    old = floor.candidate_ui["manual_registrations"]
+    new = ids - set(old)
+    for uid in new:
+        old[uid] = stamp()
+    floor.schedule_save()
+    page = getattr(floor, "candidate_page", None)
+    if page:
+        page.refresh()
+    floor.message.emit(
+        f"入替候補に手動登録：{len(new)}台 / 登録済み：{len(ids)-len(new)}台。選択状態を保持しています。"
+    )
+    return len(new)
 
 
 class CandidatePage(QWidget):
@@ -273,7 +307,7 @@ class CandidatePage(QWidget):
         for control, key, label, values in (
             (self.kinds, "kind", "全機種", sorted({r["machine_type"] for r in rs})),
             (self.methods, "method", "全運営方法", sorted({r["method"] for r in rs})),
-            (self.status, "status", "全判定", list(STATUS_COLORS)),
+            (self.status, "status", "全判定", [*STATUS_COLORS, "手動登録"]),
         ):
             control.clear()
             control.addItem(label, "")
@@ -315,9 +349,12 @@ class CandidatePage(QWidget):
                     counts["入替予定登録済み"] += 1
             added = m.uid in added_ids
             shown = "除外" if excluded else "入替予定登録済み" if planned or added else status
-            reason = " / ".join(a["reasons"])
+            reason = ("手動登録 / " if m.uid in s["manual_registrations"] else "") + " / ".join(
+                a["reasons"]
+            )
             if excluded:
                 reason = f'除外理由：{excluded["reason"]} / ' + reason
+            manual = m.uid in s["manual_registrations"]
             if (
                 excluded
                 and not s["show_excluded"]
@@ -326,7 +363,7 @@ class CandidatePage(QWidget):
                 or s["method"]
                 and r["method"] != s["method"]
                 or s["status"]
-                and shown != s["status"]
+                and (not manual if s["status"] == "手動登録" else shown != s["status"])
             ):
                 continue
             if s["search"] and normalized(s["search"]) not in normalized(
@@ -391,7 +428,11 @@ class CandidatePage(QWidget):
             )
             add = QPushButton("✓ 追加済み" if uid in added_ids else "指示書へ追加")
             add.setEnabled(uid not in added_ids)
-            add.clicked.connect(lambda checked=False, u=uid: self.add_to_instructions(uids={u}))
+            add.clicked.connect(
+                lambda checked=False, u=uid: self.add_to_instructions(
+                    uids={u}, source_method="単体"
+                )
+            )
             self.table.setCellWidget(i, 11, add)
             for j in (0, 10):
                 self.table.item(i, j).setBackground(QBrush(QColor(analysis_color(color))))
@@ -436,7 +477,7 @@ class CandidatePage(QWidget):
             keys.difference_update(ids)
         self.owner.selection_state.set(keys)
 
-    def add_to_instructions(self, statuses=None, uids=None):
+    def add_to_instructions(self, statuses=None, uids=None, source_method=None):
         from .candidate_transfer import transfer
 
         if uids is None:
@@ -456,6 +497,7 @@ class CandidatePage(QWidget):
             machines,
             self,
             category="＋".join(sorted(statuses)) if statuses else "選択候補",
+            source_method=source_method,
         )
         if result["cancelled"]:
             return result

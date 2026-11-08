@@ -144,7 +144,7 @@ def test_single_bulk_transfer_drafts_identity_unknown_save_restore_and_undo(
     assert result["added"] == 3 and result["missing_number"] == 2
     drafts = window.products
     assert [p.machines for p in drafts] == [["20088左"], ["L_1"], []]
-    assert all(not p.name and not p.included and p.units == p.cases == "" for p in drafts)
+    assert all(not p.name and p.included and p.units == p.cases == "" for p in drafts)
     assert [p.candidate_assignment["current_product_name"] for p in drafts] == [
         m.product for m in f.machines[:3]
     ]

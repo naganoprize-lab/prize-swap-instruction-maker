@@ -54,6 +54,12 @@ def selection_controls(floor):
         ("全選択", lambda: floor.selection_state.set(m.uid for m in floor.machines)),
         ("選択解除", lambda: floor.selection_state.set([])),
         ("選択台を売上分析", lambda: open_analysis(floor)),
+        (
+            "選択台を候補へ追加",
+            lambda: __import__(
+                "prize_swap.candidate_page", fromlist=["register_selected_candidates"]
+            ).register_selected_candidates(floor),
+        ),
     ]:
         b = QToolButton()
         b.setText(label)
