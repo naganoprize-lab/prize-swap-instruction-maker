@@ -75,26 +75,16 @@ ORDERS = {
 
 def distribution(records, axis, settings, population=None):
     population = records if population is None else population
-    sales = defaultdict(list)
-    for r in population:
-        if r.get("sales") is not None:
-            sales[r.get("sales_cohort")].append(r["sales"])
-    bounds = {
-        k: (
-            quartiles(v, settings["sales_percentiles"])
-            if settings["sales_mode"] != "fixed"
-            else settings["sales_fixed_breaks"]
-        )
-        for k, v in sales.items()
-    }
+    from .sales_evaluation import record_bounds, record_evaluation
+
+    bounds = record_bounds(population, settings)
     rows = {}
     types = Counter(r["machine_type"] for r in records)
     top = {k for k, v in types.most_common(10)}
     for r in records:
         if axis == "sales_bin":
-            color, label = classify(
-                r.get("sales"), bounds.get(r.get("sales_cohort")), settings["sales_mode"]
-            )
+            result = record_evaluation(r, settings, bounds)
+            color, label = result["color"], result["label"]
             label = label.split("：")[0]
         else:
             label = bucket(r, axis, settings)
@@ -156,10 +146,17 @@ def distribution(records, axis, settings, population=None):
         info += " ｜ 異なる期間・取得元の平均は合算しません"
     legend = " / ".join(f'{v["label"]}：{v["value"]}台' for v in output)
     if axis == "sales_bin":
-        legend += "\n" + " / ".join(
-            f'{k[0] or "期間不明（取得元別）"}：{boundary_legend(v,settings["sales_mode"])}'
-            for k, v in bounds.items()
+        legend += "\n" + boundary_legend(bounds, settings["sales_mode"])
+        current = next(
+            (
+                r.get("sales_evaluation")
+                for r in population
+                if r.get("sales_evaluation", {}).get("count")
+            ),
+            None,
         )
+        if current:
+            legend += f"／共通基準：売上Excel全{current["count"]}台（未照合実績は基準計算のみ）"
     if axis == "po_bin":
         legend += f'\n原価・料金から算出する理論目安、許容偏差±{settings["po_tolerance"]:.0%}。仮設定は目安。'
     return dict(rows=output, info=info, unknown=unknown, legend=legend)

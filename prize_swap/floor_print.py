@@ -231,11 +231,12 @@ def plan_floor(
     page_size=None,
     loaded_at="",
     population=None,
+    snapshot=None,
 ):
     options.validate()
     metrics_settings = validate_settings(options.analysis_settings)
     metrics_settings["_sales_bounds"] = sales_boundaries(
-        list(machines) if population is None else population, metrics_settings
+        list(machines) if population is None else population, metrics_settings, snapshot
     )
     renderer = renderer or CardRenderer()
     chosen = (
@@ -549,6 +550,7 @@ def render_floor(
     selected=(),
     loaded_at="",
     population=None,
+    snapshot=None,
 ):
     area = printer.pageRect(QPrinter.Unit.Point)
     plan = plan_floor(
@@ -561,6 +563,7 @@ def render_floor(
         (area.width(), area.height()),
         loaded_at,
         population,
+        snapshot,
     )
     render_pages(
         printer, len(plan.pages), lambda painter, index: draw_floor_page(painter, plan, index)
@@ -579,6 +582,7 @@ def save_floor_pdf(
     loaded_at="",
     sources=(),
     population=None,
+    snapshot=None,
 ):
     return save_rendered_pdf(
         path,

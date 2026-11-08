@@ -229,8 +229,11 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
             return
         from .analysis_settings import sales_boundaries
 
+        records = self.analytics.records()
+        self._metric_records = {r["uid"]: r for r in records}
+        self._card_context_cache = {}
         self._effective_metric_settings = self.analysis_settings | {
-            "_sales_bounds": sales_boundaries(self.machines, self.analysis_settings)
+            "_sales_bounds": self.analytics.sales_bounds
         }
         visible = visible_machines(
             self.machines, self.assignments(), self.presentation, self.reference_day()

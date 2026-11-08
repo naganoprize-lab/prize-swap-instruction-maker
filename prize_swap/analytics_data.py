@@ -101,7 +101,7 @@ def period_label(key):
     return f"{key[0]} ～ {key[1]}" if key[0] and key[1] else "対象期間不明"
 
 
-def machine_record(machine, reference, settings, assignments=None, history=None):
+def machine_record(machine, reference, settings, assignments=None, history=None, sales_bounds=None):
     """The same effective values/provenance used by floor cards and machine details."""
     m = machine
     record = {k: effective_stat(m, k) for k in NUMERIC if k not in ("ratio", "days")}
@@ -181,7 +181,12 @@ def machine_record(machine, reference, settings, assignments=None, history=None)
         for key in ("cost_rate", "cost"):
             record["metric_periods"][key] = record["period"]
     record["cost_details"] = po["cost_details"]
-    record["assessment_detail"] = assess(m, reference, settings, history or [])
+    from .sales_evaluation import evaluation, boundaries
+
+    if sales_bounds is None:
+        sales_bounds = boundaries([m], settings)
+    record["sales_evaluation"] = evaluation(m, settings, sales_bounds)
+    record["assessment_detail"] = assess(m, reference, settings, history or [], sales_bounds)
     record["assessment"] = record["assessment_detail"]["status"]
     record["sales_cohort"] = cohort(m)
     return record
@@ -258,8 +263,11 @@ def bucket(r, axis, settings):
         return age_band(value)[1]
     from .sales_evaluation import classify
 
-    bounds = settings.get("_sales_record_bounds", {}).get(r.get("sales_cohort"))
-    return classify(value, bounds, settings["sales_mode"])[1]
+    from .sales_evaluation import record_evaluation
+
+    return record_evaluation(r, settings, settings.get("_sales_record_bounds"))["label"].split(
+        "："
+    )[0]
 
 
 def aggregate(records, axis, metric, operation, settings, stack=None, population=None):
@@ -271,21 +279,12 @@ def aggregate(records, axis, metric, operation, settings, stack=None, population
         raise AppError("文字項目は件数または件数割合で集計してください。")
     if operation == "recalculate" and metric != "cost_rate":
         raise AppError("再計算は原価率に対応します。")
-    from .sales_evaluation import quartiles
+    from .sales_evaluation import record_bounds
 
-    sales_groups = defaultdict(list)
-    for r in (records if population is None else population):
-        if r.get("sales") is not None:
-            sales_groups[r.get("sales_cohort")].append(r["sales"])
     settings = settings | {
-        "_sales_record_bounds": {
-            k: (
-                quartiles(v, settings["sales_percentiles"])
-                if settings["sales_mode"] != "fixed"
-                else settings["sales_fixed_breaks"]
-            )
-            for k, v in sales_groups.items()
-        }
+        "_sales_record_bounds": record_bounds(
+            records if population is None else population, settings
+        )
     }
     groups = defaultdict(list)
     denominators = defaultdict(int)
@@ -367,6 +366,7 @@ class AnalyticsService:
         signature = (
             o.reference_day(),
             repr(o.analysis_settings),
+            repr(o.analysis_state),
             tuple(
                 (
                     m.uid,
@@ -417,13 +417,18 @@ class AnalyticsService:
             ),
         )
         if signature != self.signature:
+            from .sales_evaluation import boundaries
+
+            self.sales_bounds = boundaries(o.machines, o.analysis_settings, o.analysis_state)
+            assignments = o.assignments()
             self._records = [
                 machine_record(
                     m,
                     o.reference_day(),
                     o.analysis_settings,
-                    o.assignments(),
+                    assignments,
                     o.performance_history,
+                    self.sales_bounds,
                 )
                 for m in o.machines
             ]

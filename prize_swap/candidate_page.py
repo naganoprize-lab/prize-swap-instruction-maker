@@ -30,7 +30,8 @@ from .theme import manager, analysis_color, contrast_text
 
 STATUS_COLORS = {
     "要確認": "#F4A6A6",
-    "入替検討": "#F7D5A0",
+    "入替検討": "#F6BE78",
+    "暫定判定": "#FFE16A",
     "経過観察": "#FFE16A",
     "好調": "#94D8A0",
     "データ不足": "#B8BEC6",
@@ -131,7 +132,7 @@ class CandidatePage(QWidget):
         from .detail_widgets import KpiCard
 
         self.cards = {}
-        for status in ("要確認", "入替検討", "好調", "データ不足", "入替予定登録済み"):
+        for status in ("要確認", "入替検討", "暫定判定", "好調", "データ不足", "入替予定登録済み"):
             card = KpiCard("追加済み" if status == "入替予定登録済み" else status)
             card.setFixedHeight(80)
             card.setMinimumWidth(100)
@@ -445,7 +446,7 @@ class CandidatePage(QWidget):
                 continue
             rows.append(
                 [
-                    (f'{a["priority"]+1} {status}', a["priority"]),
+                    (f'{a["priority"]+1} {a.get("display_status",status)}', a["priority"]),
                     machine_key(m) or "—",
                     m.source_key or "—",
                     m.product or "—",
@@ -455,7 +456,11 @@ class CandidatePage(QWidget):
                     (formatted("cost_rate", r["cost_rate"]), r["cost_rate"]),
                     (formatted("days", r["days"]), r["days"]),
                     reason,
-                    "✓ 追加済み" if added else shown,
+                    (
+                        "✓ 追加済み"
+                        if added
+                        else a.get("display_status", shown) if shown == status else shown
+                    ),
                     "指示書へ追加",
                     "理由を見る",
                 ]

@@ -170,7 +170,15 @@ def build_overview(dialog, tabs, scroll, panel):
 
 def refresh_overview(d):
     m, o = d.updated, d.owner
-    r = machine_record(m, o.reference_day(), o.analysis_settings, o.assignments())
+    population = o.analytics.records()
+    r = machine_record(
+        m,
+        o.reference_day(),
+        o.analysis_settings,
+        o.assignments(),
+        o.performance_history,
+        o.analytics.sales_bounds,
+    )
     d.header_meta.setText(
         f'管理 {m.source_key or "—"} ｜ {r["machine_type"] or "機種 —"} ｜ {d.method.currentText() or "方法 —"}\n'
         f'{MATCH_LABELS[m.match_method]} ｜ 更新 {r["updated_at"] or "不明"} ｜ {r["period_text"]}'
@@ -191,9 +199,7 @@ def refresh_overview(d):
         }[key]
         from .analysis_settings import sales_boundaries
 
-        metric_settings = o.analysis_settings | {
-            "_sales_bounds": sales_boundaries(o.machines, o.analysis_settings)
-        }
+        metric_settings = o.analysis_settings | {"_sales_bounds": o.analytics.sales_bounds}
         color, label = filter_status(m, mode, o.reference_day(), settings=metric_settings)
         text = formatted("po_rate" if key == "po_target" else key, r[key])
         if key == "po_target":
@@ -220,7 +226,9 @@ def refresh_overview(d):
         from .radar import evaluate, score_record, AGE_EXPLANATION
         from PySide6.QtWidgets import QTableWidgetItem
 
-        peers = [score_record(m, o.reference_day(), o.analysis_settings) for m in o.machines]
+        peers = [
+            r | {"score_comparable": r.get("match_method") != "照合要確認"} for r in population
+        ]
         d.scores = evaluate(m, o.reference_day(), o.analysis_settings, peers, o.assignments())
         d.radar.set_axes(d.scores)
         d.evaluation_note.setText(

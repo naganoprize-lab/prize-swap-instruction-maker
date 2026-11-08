@@ -17,6 +17,7 @@ DEFAULTS = dict(
     cost_high=0.70,
     cost_target=0.60,
     sales_mode="quantile",
+    sales_colors=["#F4A6A6", "#F6BE78", "#FFFFFF", "#94D8A0", "#FFE16A"],
     sales_benchmark=None,
     sales_low=1000.0,
     sales_middle=3000.0,
@@ -59,6 +60,7 @@ def validate_settings(value=None):
             "aliases",
             "types",
             "sales_mode",
+            "sales_colors",
             "dashboard_visible",
             "fullscreen_dashboard",
             "radar_po_knots",
@@ -74,6 +76,15 @@ def validate_settings(value=None):
             continue
         if type(v) not in (float, int) or not math.isfinite(v) or v < 0:
             raise AppError(f"分析設定 {key} は0以上の有限数で指定してください。")
+    if (
+        not isinstance(s["sales_colors"], list)
+        or len(s["sales_colors"]) != 5
+        or any(
+            not isinstance(c, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", c)
+            for c in s["sales_colors"]
+        )
+    ):
+        raise AppError("売上の色は5つの #RRGGBB で指定してください。")
     for key in ("poor_days", "consider_days", "stale_days", "long_days"):
         if type(s[key]) is not int or s[key] > 100000:
             raise AppError("判定日数は0〜100000の整数で指定してください。")
@@ -212,7 +223,7 @@ def type_style(name, settings=None):
     return (settings or {}).get("types", {}).get(name, default)
 
 
-def sales_boundaries(machines, settings):
+def sales_boundaries(machines, settings, snapshot=None):
     from .sales_evaluation import boundaries
 
-    return boundaries(machines, settings)
+    return boundaries(machines, settings, snapshot)

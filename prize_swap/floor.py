@@ -936,6 +936,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         return getattr(self, "_effective_metric_settings", self.analysis_settings)
 
     def card_context(self, m):
+        cached = getattr(self, "_card_context_cache", {}).get(m.uid)
+        if cached is not None:
+            return cached
         plans = self.assignments().get(machine_key(m), [])
         priority = any(p.priority for p in plans)
         background, status = filter_status(
@@ -960,7 +963,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             if self.show_methods.isChecked()
             else ""
         )
-        return (
+        result = (
             background,
             status,
             priority,
@@ -973,6 +976,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             * (1.35 if mode == "product" else 1.1 if mode == "analysis" else 1),
             methods,
         )
+        self._card_context_cache[m.uid] = result
+        return result
 
     def apply_shared_selection(self):
         if not hasattr(self, "scene") or self._syncing_selection:
@@ -1020,6 +1025,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                     [m.uid for m in self.selected()],
                     loaded_at=self.print_data_timestamp(),
                     population=self.machines,
+                    snapshot=self.analysis_state,
                 ).frames
             except AppError:
                 pass
@@ -1492,6 +1498,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             [m.uid for m in self.selected()],
             self.print_data_timestamp(),
             population=self.machines,
+            snapshot=self.analysis_state,
         )
 
     def print_settings(self, *_):
@@ -1547,6 +1554,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             [m.uid for m in self.selected()],
             loaded_at=self.print_data_timestamp(),
             population=self.machines,
+            snapshot=self.analysis_state,
         )
         if plan.warnings:
             parent = self._active_preview or self
@@ -1593,6 +1601,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 self.print_data_timestamp(),
                 sources,
                 population=self.machines,
+                snapshot=self.analysis_state,
             )
             self.message.emit(f"売り場PDFを保存しました（{len(plan.pages)}ページ）：{path}")
         except Exception as exc:

@@ -1,7 +1,7 @@
 """Shared financial and age bands for cards, distributions and printed legends."""
 
 SALES_LABELS = ("低売上", "やや低売上", "中程度", "高売上", "特に高売上")
-SALES_COLORS = ("#F4A6A6", "#F8C88A", "#F3F4F6", "#94D8A0", "#FFE16A")
+SALES_COLORS = ("#F4A6A6", "#F6BE78", "#FFFFFF", "#94D8A0", "#FFE16A")
 UNKNOWN = "#AEB7C2"
 PO_LABELS = ("適正より低い", "やや低い", "適正範囲", "やや高い", "適正より高い")
 PO_COLORS = ("#8FC5F4", "#C5E2FA", "#94D8A0", "#F7C2C2", "#F4A6A6")

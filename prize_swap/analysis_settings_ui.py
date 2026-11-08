@@ -110,6 +110,27 @@ def edit_analysis_settings(owner):
                     "売上は現在のExcelの集計期間ごとに比較します。\nPO率は原価・料金から算出する理論目安です。未確認原価や料金は確定扱いしません。"
                 )
             )
+    color_edits = []
+    from .analysis_bands import SALES_LABELS
+
+    for label, color in zip(SALES_LABELS, s["sales_colors"]):
+        edit = QLineEdit(color)
+        edit.setToolTip("#RRGGBB（低売上から特に高売上までの5色）")
+        form.addRow("売上色・" + label, edit)
+        color_edits.append(edit)
+    reset_sales = QPushButton("売上の色・方式・境界を初期値に戻す")
+
+    def reset_sales_settings():
+        defaults = validate_settings()
+        for edit, color in zip(color_edits, defaults["sales_colors"]):
+            edit.setText(color)
+        mode.setCurrentIndex(mode.findData("quantile"))
+        for key in ("sales_percentiles", "sales_fixed_breaks"):
+            edit, scale = lists[key]
+            edit.setText(", ".join(f"{v*scale:g}" for v in defaults[key]))
+
+    reset_sales.clicked.connect(reset_sales_settings)
+    form.addRow(reset_sales)
     lists = {}
     radar_page = QWidget()
     radar_form = QFormLayout(radar_page)
@@ -207,6 +228,7 @@ def edit_analysis_settings(owner):
             if data["sales_benchmark"] == 0:
                 data["sales_benchmark"] = None
             data["sales_mode"] = mode.currentData()
+            data["sales_colors"] = [e.text().strip() for e in color_edits]
             for key, (control, scale) in lists.items():
                 data[key] = [
                     float(v.strip()) / scale for v in control.text().replace("、", ",").split(",")

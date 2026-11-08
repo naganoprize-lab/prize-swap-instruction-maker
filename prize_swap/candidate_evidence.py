@@ -28,6 +28,8 @@ def evidence(machine, record, reference, settings):
         explanation = f"アベ比{ratio:.1f}%は{rules['consider_ratio']:.1f}%以上のため好調。"
     else:
         explanation = "判定保留：" + a["reasons"][0]
+    if a.get("display_status"):
+        explanation += " / " + a["display_status"] + "：" + " / ".join(a["reasons"])
     source = machine.analysis or {}
     data = dict(
         machine_key=machine.uid,
@@ -46,7 +48,10 @@ def evidence(machine, record, reference, settings):
             sales_trend=a["trend"],
             target_po_rate=record["target_po_rate"],
         ),
-        rule_id="replacement-rule-v1",
+        rule_id="replacement-rule-v2",
+        sales_evaluation=deepcopy(a.get("sales_evaluation", {})),
+        provisional=a.get("provisional", False),
+        missing=deepcopy(a.get("missing", [])),
         rule=rules,
         evaluation_result=status,
         priority=a["priority"],

@@ -131,8 +131,9 @@ class FloorDashboard(QWidget):
         from .candidate_page import candidate_key
 
         excluded = o.candidate_ui["exclusions"]
+        byuid = {r["uid"]: r for r in o.analytics.records()}
         candidates = sum(
-            assess(m, o.reference_day(), o.analysis_settings)["status"] in ("要確認", "入替検討")
+            byuid[m.uid]["assessment"] in ("要確認", "入替検討", "暫定判定")
             for m in o.machines
             if candidate_key(m) not in excluded
         )

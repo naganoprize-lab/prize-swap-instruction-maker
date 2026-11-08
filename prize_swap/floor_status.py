@@ -106,12 +106,16 @@ def filter_status(machine, mode, reference, planned=False, priority=False, setti
             from .replacement import assess
 
             result = assess(
-                machine, reference, {k: v for k, v in settings.items() if k != "_sales_bounds"}
+                machine,
+                reference,
+                {k: v for k, v in settings.items() if k != "_sales_bounds"},
+                sales_bounds=bounds,
             )
-            label = result["status"] + " / " + result["reasons"][0]
+            label = result["display_status"] + " / " + " / ".join(result["reasons"])
             colour = {
                 "要確認": "#F4A6A6",
-                "入替検討": "#FFE16A",
+                "入替検討": "#F6BE78",
+                "暫定判定": "#FFE16A",
                 "好調": "#94D8A0",
                 "判定保留": COLORS["unknown"],
             }[result["status"]]
@@ -145,7 +149,7 @@ def filter_legend(mode, settings=None, sales_bounds=None):
         + boundary_legend(sales_bounds, s["sales_mode"]),
         "machine_type": "機種ごとの固定色（略称と枠線でも識別）／灰：不明 "
         + "、".join(f"{k} {v['color']}" for k, v in s["types"].items()),
-        "assessment": "赤：要確認／黄：入替検討／緑：好調／灰：判定保留（確定は手動）",
+        "assessment": "赤：要確認／橙：入替検討／黄：暫定・要確認候補／緑：好調／灰：判定保留（確定は手動）",
     }[mode]
 
 
@@ -172,7 +176,7 @@ def metric_text(machine, key, reference, settings=None):
             "—" if value is None else f"{value*100:.1f}%"
         )
     if key == "sales_metric":
-        return f"売上金額 {money(effective_stat(machine,'sales'))}円"
+        return f"売上 {money(effective_stat(machine,'sales'))}円"
     if key == "machine_type":
         name = machine_type(machine, settings)
         return type_style(name, settings)["short"] if name and name != "クレーン" else "機種 —"
@@ -180,8 +184,11 @@ def metric_text(machine, key, reference, settings=None):
         from .replacement import assess
 
         return assess(
-            machine, reference, {k: v for k, v in (settings or {}).items() if k != "_sales_bounds"}
-        )["status"]
+            machine,
+            reference,
+            {k: v for k, v in (settings or {}).items() if k != "_sales_bounds"},
+            sales_bounds=(settings or {}).get("_sales_bounds"),
+        )["display_status"]
     raise ValueError(key)
 
 
@@ -219,6 +226,8 @@ def percent(value, number_format="General"):
 def raw_stat(machine, key):
     overlay = getattr(machine, "analysis", None)
     value = overlay.get("values", {}).get(key) if overlay else getattr(machine, key, None)
+    if value is not None:
+        value = numeric(value)
     if value is not None and (
         key in ("po_rate", "cost_rate")
         and not 0 <= value <= 1

@@ -17,8 +17,8 @@ def test_sales_total_quartiles_zero_ties_missing_and_periods():
     colors = [
         filter_status(m, "sales_metric", DAY, settings=s | {"_sales_bounds": b})[0] for m in ms
     ]
-    assert colors == ["#F4A6A6", "#F8C88A", "#F3F4F6", "#94D8A0", "#FFE16A", "#AEB7C2"]
-    assert "80円" in filter_legend("sales_metric", s, b)
+    assert colors == ["#F4A6A6", "#F6BE78", "#FFFFFF", "#94D8A0", "#FFE16A", "#AEB7C2"]
+    assert "上位0〜20%" in filter_legend("sales_metric", s, b)
     for values in [[0], [0, 1], [2, 2, 2, 2], [0, 0, 10, 10]]:
         group = [Machine(sales=v) for v in values]
         bounds = sales_boundaries(group, s)
@@ -27,7 +27,7 @@ def test_sales_total_quartiles_zero_ties_missing_and_periods():
             for m in group
         ]
         if len(set(values)) == 1:
-            assert set(colors) == {"#F3F4F6"}
+            assert set(colors) == {"#FFFFFF"}
         assert len(set((v, c) for v, c in zip(values, colors))) == len(set(values))
     ms[0].analysis = {
         "values": {"sales": 10000},
@@ -36,7 +36,7 @@ def test_sales_total_quartiles_zero_ties_missing_and_periods():
     }
     b = sales_boundaries(ms, s)
     assert (
-        filter_status(ms[0], "sales_metric", DAY, settings=s | {"_sales_bounds": b})[0] == "#F3F4F6"
+        filter_status(ms[0], "sales_metric", DAY, settings=s | {"_sales_bounds": b})[0] == "#FFFFFF"
     )
 
 
