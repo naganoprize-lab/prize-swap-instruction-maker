@@ -157,7 +157,7 @@ def run(output):
         f.selection_state.set_mode("normal")
         window.tabs.setCurrentWidget(f)
         report["shared_selection_analysis"] = True
-        report["home_tiles"] = 8
+        report["home_tiles"] = len(window.dashboard_page.tiles)
         f.set_zoom(125)
         f.floor_search.setText("CHECK29")
         app.processEvents()
@@ -196,7 +196,13 @@ def run(output):
         window.floor.show_candidates()
         c = window.candidate_page
         assert window.tabs.currentWidget() is c and not c.isWindow() and c.table.rowCount() == 300
-        c.table.selectRow(0)
+        first_check = c.table.item(0, 0)
+        f.selection_state.set(set())
+        QTest.mouseClick(
+            c.table.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=c.table.visualItemRect(first_check).center(),
+        )
         excluded_key = __import__(
             "prize_swap.candidate_page", fromlist=["candidate_key"]
         ).candidate_key(c.selected_machines()[0])

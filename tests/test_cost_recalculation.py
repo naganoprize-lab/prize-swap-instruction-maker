@@ -133,6 +133,7 @@ def test_detail_cost_edit_updates_actual_values_and_preserves_excel_input(tmp_pa
         assert d.confirmed_cost.value() == 270 and "取得元：商品名末尾" in d.cost_values.text()
         d.confirmed_cost.setValue(300)
         assert d.kpis["cost_rate"].value.text() == "55.00%"
+        assert d.values["cost"].text() == "3,300円"
         assert "手動確認済み" in d.cost_values.text() and "90.00%" in d.cost_values.text()
         assert d.radar.axes[3]["actual"] == "55.00%" and d.radar.axes[4]["actual"] == "20.00%"
         assert d.updated.cost_rate == 0.9 and d.updated.po_rate == 0.2
@@ -144,3 +145,20 @@ def test_detail_cost_edit_updates_actual_values_and_preserves_excel_input(tmp_pa
         w.floor.timer.stop()
         w.floor.day_timer.stop()
         w.close()
+
+
+def test_source_product_difference_and_multiple_prizes_block_single_cost_calculation():
+    m = sample()
+    m.analysis = {
+        "values": {"sales": 6000, "dispensed": 11},
+        "reference_product_name": "別の景品 500",
+        "product_context": {"product": m.product, "installed_on": m.installed_on},
+        "period_source": "excel",
+        "period_start": "2026-11-01",
+        "period_end": "2026-11-06",
+    }
+    assert cost_profile(m)["calculated_cost_rate"] is None
+    m.analysis["reference_product_name"] = "売上登録用"
+    assert cost_profile(m)["calculated_cost_rate"] == pytest.approx(0.495)
+    m.analysis["multiple_products"] = True
+    assert cost_profile(m)["calculated_cost_rate"] is None

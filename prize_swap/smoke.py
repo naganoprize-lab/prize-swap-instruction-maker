@@ -179,6 +179,8 @@ def run(output):
                 QTimer.singleShot(20, close_preview)
         QTimer.singleShot(100, close_preview)
         w.preview()
+        if w.preflight.pending:
+            w.preflight.continue_button.click()
         assert observed and observed[0] > 0
         report.update(preview_pages=observed[0])
         label_plan = save_labels_pdf(output / "入荷ブースラベル.pdf", w.labels.model.entries)

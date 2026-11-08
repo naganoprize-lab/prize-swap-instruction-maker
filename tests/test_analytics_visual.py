@@ -18,7 +18,7 @@ def test_real_300booth_analytics_and_detail_at_150_dpi(tmp_path):
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert process.returncode == 0 and report["ok"], report.get("error", process.stderr)
     assert report["machines"] == 300 and report["history_points"] == 600
-    assert report["shared_selection_analysis"] and report["home_tiles"] == 8
+    assert report["shared_selection_analysis"] and report["home_tiles"] == 9
     assert report["candidate_instruction_bulk"]
     assert len(report["charts"]) == 23 and all(r["ok"] for r in report["charts"].values())
     assert (

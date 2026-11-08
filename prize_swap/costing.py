@@ -83,6 +83,15 @@ def cost_profile(machine):
     count = (a.get("po_inputs") or {}).get("acquired_count")
     if count is None:
         count = raw_stat(machine, "dispensed")
+    source_product = unicodedata.normalize(
+        "NFKC", str(a.get("reference_product_name") or "")
+    ).strip()
+    product_key = lambda v: re.sub(r"\s+", "", unicodedata.normalize("NFKC", v)).casefold()
+    product_mismatch = bool(
+        source_product
+        and not re.search(r"売上登録用|売上計上用|集計用", source_product)
+        and product_key(source_product) != product_key(machine.product)
+    )
     reason = ""
     if not positive(sales):
         reason = "売上金額が0または不明"
@@ -96,6 +105,10 @@ def cost_profile(machine):
         reason = "獲得個数が不明・不正"
     elif effective is None:
         reason = "使用原価が不明"
+    elif product_mismatch:
+        reason = "分析表の商品名と現在の商品が異なり、獲得個数との対応が未確認"
+    elif a.get("multiple_products"):
+        reason = "同一期間に複数景品が含まれるため単一原価では算出不可"
     elif changed:
         reason = "商品・設置日と実績期間の不一致"
     elif a and (

@@ -152,7 +152,10 @@ def test_candidates_embedded_colors_filters_and_persistent_exclusion(window, mon
     assert all(
         p.table.horizontalHeaderItem(i).text() != "平均売上" for i in range(p.table.columnCount())
     )
-    p.table.selectRow(0)
+    check = p.table.item(0, 0)
+    check.setCheckState(
+        Qt.CheckState.Checked
+    )  # Explicit checkbox operation; row focus no longer selects machines.
     m = p.selected_machines()[0]
     assert p.set_exclusions("現場で継続稼働を確認")
     state = validate_state(f.state())
@@ -185,7 +188,10 @@ def test_candidate_registration_only_after_explicit_product_confirmation(window,
     monkeypatch.setattr(f, "products", lambda: [product])
     monkeypatch.setattr(f, "selected_day", lambda: DAY)
     p.refresh()
-    p.table.selectRow(0)
+    check = p.table.item(0, 0)
+    check.setCheckState(
+        Qt.CheckState.Checked
+    )  # Explicit checkbox operation; row focus no longer selects machines.
     selected = p.selected_machines()[0]
     assert not product.machines
     monkeypatch.setattr(QInputDialog, "getItem", lambda *a, **k: ("1: 新景品", True))

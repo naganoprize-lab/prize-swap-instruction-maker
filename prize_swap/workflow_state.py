@@ -256,6 +256,10 @@ class WorkflowStore(QObject):
         self._watchers.append(watcher)
 
         def changed(index):
+            from shiboken6 import isValid
+
+            if not isValid(stack) or not isValid(self.owner):
+                return
             current = deepcopy(get())
             before = watcher["snapshot"]
             oldindex = watcher["index"]

@@ -162,6 +162,8 @@ def test_direct_print_and_pdf_save_use_identical_optimized_layout(
     monkeypatch.setattr(ui, "configured_printer", lambda: configured_printer(direct))
     monkeypatch.setattr(QPrintDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
     window.print_direct()
+    if window.preflight.pending:
+        window.preflight.continue_button.click()
     plan = save_pdf(saved, window.products, DAY, mode=mode)
     assert normalized_pdf_text(
         "".join(p["text"] for p in require_searchable_pdf(direct)["pages"])
@@ -197,5 +199,7 @@ def test_preview_mode_selector_repaints_and_explains_actual_pages(window, monkey
 
     monkeypatch.setattr(QPrintPreviewDialog, "exec", inspect)
     window.preview()
+    if window.preflight.pending:
+        window.preflight.continue_button.click()
     assert observed and observed[0] <= 1
     assert window.print_mode.currentData() == "compact"

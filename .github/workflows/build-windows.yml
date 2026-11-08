@@ -145,6 +145,24 @@ jobs:
               throw "Native instruction/map validation failed ($scale)"
             }
           }
+      - name: Native Windows docking cost workflow and import safety
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+        run: |
+          foreach ($scale in @('1', '1.25', '1.5')) {
+            $env:QT_SCALE_FACTOR = $scale
+            $outputPath = "build-visual/workflow-$scale"
+            python -m prize_swap.workflow_visual_check $outputPath
+            $code = $LASTEXITCODE
+            if (!(Test-Path "$outputPath/report.json")) { throw "Workflow report missing ($scale)" }
+            $report = Get-Content "$outputPath/report.json" -Raw | ConvertFrom-Json
+            if ($code -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+              Write-Output "::error::$($report.error -replace "`n", ' | ')"
+              throw "Workflow validation failed ($scale)"
+            }
+          }
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-visual/**') != '' }}
         with:
@@ -241,6 +259,22 @@ jobs:
           if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
             Write-Output "::error::$($report.error -replace "`n", ' | ')"
             throw "Packaged instruction/map validation failed"
+          }
+      - name: Native packaged EXE docking cost workflow and import safety at 150 percent DPI
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+          QT_SCALE_FACTOR: '1.5'
+        run: |
+          $exe = (Resolve-Path dist/PrizeSwapInstructionMaker.exe).Path
+          $process = Start-Process -FilePath $exe -ArgumentList @('--workflow-visual-test', 'build-smoke/workflow-150') -PassThru
+          if (!$process.WaitForExit(180000)) { $process.Kill(); throw "Packaged workflow validation timed out" }
+          $process.Refresh()
+          if (!(Test-Path build-smoke/workflow-150/report.json)) { throw "Packaged workflow report missing" }
+          $report = Get-Content build-smoke/workflow-150/report.json -Raw | ConvertFrom-Json
+          if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+            Write-Output "::error::$($report.error -replace "`n", ' | ')"
+            throw "Packaged workflow validation failed"
           }
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-smoke/**') != '' }}

@@ -697,12 +697,22 @@ class MachineDetailPanel(QWidget):
             return "—" if value is None else f"{value:,.0f}円"
 
         self.cost_values.setText(
-            f"使用原価：{currency(c['effective'])} ／ 取得元：{c['source']}\n末尾候補：{currency(c['candidate'])} ／ 正式単価：{currency(c['official'])} ／ 確認済み：{currency(c['confirmed'])}\n景品原価総額：{currency(c['calculated_cost'])} ／ 再計算原価率：{formatted('cost_rate',c['calculated_cost_rate']) if c['calculated_cost_rate'] is not None else '算出不可（'+c['reason']+'）'} ／ Excel原価率：{formatted('cost_rate',c['excel_cost_rate'])}"
+            f"使用原価：{currency(c['effective'])} ／ 取得元：{c['source']}\n末尾候補：{currency(c['candidate'])} ／ 正式単価：{currency(c['official'])} ／ 確認済み：{currency(c['confirmed'])}\n景品原価総額：{currency(c['calculated_cost'])} ／ 再計算原価率：{formatted('cost_rate',c['calculated_cost_rate']) if c['calculated_cost_rate'] is not None else '算出不可（'+c['reason']+'）'} ／ Excel原価率：{formatted('cost_rate',c['excel_cost_rate'])} ／ Excel原価総額：{currency(c['excel_cost'])}"
         )
         self.values["cost_rate"].setText(
             formatted("cost_rate", effective_stat(self.updated, "cost_rate"))
             if effective_stat(self.updated, "cost_rate") is not None
             else "算出不可"
+        )
+        self.values["cost"].setText(
+            currency(effective_stat(self.updated, "cost"))
+            if effective_stat(self.updated, "cost") is not None
+            else "算出不可"
+        )
+        self.values["cost"].setToolTip(
+            "使用原価による再計算値。Excelの元の原価は上の取得元欄で確認できます。"
+            if c["overridden"]
+            else "Excel・レイアウトの元の実績値"
         )
         self.po_origin.setText(
             po["cost_source"]

@@ -154,13 +154,31 @@ def test_opening_existing_unassigned_instruction_does_not_create_dirty_edits(win
 
 
 def test_target_changes_refresh_existing_panel_without_discarding_cost_draft(window):
-    w=window;f=w.floor;c=f.detail_controller
-    f.open_details(f.machines[0].uid);p=c.panel
+    w = window
+    f = w.floor
+    c = f.detail_controller
+    f.open_details(f.machines[0].uid)
+    p = c.panel
     p.confirmed_cost.setValue(300)
-    before=p.radar.axes[4]["score"]
-    f.analysis_settings["cost_target"]=.5
+    before = p.radar.axes[4]["score"]
+    f.analysis_settings["cost_target"] = 0.5
     f.changed.emit()
-    assert c.panel is p and p.confirmed_cost.value()==300 and p.is_dirty()
+    assert c.panel is p and p.confirmed_cost.value() == 300 and p.is_dirty()
     assert p.radar.axes[4]["score"] != before
     assert "50.0%" in p.po_summary.text()
     p.load_machine(f.machines[0])
+
+
+def test_short_window_keeps_detail_save_controls_inside_the_dock(window):
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    w = window
+    w.resize(1000, 650)
+    w.floor.open_details(w.floor.machines[0].uid)
+    QTest.qWait(80)
+    c = w.floor.detail_controller
+    p = c.panel
+    buttons = p.findChild(QDialogButtonBox)
+    point = buttons.mapTo(c.host, buttons.rect().bottomRight())
+    assert c.host.rect().contains(point)
+    assert c.dock.height() <= c.host.height()

@@ -509,6 +509,7 @@ def apply_snapshot(machines, snapshot):
                 po_inputs=deepcopy(record.get("po_inputs", {})) if record else {},
                 po_definition=snapshot.get("po_definition", "unknown"),
                 machine_name=record.get("machine_name", "") if record else "",
+                reference_product_name=record.get("reference_name", "") if record else "",
                 imported_ratio=record.get("imported_ratio") if record else None,
                 file_name=snapshot["file_name"],
                 loaded_at=snapshot["loaded_at"],

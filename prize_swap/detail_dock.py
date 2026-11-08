@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QMessageBox,
     QApplication,
+    QSizePolicy,
 )
 from .core import AppError
 
@@ -93,6 +94,7 @@ class DetailDockController:
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
         self.container = QWidget()
+        self.container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         outer = QVBoxLayout(self.container)
         outer.setContentsMargins(3, 3, 3, 3)
         row = QHBoxLayout()
@@ -245,6 +247,7 @@ class DetailDockController:
         if self.panel is None:
             self.panel = MachineDetailPanel(self.owner, machine)
             self.panel.setMinimumWidth(320)
+            self.panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
             self.body.addWidget(self.panel, 1)
             self.panel.accepted.connect(self.save)
             self.panel.rejected.connect(self.cancel)

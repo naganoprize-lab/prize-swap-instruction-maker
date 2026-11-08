@@ -60,14 +60,17 @@ def test_po_candidate_requires_confirmation_and_sources_never_use_total_cost():
     m = Machine(product="堅あげ 270", cost=99999)
     assert cost_candidate(m.product) == 270
     r = evaluate_po(m, validate_settings())
-    assert r["target"] is None and "未確認" in r["cost_source"]
+    assert r["target"] == pytest.approx(2 / 9) and r["cost_source"] == "商品名末尾"
+    assert r["cost_details"]["confidence"] == "estimated" and r["prize_cost"] != m.cost
     m.prize_cost = 270
     m.prize_cost_product = m.product
     r = evaluate_po(m, validate_settings())
     assert r["target"] == pytest.approx(2 / 9) and r["provisional"]
     m.product = "新しい商品 999"
-    assert evaluate_po(m, validate_settings())["target"] is None
+    assert evaluate_po(m, validate_settings())["target"] == pytest.approx(60 / 999)
     m.unit_price = 500
+    assert evaluate_po(m, validate_settings())["prize_cost"] == 999
+    m.product = "商品名に原価候補なし"
     assert evaluate_po(m, validate_settings())["prize_cost"] == 500
     assert validate_machines([asdict(m)])[0].play_pricing is None
 
@@ -139,7 +142,7 @@ def test_excel_sales_import_does_not_require_average_value_and_uses_optional_po_
     assert effective_stat(m, "sales") == 17900 and effective_stat(m, "average") is None
     guidance = evaluate_po(m, validate_settings())
     assert guidance["target"] == pytest.approx(2 / 9) and not guidance["provisional"]
-    assert guidance["cost_source"] == "景品運営分析表：景品原価"
+    assert guidance["cost_source"] == "正式単価" and guidance["cost_details"]["official"] == 270
 
 
 @pytest.mark.parametrize("v", [float("nan"), float("inf"), -1, True, "100"])
@@ -162,7 +165,7 @@ def test_discount_pricing_cost_priority_and_source_context():
     g = evaluate_po(m, validate_settings())
     assert g["target"] == pytest.approx(500 / 6 * 0.6 / 270)
     m.unit_price = 1000
-    assert "手動修正" in evaluate_po(m, validate_settings())["cost_source"]
+    assert "手動確認済み" in evaluate_po(m, validate_settings())["cost_source"]
     assert evaluate_po(m, validate_settings())["prize_cost"] == 270
     m.analysis = {
         "values": {"unit_price": 500, "po_rate": 0.1},
