@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QMenu,
     QToolButton,
+    QAbstractItemView,
 )
 from .analysis_views import make_table, ValueItem, propose_assignments
 from .analytics_page import fill_table
@@ -185,6 +186,11 @@ class CandidatePage(QWidget):
         self.table.cellClicked.connect(lambda *_: self.highlight(False))
         self.table.itemChanged.connect(self.checked_changed)
         self.table.viewport().installEventFilter(self)
+        self.table.installEventFilter(self)
+        self.table.setAutoScroll(False)
+        self._check_pressed = None
+        for label,callback in [('候補を全選択',self.select_all_candidates),('選択解除',lambda:self.owner.selection_state.set(set()))]:
+            b=QPushButton(label);bulk.addWidget(b);b.clicked.connect(callback)
         self.table.selectionModel().selectionChanged.connect(self.table_selection_changed)
         self.owner.selection_state.changed.connect(self.sync_selection_widgets)
         self.table.cellDoubleClicked.connect(lambda *_: self.open_detail())
@@ -228,51 +234,59 @@ class CandidatePage(QWidget):
     def selected_uids(self):
         return list(self.owner.selection_state.selected_machine_keys)
 
-    def eventFilter(self, obj, event):
-        if (
-            obj is self.table.viewport()
-            and event.type() == QEvent.Type.MouseButtonPress
-            and event.button() == Qt.MouseButton.LeftButton
-        ):
-            index = self.table.indexAt(event.position().toPoint())
-            if index.isValid() and index.column() == 0:
-                ids = self.table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole)
-                keys = set(self.selected_uids())
-                keys.symmetric_difference_update(ids)
-                self.owner.selection_state.set(keys)
-                return True
-        return super().eventFilter(obj, event)
+    def select_all_candidates(self,*_):
+        keys={self.table.item(i,0).data(Qt.ItemDataRole.UserRole)[0] for i in range(self.table.rowCount())}
+        self.owner.selection_state.set(set(self.selected_uids()) | keys)
 
-    def table_selection_changed(self, *_):
-        if self._building or self._syncing_selection:
-            return
-        visible = {
-            self.table.item(i, 0).data(Qt.ItemDataRole.UserRole)[0]
-            for i in range(self.table.rowCount())
-        }
-        selected = {
-            self.table.item(index.row(), 0).data(Qt.ItemDataRole.UserRole)[0]
-            for index in self.table.selectionModel().selectedRows()
-        }
-        self.owner.selection_state.set((set(self.selected_uids()) - visible) | selected)
+    def reset_pointer(self):
+        self._check_pressed=None
+        self.table.setState(QAbstractItemView.State.NoState)
+
+    def eventFilter(self,obj,event):
+        if obj not in (self.table,self.table.viewport()):return super().eventFilter(obj,event)
+        kind=event.type()
+        if kind in (QEvent.Type.FocusOut,QEvent.Type.WindowDeactivate,QEvent.Type.UngrabMouse,QEvent.Type.Hide):
+            self.reset_pointer()
+        if kind==QEvent.Type.MouseMove and event.buttons()==Qt.MouseButton.NoButton:
+            self.reset_pointer()
+            return True
+        if kind==QEvent.Type.MouseButtonPress and event.button()==Qt.MouseButton.LeftButton:
+            index=self.table.indexAt(event.position().toPoint())
+            if index.isValid() and index.column()==0:
+                self._check_pressed=self.table.item(index.row(),0).data(Qt.ItemDataRole.UserRole)[0]
+                return True
+        if kind==QEvent.Type.MouseButtonRelease and event.button()==Qt.MouseButton.LeftButton:
+            pressed=self._check_pressed
+            if pressed is not None:
+                index=self.table.indexAt(event.position().toPoint())
+                self.reset_pointer()
+                if index.isValid() and index.column()==0 and self.table.item(index.row(),0).data(Qt.ItemDataRole.UserRole)[0]==pressed:
+                    keys=set(self.selected_uids());keys.symmetric_difference_update({pressed});self.owner.selection_state.set(keys)
+                return True
+        if kind==QEvent.Type.KeyPress and event.key()==Qt.Key.Key_Space:
+            indexes=self.table.selectionModel().selectedRows()
+            if not indexes and self.table.currentIndex().isValid():indexes=[self.table.currentIndex()]
+            keys=set(self.selected_uids())
+            ids={self.table.item(index.row(),0).data(Qt.ItemDataRole.UserRole)[0] for index in indexes}
+            if ids <= keys:keys-=ids
+            else:keys|=ids
+            self.owner.selection_state.set(keys)
+            return True
+        return super().eventFilter(obj,event)
+
+    def table_selection_changed(self,*_):
+        # Row focus / drag highlight is deliberately independent of work selection.
+        if not self._building and not self._syncing_selection:
+            self.highlight(False)
 
     def sync_selection_widgets(self):
-        if self._building or self._syncing_selection:
-            return
-        self._syncing_selection = True
-        keys = self.owner.selection_state.selected_machine_keys
-        self.table.clearSelection()
+        if self._building or self._syncing_selection:return
+        self._syncing_selection=True
+        keys=self.owner.selection_state.selected_machine_keys
         for i in range(self.table.rowCount()):
-            item = self.table.item(i, 0)
-            uid = item.data(Qt.ItemDataRole.UserRole)[0]
+            item=self.table.item(i,0);uid=item.data(Qt.ItemDataRole.UserRole)[0]
             item.setCheckState(Qt.CheckState.Checked if uid in keys else Qt.CheckState.Unchecked)
-            if uid in keys:
-                self.table.selectionModel().select(
-                    self.table.model().index(i, 0),
-                    QItemSelectionModel.SelectionFlag.Select
-                    | QItemSelectionModel.SelectionFlag.Rows,
-                )
-        self._syncing_selection = False
+        self._syncing_selection=False
 
     def selected_machines(self):
         ids = set(self.selected_uids())
@@ -297,6 +311,10 @@ class CandidatePage(QWidget):
             return
         self.timer.stop()
         self._building = True
+        vscroll=self.table.verticalScrollBar().value();hscroll=self.table.horizontalScrollBar().value()
+        sort_column=self.table.horizontalHeader().sortIndicatorSection();sort_order=self.table.horizontalHeader().sortIndicatorOrder()
+        current=self.table.currentRow()
+        focus_uid=self.table.item(current,0).data(Qt.ItemDataRole.UserRole)[0] if current>=0 and self.table.item(current,0) else None
         s = self.owner.candidate_ui
         selection = set(self.selected_uids())
         from .candidate_transfer import registered_ids
@@ -440,18 +458,14 @@ class CandidatePage(QWidget):
                     QBrush(QColor(contrast_text(analysis_color(color))))
                 )
         self.table.setSortingEnabled(True)
-        self.table.sortItems(0)
+        self.table.sortItems(max(0,sort_column),sort_order)
         self.table.setColumnWidth(3, 280)
         self.table.setColumnWidth(9, 410)
-        from PySide6.QtCore import QItemSelectionModel
-
-        for i in range(self.table.rowCount()):
-            if self.table.item(i, 0).data(Qt.ItemDataRole.UserRole)[0] in selection:
-                self.table.selectionModel().select(
-                    self.table.model().index(i, 0),
-                    QItemSelectionModel.SelectionFlag.Select
-                    | QItemSelectionModel.SelectionFlag.Rows,
-                )
+        if focus_uid:
+            for i in range(self.table.rowCount()):
+                if self.table.item(i,0).data(Qt.ItemDataRole.UserRole)[0]==focus_uid:
+                    self.table.setCurrentCell(i,0);break
+        self.table.verticalScrollBar().setValue(vscroll);self.table.horizontalScrollBar().setValue(hscroll)
         for status, card in self.cards.items():
             card.set_value(
                 str(counts[status]),

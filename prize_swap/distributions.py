@@ -175,7 +175,7 @@ class DistributionChart(QWidget):
         self.kind = "horizontal"
         self.setMinimumHeight(135)
         self.setMouseTracking(True)
-        manager().changed.connect(lambda *_: self.update())
+        manager().changed.connect(self.update)
 
     def event(self, event):
         if event.type() == event.Type.ToolTip:
