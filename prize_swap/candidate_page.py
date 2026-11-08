@@ -1,0 +1,386 @@
+"""Embedded replacement management; assessments never silently register assignments."""
+
+from copy import deepcopy
+from datetime import datetime, timezone
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QBrush
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QComboBox,
+    QPushButton,
+    QCheckBox,
+    QInputDialog,
+    QMessageBox,
+    QMenu,
+)
+from .analysis_views import make_table, ValueItem, propose_assignments
+from .analytics_page import fill_table
+from .machine_matching import machine_key, display_identity
+from .analytics_data import formatted, normalized
+from .analysis_settings import machine_type
+from .replacement import assess
+from .theme import manager, analysis_color, contrast_text
+
+STATUS_COLORS = {
+    "要確認": "#F4A6A6",
+    "入替検討": "#F7D5A0",
+    "経過観察": "#FFE16A",
+    "好調": "#94D8A0",
+    "データ不足": "#B8BEC6",
+    "入替予定登録済み": "#A9D7FF",
+    "除外": "#B8BEC6",
+}
+
+
+def candidate_key(m):
+    return (
+        "management:" + normalized(m.source_key)
+        if m.source_key
+        else "machine:" + machine_key(m) if machine_key(m) else "uid:" + m.uid
+    )
+
+
+def validate_candidate_state(value=None):
+    from .core import AppError
+
+    default = dict(
+        version=1, exclusions={}, search="", kind="", method="", status="", show_excluded=False
+    )
+    if value is None:
+        return default
+    if not isinstance(value, dict) or set(value) - set(default):
+        raise AppError("入替候補の保存形式が不正です。")
+    s = default | deepcopy(value)
+    if (
+        s["version"] != 1
+        or type(s["show_excluded"]) is not bool
+        or any(
+            not isinstance(s[k], str) or len(s[k]) > 2000
+            for k in ("search", "kind", "method", "status")
+        )
+    ):
+        raise AppError("入替候補の表示設定が不正です。")
+    if not isinstance(s["exclusions"], dict) or len(s["exclusions"]) > 10000:
+        raise AppError("候補の除外情報が不正です。")
+    for key, row in s["exclusions"].items():
+        if (
+            not isinstance(key, str)
+            or not isinstance(row, dict)
+            or set(row) != {"reason", "updated_at"}
+            or any(not isinstance(v, str) or len(v) > 2000 for v in row.values())
+        ):
+            raise AppError("候補の除外理由が不正です。")
+    return s
+
+
+class CandidatePage(QWidget):
+    def __init__(self, window):
+        super().__init__()
+        self.host_window = window
+        self.owner = window.floor
+        self._building = False
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(5, 5, 5, 5)
+        outer.setSpacing(7)
+        row = QHBoxLayout()
+        outer.addLayout(row)
+        from .detail_widgets import KpiCard
+
+        self.cards = {}
+        for status in ("要確認", "入替検討", "好調", "データ不足", "入替予定登録済み"):
+            card = KpiCard("追加済み" if status == "入替予定登録済み" else status)
+            card.setFixedHeight(80)
+            card.setMinimumWidth(100)
+            row.addWidget(card, 1)
+            self.cards[status] = card
+        note = QLabel(
+            "ルールによる参考判定です。選択だけでは登録せず、入替先商品を選んで明示的に確認した場合に指示書へ反映します。"
+        )
+        note.setWordWrap(True)
+        outer.addWidget(note)
+        row = QHBoxLayout()
+        outer.addLayout(row)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("機械番号・管理ナンバー・商品・判定理由を検索")
+        row.addWidget(self.search, 1)
+        self.kinds = QComboBox()
+        self.methods = QComboBox()
+        self.status = QComboBox()
+        for c in (self.kinds, self.methods, self.status):
+            row.addWidget(c)
+        self.show_excluded = QCheckBox("除外済みも表示")
+        row.addWidget(self.show_excluded)
+        self.table = make_table([], [])
+        outer.addWidget(self.table, 1)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.context_menu)
+        self.table.cellClicked.connect(lambda *_: self.highlight(False))
+        self.table.cellDoubleClicked.connect(lambda *_: self.open_detail())
+        actions = QHBoxLayout()
+        outer.addLayout(actions)
+        self.buttons = {}
+        for label, callback in [
+            ("マシン詳細", self.open_detail),
+            ("売り場で場所を確認", lambda: self.highlight(True)),
+            ("入替予定へ登録", self.register),
+            ("理由を付けて除外", self.exclude),
+            ("除外を解除", self.restore_exclusion),
+        ]:
+            b = QPushButton(label)
+            b.clicked.connect(callback)
+            actions.addWidget(b)
+            self.buttons[label] = b
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        outer.addWidget(self.summary)
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(120)
+        self.timer.timeout.connect(self.refresh)
+        self.owner.changed.connect(self.invalidate)
+        manager().changed.connect(self.invalidate)
+        self.search.textChanged.connect(self.changed)
+        for c in (self.kinds, self.methods, self.status):
+            c.currentIndexChanged.connect(self.changed)
+        self.show_excluded.toggled.connect(self.changed)
+        self.refresh()
+
+    def invalidate(self, *_):
+        if self.isVisible():
+            self.timer.start()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.refresh()
+
+    def selected_uids(self):
+        return [
+            self.table.item(i.row(), 0).data(Qt.ItemDataRole.UserRole)[0]
+            for i in self.table.selectionModel().selectedRows()
+        ]
+
+    def selected_machines(self):
+        ids = set(self.selected_uids())
+        return [m for m in self.owner.machines if m.uid in ids]
+
+    def changed(self, *_):
+        if self._building:
+            return
+        s = self.owner.candidate_ui
+        s.update(
+            search=self.search.text(),
+            kind=self.kinds.currentData() or "",
+            method=self.methods.currentData() or "",
+            status=self.status.currentData() or "",
+            show_excluded=self.show_excluded.isChecked(),
+        )
+        self.owner.schedule_save()
+        self.timer.start()
+
+    def refresh(self):
+        if self._building:
+            return
+        self.timer.stop()
+        self._building = True
+        s = self.owner.candidate_ui
+        selection = set(self.selected_uids())
+        rs = self.owner.analytics.records()
+        byuid = {r["uid"]: r for r in rs}
+        for control, key, label, values in (
+            (self.kinds, "kind", "全機種", sorted({r["machine_type"] for r in rs})),
+            (self.methods, "method", "全運営方法", sorted({r["method"] for r in rs})),
+            (self.status, "status", "全判定", list(STATUS_COLORS)),
+        ):
+            control.clear()
+            control.addItem(label, "")
+            for val in values:
+                control.addItem(val, val)
+            if s[key] and control.findData(s[key]) < 0:
+                control.addItem(s[key] + "（該当なし）", s[key])
+            control.setCurrentIndex(max(0, control.findData(s[key])))
+        self.search.setText(s["search"])
+        self.show_excluded.setChecked(s["show_excluded"])
+        rows = []
+        identities = []
+        colors = []
+        counts = {k: 0 for k in self.cards}
+        for m in self.owner.machines:
+            r = byuid[m.uid]
+            a = assess(
+                m,
+                self.owner.reference_day(),
+                self.owner.analysis_settings,
+                self.owner.performance_history,
+            )
+            status = a["status"]
+            if status == "判定保留":
+                status = (
+                    "経過観察"
+                    if r["ratio"] is not None
+                    and r["days"] is not None
+                    and r["days"] >= 0
+                    and not m.analysis
+                    else "データ不足"
+                )
+            planned = r["planned"]
+            excluded = s["exclusions"].get(candidate_key(m))
+            if not excluded:
+                if status in counts:
+                    counts[status] += 1
+                if planned:
+                    counts["入替予定登録済み"] += 1
+            shown = "除外" if excluded else "入替予定登録済み" if planned else status
+            reason = " / ".join(a["reasons"])
+            if excluded:
+                reason = f'除外理由：{excluded["reason"]} / ' + reason
+            if (
+                excluded
+                and not s["show_excluded"]
+                or s["kind"]
+                and r["machine_type"] != s["kind"]
+                or s["method"]
+                and r["method"] != s["method"]
+                or s["status"]
+                and shown != s["status"]
+            ):
+                continue
+            if s["search"] and normalized(s["search"]) not in normalized(
+                " ".join(
+                    [
+                        display_identity(m),
+                        m.source_key,
+                        m.product,
+                        r["machine_type"],
+                        r["method"],
+                        reason,
+                        shown,
+                    ]
+                )
+            ):
+                continue
+            rows.append(
+                [
+                    (f'{a["priority"]+1} {status}', a["priority"]),
+                    machine_key(m) or "—",
+                    m.source_key or "—",
+                    m.product or "—",
+                    (formatted("ratio", r["ratio"]), r["ratio"]),
+                    (formatted("sales", r["sales"]), r["sales"]),
+                    (formatted("po_rate", r["po_rate"]), r["po_rate"]),
+                    (formatted("cost_rate", r["cost_rate"]), r["cost_rate"]),
+                    (formatted("days", r["days"]), r["days"]),
+                    reason,
+                    shown,
+                    "詳細 / 配置 / 登録 / 除外",
+                ]
+            )
+            identities.append(m.uid)
+            colors.append(STATUS_COLORS[shown])
+        fill_table(
+            self.table,
+            [
+                "優先順位",
+                "機械番号",
+                "管理ナンバー",
+                "商品名",
+                "アベ比",
+                "売上金額（円）",
+                "PO率",
+                "原価率",
+                "投入日数",
+                "判定理由",
+                "状態",
+                "操作",
+            ],
+            rows,
+        )
+        for i, (uid, color) in enumerate(zip(identities, colors)):
+            self.table.item(i, 0).setData(Qt.ItemDataRole.UserRole, [uid])
+            for j in (0, 10):
+                self.table.item(i, j).setBackground(QBrush(QColor(analysis_color(color))))
+                self.table.item(i, j).setForeground(
+                    QBrush(QColor(contrast_text(analysis_color(color))))
+                )
+        self.table.setSortingEnabled(True)
+        self.table.sortItems(0)
+        self.table.setColumnWidth(3, 280)
+        self.table.setColumnWidth(9, 410)
+        from PySide6.QtCore import QItemSelectionModel
+
+        for i in range(self.table.rowCount()):
+            if self.table.item(i, 0).data(Qt.ItemDataRole.UserRole)[0] in selection:
+                self.table.selectionModel().select(
+                    self.table.model().index(i, 0),
+                    QItemSelectionModel.SelectionFlag.Select
+                    | QItemSelectionModel.SelectionFlag.Rows,
+                )
+        for status, card in self.cards.items():
+            card.set_value(
+                str(counts[status]),
+                STATUS_COLORS[status],
+                "明示登録のみ反映" if status == "入替予定登録済み" else "ルールによる参考判定",
+            )
+            card.value.setToolTip(status)
+        self.summary.setText(
+            f'表示 {len(rows)} / {len(rs)}台 ｜ 除外 {len(s["exclusions"])}件 ｜ ダブルクリックで詳細、場所確認で配置へ移動します。'
+        )
+        self._building = False
+
+    def highlight(self, activate=True):
+        ids = self.selected_uids()
+        if not ids:
+            return
+        if activate:
+            self.host_window.highlight_analysis_machines(ids)
+        else:
+            self.owner.set_analysis_highlight(ids)
+
+    def open_detail(self):
+        selected = self.selected_machines()
+        if selected:
+            from .floor_details import MachineDetailDialog
+
+            d = MachineDetailDialog(self.owner, selected[0])
+            d.exec()
+            self.refresh()
+
+    def register(self):
+        selected = self.selected_machines()
+        if propose_assignments(self.owner, [machine_key(m) for m in selected], self):
+            self.refresh()
+
+    def set_exclusions(self, reason):
+        reason = reason.strip()
+        if not reason:
+            return False
+        for m in self.selected_machines():
+            self.owner.candidate_ui["exclusions"][candidate_key(m)] = {
+                "reason": reason,
+                "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+        self.owner.schedule_save()
+        self.refresh()
+        return True
+
+    def exclude(self):
+        if not self.selected_machines():
+            return
+        reason, ok = QInputDialog.getText(self, "候補から除外", "除外理由（保存します）")
+        if ok and not self.set_exclusions(reason):
+            QMessageBox.information(self, "除外理由", "理由を入力してください。")
+
+    def restore_exclusion(self):
+        for m in self.selected_machines():
+            self.owner.candidate_ui["exclusions"].pop(candidate_key(m), None)
+        self.owner.schedule_save()
+        self.refresh()
+
+    def context_menu(self, pos):
+        menu = QMenu(self)
+        for b in self.buttons.values():
+            menu.addAction(b.text(), b.click)
+        menu.exec(self.table.viewport().mapToGlobal(pos))

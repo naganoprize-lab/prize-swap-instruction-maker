@@ -175,15 +175,14 @@ class SalesAnalysisMixin:
                     number,
                     r["reference_name"],
                     money(r["values"]["sales"]),
-                    money(r["values"]["average"]),
                 )
             )
         rows.extend(
-            (r["number"], "正規化不能", "—", "—", "—")
+            (r["number"], "正規化不能", "—", "—")
             for r in self.analysis_state.get("unmatched_rows", [])
         )
         tabs.addTab(
-            table(["Excel機器番号", "照合用番号", "商品名（参考）", "売上金額", "平均売上"], rows),
+            table(["Excel機器番号", "照合用番号", "商品名（参考）", "売上金額"], rows),
             f"未照合（{len(rows)}件）",
         )
         errors = [(r["row"], r["number"], r["message"]) for r in self.analysis_state["errors"]]

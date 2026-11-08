@@ -57,6 +57,9 @@ class Machine:
     layout_loaded_at: str = ""
     direct_number_raw: str = ""
     manual_updates: dict = field(default_factory=dict)
+    prize_cost: float | None = None
+    prize_cost_product: str = ""
+    play_pricing: dict | None = None
 
     def __post_init__(self):
         if isinstance(self.installed_on, (date, datetime)):
@@ -94,8 +97,13 @@ def validate_machines(records):
                 raise ValueError("文字列項目が不正")
             from .machine_matching import normalize_number, MATCH_LABELS
             from .machine_matching import MANUAL_FIELDS
-            if not isinstance(m.manual_updates,dict) or set(m.manual_updates)-set(MANUAL_FIELDS) or any(not isinstance(v,str) or len(v)>100 for v in m.manual_updates.values()):
-                raise ValueError('手動入力の取得元情報が不正')
+
+            if (
+                not isinstance(m.manual_updates, dict)
+                or set(m.manual_updates) - set(MANUAL_FIELDS)
+                or any(not isinstance(v, str) or len(v) > 100 for v in m.manual_updates.values())
+            ):
+                raise ValueError("手動入力の取得元情報が不正")
 
             if m.number_origin not in ("direct", "reference") or m.match_method not in MATCH_LABELS:
                 raise ValueError("照合状態が不正")
@@ -144,6 +152,13 @@ def validate_machines(records):
                     or not math.isfinite(value)
                 ):
                     raise ValueError("稼働数値が不正")
+            from .po_evaluation import validate_pricing, positive
+
+            validate_pricing(m.play_pricing)
+            if m.prize_cost is not None and not positive(m.prize_cost):
+                raise ValueError("確認原価は正の金額で指定してください")
+            if not isinstance(m.prize_cost_product, str):
+                raise ValueError("確認原価の商品情報が不正")
             from .sales_analysis import validate_overlay
 
             validate_overlay(m.analysis)
@@ -258,6 +273,9 @@ def validate_state(state):
     from .analytics_data import validate_ui_state
 
     validate_ui_state(state.get("analytics_ui"))
+    from .candidate_page import validate_candidate_state
+
+    validate_candidate_state(state.get("candidate_ui"))
     from .sales_analysis import validate_snapshot
 
     validate_snapshot(state.get("sales_analysis"))

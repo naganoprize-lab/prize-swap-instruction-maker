@@ -8,7 +8,7 @@ from .analytics_data import machine_record, formatted
 from .analysis_settings import validate_settings
 from .theme import tokens, manager
 
-AGE_EXPLANATION = "投入日数は設置からの経過期間を示し、長いほどスコアが低くなります。売上不振を意味するものではありません。"
+AGE_EXPLANATION = "投入日数は設置からの経過期間を示し、長いほど新しさの評価が低くなります。売上不振を意味するものではありません。"
 
 
 def interpolate(value, points):
@@ -23,53 +23,42 @@ def interpolate(value, points):
 
 
 def sales_score(machine, peers, settings):
-    """Average-rank empirical percentile within a confirmed type/period cohort."""
+    """Midrank percentile of total sales for all machines in this source/period."""
     r = machine
-    if (
-        not r.get("score_comparable")
-        or not r["period"][0]
-        or not r.get("machine_type")
-        or r["machine_type"] == "クレーン"
-    ):
-        return None, "同機種・確定期間・現在の商品に対応する実績が不足しています。"
     values = [
-        p["average"]
+        p["sales"]
         for p in peers
         if p.get("score_comparable")
-        and p["period"] == r["period"]
-        and p["machine_type"] == r["machine_type"]
-        and p["average"] is not None
+        and p.get("sales_cohort") == r.get("sales_cohort")
+        and p.get("sales") is not None
+        and p["sales"] >= 0
     ]
     n = len(values)
-    if r["average"] is None or n < settings["radar_min_peers"]:
-        return (
-            None,
-            f'同機種・同期間の比較対象 {n}台／最低{settings["radar_min_peers"]}台。未評価。',
-        )
-    low = sum(v < r["average"] for v in values)
-    ties = sum(v == r["average"] for v in values)
-    score = (low + (ties - 1) / 2) / (n - 1) * 100 if n > 1 else 50
-    return score, f"平均売上の百分位（同順位は平均順位）：{n}台。アベ比の基準額とは独立。"
+    if not r.get("score_comparable") or r.get("sales") is None or n < 2:
+        return None, f"同じ集計期間の全台比較：有効{n}台。比較対象不足。"
+    if len(set(values)) == 1:
+        return 50.0, f"全{n}台が同額のため中立の状態です。"
+    if n < 4:
+        return None, f"有効{n}台：比較対象不足のため順位で優劣をつけません。"
+    low = sum(v < r["sales"] for v in values)
+    ties = sum(v == r["sales"] for v in values)
+    return (low + (ties - 1) / 2) / (
+        n - 1
+    ) * 100, f"売上金額・同じ集計期間の全{n}台比較（同額は同順位）。"
 
 
 def score_record(machine, reference, settings, assignments=None):
     from .replacement import episode
+    from .sales_evaluation import cohort
 
     r = machine_record(machine, reference, settings, assignments)
     a = machine.analysis or {}
-    r["score_comparable"] = bool(
-        a
-        and a.get("period_source") in ("excel", "manual")
-        and not a.get("quality_issues")
-        and a.get("product_context") == episode(machine)
-        and machine.product
-        and machine.installed_on
-        and a.get("period_start")
-        and a["period_start"] >= machine.installed_on
-        and (
-            a.get("operation_context") is None or a["operation_context"] == machine.operation_method
-        )
-        and machine.match_method != "review"
+    r["sales_cohort"] = cohort(machine)
+    r["score_comparable"] = not (
+        a.get("quality_issues")
+        or a.get("product_context") is not None
+        and a["product_context"] != episode(machine)
+        or machine.match_method == "review"
     )
     return r
 
@@ -82,20 +71,20 @@ def evaluate(machine, reference, settings=None, peers=(), assignments=None):
     cost_points = list(
         zip([target * k for k in (0.5, 2 / 3, 5 / 6, 1, 7 / 6, 4 / 3)], [0, 50, 75, 100, 75, 0])
     )
-    po_target = s["po_reference"]
-    po_points = list(
-        zip([po_target * k for k in s["radar_po_knots"]], [20, 60, 80, 100, 80, 60, 20])
-    )
+    from .po_evaluation import evaluate_po
+
+    po = evaluate_po(machine, s)
+    po_target = po["target"]
     age = r["days"]
     specs = [
         (
             "ratio",
             "アベ比",
             interpolate(r["ratio"], [(0, 0), (100, 50), (200, 100)]),
-            "200%以上で100点",
+            "アベ比の状態",
             "既存の基準アベレージに対する稼働比率。",
         ),
-        ("sales", "売上", sales, "同機種・同期間で比較", comparison),
+        ("sales", "売上", sales, "同期間の全台・売上金額で比較", comparison),
         (
             "days",
             "投入日数",
@@ -117,19 +106,21 @@ def evaluate(machine, reference, settings=None, peers=(), assignments=None):
         (
             "po_rate",
             "PO率",
-            interpolate(r["po_rate"], po_points) if po_target > 0 else None,
-            f"目標 {po_target:.1%}",
-            "PO率の運営設定への適合度。",
+            po["score"],
+            f"理論目安 {po_target:.2%}" if po_target is not None else "理論目安：計算不可",
+            po["explanation"] + " / " + po["cost_source"] + " / " + po["price_source"],
         ),
     ]
     output = []
     for key, label, score, goal, note in specs:
         actual = formatted(key, r[key])
         if key == "sales":
-            actual = f'売上 {formatted("sales",r["sales"])}円／平均 {formatted("average",r["average"])}円'
+            actual = "データなし" if r["sales"] is None else f'{formatted("sales",r["sales"])}円'
         elif key == "days" and age is not None and age >= 0:
             actual += "日"
-        warning = ""
+        if r[key] is None:
+            actual = "データなし"
+        warning = " / ".join(po["warnings"]) if key == "po_rate" else ""
         if key == "cost_rate" and r[key] is not None and r[key] < s["cost_low"]:
             warning = "低原価率・要確認（入替確定ではありません）"
         if key == "days" and age is not None and age < 0:
@@ -173,8 +164,8 @@ class RadarChart(QWidget):
 
     @staticmethod
     def tooltip(a):
-        score = "未評価" if a["score"] is None else f'{a["score"]:.1f}点'
-        return f'{a["label"]}\n実測値：{a["actual"]}\nスコア：{score}\n{a["goal"]}\n{a["note"]}\n{a["warning"]}'
+        status = "未評価" if a["score"] is None else "状態を表示"
+        return f'{a["label"]}\n実測値：{a["actual"]}\n{status}\n{a["goal"]}\n{a["note"]}\n{a["warning"]}'
 
     def tooltip_at(self, point):
         for rect, a in self.hit_targets:
@@ -224,7 +215,7 @@ class RadarChart(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPolygon(QPolygonF([center + (v - center) * mark / 100 for v in vertices]))
             p.setPen(QColor(t["muted"]))
-            p.drawText(QPointF(cx + 3, cy - radius * mark / 100), str(mark))
+            # Internal normalization marks are intentionally unlabelled.
         for v in vertices:
             p.setPen(QPen(QColor(t["border"]), 1))
             p.drawLine(center, v)
@@ -262,7 +253,7 @@ class RadarChart(QWidget):
                 50,
             )
             p.setPen(QColor(t["text"]))
-            text = a["label"] + ("\n未評価" if point is None else f'\n{a["score"]:.0f}点')
+            text = a["label"] + "\n" + a["actual"] + ("\n未評価" if point is None else "")
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, text)
             self.hit_targets.append((rect, a))
             marker = point if point is not None else v

@@ -7,7 +7,7 @@ import tempfile
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from .core import AppError
-from .analytics_data import FIELDS, NUMERIC
+from .analytics_data import DISPLAY_FIELDS as FIELDS, NUMERIC
 
 
 def safe_csv(value):
@@ -81,12 +81,12 @@ def export_tables(page):
         [r.get(k) for k in keys] + [r["loaded_at"], r["extracted_at"], r["source_file"]]
         for r in page.records
     ]
-    for key in NUMERIC:
+    for key in (k for k in NUMERIC if k in FIELDS):
         details_headers.extend(
             [FIELDS[key] + "・取得元", FIELDS[key] + "・更新日時", FIELDS[key] + "・対象期間"]
         )
     for row, r in zip(details, page.records):
-        for key in NUMERIC:
+        for key in (k for k in NUMERIC if k in FIELDS):
             from .analytics_data import period_label
 
             row.extend(
@@ -151,9 +151,16 @@ def export_tables(page):
     }
     if page.chart_type.currentData() == "radar":
         output["グラフデータ"] = (
-            ["項目", "実測値", "スコア", "目標・意味", "説明", "注意"],
+            ["項目", "実測値", "状態", "目標・意味", "説明", "注意"],
             [
-                [a["label"], a["actual"], a["score"], a["goal"], a["note"], a["warning"]]
+                [
+                    a["label"],
+                    a["actual"],
+                    "未評価" if a["score"] is None else "評価可能",
+                    a["goal"],
+                    a["note"],
+                    a["warning"],
+                ]
                 for a in page.radar.axes
             ],
         )

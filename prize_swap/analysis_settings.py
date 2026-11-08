@@ -16,11 +16,13 @@ DEFAULTS = dict(
     cost_near=0.50,
     cost_high=0.70,
     cost_target=0.60,
-    sales_mode="benchmark",
+    sales_mode="quantile",
     sales_benchmark=None,
     sales_low=1000.0,
     sales_middle=3000.0,
     sales_high=6000.0,
+    default_play_price=100.0,
+    po_tolerance=0.20,
     aliases={},
     types={},
     tolerance_absolute=2.0,
@@ -80,7 +82,7 @@ def validate_settings(value=None):
         raise AppError("原価率は低すぎる境界＜低め境界≦目標≦高い境界にしてください。")
     if (
         s["sales_mode"] not in ("benchmark", "fixed", "quantile")
-        or not s["sales_low"] < s["sales_middle"] < s["sales_high"]
+        or not s["sales_low"] < s["sales_high"]
     ):
         raise AppError("売上比較方式または固定金額の境界が不正です。")
     if s["sales_benchmark"] is not None and s["sales_benchmark"] <= 0:
@@ -115,6 +117,16 @@ def validate_settings(value=None):
             or not re.fullmatch("#[0-9a-fA-F]{6}", item["color"])
         ):
             raise AppError("機種色は #RRGGBB、短縮名は文字列で指定してください。")
+    if (
+        not 0 < s["cost_target"] <= 1
+        or not 0 < s["default_play_price"] <= 1000000
+        or not 0 <= s["po_tolerance"] <= 1
+    ):
+        raise AppError("目標原価率・プレイ料金・PO許容偏差が不正です。")
+    if s["sales_mode"] == "benchmark":
+        s["sales_mode"] = (
+            "quantile"  # Legacy benchmark remains stored, but is not an active comparison.
+        )
     return s
 
 
@@ -139,16 +151,6 @@ def type_style(name, settings=None):
 
 
 def sales_boundaries(machines, settings):
-    from .floor_status import effective_stat
+    from .sales_evaluation import boundaries
 
-    if settings["sales_mode"] == "quantile":
-        values = sorted(
-            v for m in machines if (v := effective_stat(m, "average")) is not None and v >= 0
-        )
-        if not values:
-            return None
-        return [values[round((len(values) - 1) * p)] for p in (0.25, 0.5, 0.75)]
-    if settings["sales_mode"] == "fixed":
-        return [settings[k] for k in ("sales_low", "sales_middle", "sales_high")]
-    v = settings["sales_benchmark"]
-    return [v * 0.5, v, v * 2] if v is not None else None
+    return boundaries(machines, settings)

@@ -132,11 +132,16 @@ def validate_snapshot(value):
             or type(record.get("row")) is not int
         ):
             raise AppError("売上分析の照合情報が不正です。")
+        from .po_evaluation import validate_inputs
+
+        validate_inputs(record.get("po_inputs"))
         validate_values(record.get("values"))
         if not isinstance(record.get("machine_name", ""), str):
             raise AppError("機器名が不正です。")
         context = record.get("product_context")
-        if record.get("operation_context") is not None and not isinstance(record["operation_context"], str):
+        if record.get("operation_context") is not None and not isinstance(
+            record["operation_context"], str
+        ):
             raise AppError("実績読込時の運営方法が不正です。")
         if context is not None and (
             not isinstance(context, dict)
@@ -216,6 +221,9 @@ def validate_overlay(value):
         not isinstance(value.get(k), str) for k in ("file_name", "loaded_at")
     ):
         raise AppError("マシンの売上分析情報が不正です。")
+    from .po_evaluation import validate_inputs
+
+    validate_inputs(value.get("po_inputs"))
     validate_values(value.get("values"))
 
 
@@ -241,6 +249,11 @@ def load_analysis(path, tolerance=None):
                 raise AppError(f"ヘッダー「{label}」がありません。")
             columns[key] = match
         columns["machine_name"] = labels.get(canonical("機器"))
+        columns["prize_cost"] = labels.get(canonical("景品原価"))
+        columns["play_amount"] = labels.get(
+            canonical("プレイ料金"), labels.get(canonical("1プレイ料金"))
+        )
+        columns["play_count"] = labels.get(canonical("料金回数"))
         result = empty_snapshot()
         result.update(
             source=str(path.resolve()),
@@ -302,8 +315,8 @@ def load_analysis(path, tolerance=None):
                     ):
                         raise AppError(f"{METRICS[key]}にパーセント文字列は使用できません。")
                 validate_values(values)
-                if any(values[k] is None for k in ("sales", "average", "operating_days")):
-                    raise AppError("売上・平均売上・稼働日数が欠損しています。")
+                if values["sales"] is None:
+                    raise AppError("売上金額が欠損しています。")
             except AppError as exc:
                 result["errors"].append(
                     dict(row=row_index, number=number, message=str(exc), kind="numeric")
@@ -318,6 +331,37 @@ def load_analysis(path, tolerance=None):
                 row=row_index,
                 values=values,
             )
+            po_inputs = {}
+            for input_key in ("prize_cost", "play_amount", "play_count"):
+                raw_input = cell(input_key)
+                if raw_input not in (None, ""):
+                    val = numeric(raw_input)
+                    if val is None or val <= 0 or input_key == "play_count" and val != int(val):
+                        result["issues"].append(
+                            issue(
+                                number,
+                                "po_input",
+                                "景品原価・料金条件を確認してください。",
+                                "警告",
+                                row_index,
+                            )
+                        )
+                        continue
+                    po_inputs[input_key] = val
+            record["po_inputs"] = {}
+            if "prize_cost" in po_inputs:
+                record["po_inputs"]["prize_cost"] = po_inputs["prize_cost"]
+            if any(
+                cell(k) not in (None, "") and k not in po_inputs
+                for k in ("play_amount", "play_count")
+            ):
+                record["po_inputs"]["pricing_unavailable"] = True
+            if "play_amount" in po_inputs:
+                record["po_inputs"]["pricing"] = dict(
+                    amount=po_inputs["play_amount"],
+                    plays=int(po_inputs.get("play_count", 1)),
+                    confirmed=True,
+                )
             if number in conflicts:
                 result["duplicate_rows"] += 1
                 continue
@@ -333,7 +377,9 @@ def load_analysis(path, tolerance=None):
                         row_index,
                     )
                 )
-                if previous["values"] != values:
+                if previous["values"] != values or previous.get("po_inputs") != record.get(
+                    "po_inputs"
+                ):
                     result["records"].pop(number)
                     conflicts.add(number)
                     result["errors"].append(
@@ -393,6 +439,7 @@ def apply_snapshot(machines, snapshot):
         machine.analysis = (
             dict(
                 values=deepcopy(record["values"]) if record else {k: None for k in METRICS},
+                po_inputs=deepcopy(record.get("po_inputs", {})) if record else {},
                 machine_name=record.get("machine_name", "") if record else "",
                 file_name=snapshot["file_name"],
                 loaded_at=snapshot["loaded_at"],

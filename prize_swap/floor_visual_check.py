@@ -79,11 +79,13 @@ def run(output):
         window.products = [Product(day, "入替予定商品", machines=["20000右"])]
         window.day.setDate(QDate(day))
         floor.reference_date.setDate(QDate(day))
+        floor.follow_today = False
         floor.machines = [
             Machine(
                 number=f"{20000+i}右",
                 product=f"マシン描画検証 商品{i}",
                 po_rate=0.05,
+                unit_price=1200,
                 cost_rate=0.6,
                 kind="UFO9 third",
                 ratio=[49.9, 200, 49.9, None][i],

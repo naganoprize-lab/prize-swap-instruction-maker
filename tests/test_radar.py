@@ -68,31 +68,33 @@ def test_cost_fit_scores_not_lower_is_better(value, expected):
 @pytest.mark.parametrize(
     "value,expected",
     [
-        (0, 20),
-        (0.02, 20),
+        (0, 0),
+        (0.02, 40),
         (0.03, 60),
         (0.04, 80),
         (0.05, 100),
         (0.06, 80),
         (0.07, 60),
-        (0.08, 20),
-        (0.1, 20),
+        (0.08, 40),
+        (0.1, 0),
         (None, None),
     ],
 )
 def test_po_fit_scores(value, expected):
-    score = axis(Machine(po_rate=value), "po_rate")["score"]
+    score = axis(Machine(po_rate=value, unit_price=1200), "po_rate")["score"]
     assert score == pytest.approx(expected) if expected is not None else score is None
 
 
 def test_po_target_and_boundaries_configurable_without_changing_measurements():
     s = validate_settings()
-    s["po_reference"] = 0.06
-    m = Machine(po_rate=0.06)
+    s["cost_target"] = 0.6
+    m = Machine(po_rate=0.06, unit_price=1000)
     assert axis(m, "po_rate", s)["score"] == 100 and m.po_rate == 0.06
-    s["radar_po_knots"] = [0.2, 0.5, 0.9, 1, 1.1, 1.5, 1.8]
-    assert axis(Machine(po_rate=0.03), "po_rate", s)["score"] == 60
-    assert validate_settings({"radar_min_peers": 7})["radar_min_peers"] == 7
+    m.play_pricing = dict(amount=200, plays=1, confirmed=True)
+    assert axis(m, "po_rate", s)["score"] == pytest.approx(50)
+    assert (
+        validate_settings({"radar_min_peers": 7})["radar_min_peers"] == 7
+    )  # legacy setting remains readable
 
 
 def test_sales_uses_type_period_rank_and_excludes_insufficient_or_changed_context(tmp_path):
@@ -120,13 +122,13 @@ def test_sales_uses_type_period_rank_and_excludes_insufficient_or_changed_contex
     ms[0].product = "新商品"
     assert axis(ms[0], "sales", s, peers)["score"] is None
     ms[0].product = "商品"
-    assert axis(ms[0], "sales", s, peers[:4])["score"] is None
-    peers[1]["period"] = ("2026-11-04", "2026-11-06", "confirmed")
-    assert axis(ms[0], "sales", s, peers)["score"] is None
+    assert axis(ms[0], "sales", s, peers[:4])["score"] == 0
+    peers[1]["sales_cohort"] = ("2026-11-04", "2026-11-06", "confirmed")
+    assert axis(ms[0], "sales", s, peers)["score"] == 0
 
 
 def test_partial_radar_renders_markers_without_closed_invented_polygon():
-    axes = evaluate(Machine(ratio=85, po_rate=0, installed_on="2026-11-01"), DAY)
+    axes = evaluate(Machine(ratio=85, po_rate=0, unit_price=1200, installed_on="2026-11-01"), DAY)
     chart = RadarChart()
     chart.resize(460, 380)
     chart.set_axes(axes)

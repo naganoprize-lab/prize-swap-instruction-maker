@@ -103,7 +103,7 @@ def show_candidates(owner):
                 m.product,
                 (ratio_text(m), ratio(m)),
                 (days_text(m, owner.reference_day()), days(m, owner.reference_day())),
-                (money(effective_stat(m, "average")), effective_stat(m, "average")),
+                (money(effective_stat(m, "sales")), effective_stat(m, "sales")),
                 (percent_text(effective_stat(m, "po_rate")), effective_stat(m, "po_rate")),
                 (percent_text(effective_stat(m, "cost_rate")), effective_stat(m, "cost_rate")),
                 (percent_text(a["trend"]), a["trend"]),
@@ -120,7 +120,7 @@ def show_candidates(owner):
             "商品名",
             "アベ比",
             "投入日数",
-            "平均売上",
+            "売上金額",
             "PO率",
             "原価率",
             "売上前回比",
@@ -240,14 +240,14 @@ class MethodBars(QWidget):
         if not records:
             painter.drawText(10, 30, "集計対象がありません。")
             return
-        values = [max(0, r["average_sales"] or 0) for r in records]
+        values = [max(0, r["sales"] or 0) for r in records]
         largest = max(values, default=0) or 1
         height = max(20, (self.height() - 30) / max(1, len(records)))
         for i, (r, value) in enumerate(zip(records, values)):
             y = 20 + i * height
             painter.setPen(QColor(tokens()["text"]))
             painter.drawText(4, round(y + 14), r["method"])
-            if r["average_sales"] is not None:
+            if r["sales"] is not None:
                 painter.fillRect(
                     140,
                     round(y),
@@ -255,9 +255,7 @@ class MethodBars(QWidget):
                     max(8, round(height - 5)),
                     QColor(analysis_color("#94D8A0")),
                 )
-            painter.drawText(
-                max(145, self.width() - 150), round(y + 14), money(r["average_sales"]) + "円"
-            )
+            painter.drawText(max(145, self.width() - 150), round(y + 14), money(r["sales"]) + "円")
             self.hits.append((QRectF(0, y, self.width(), height), r.get("uids", [])))
         painter.end()
 
@@ -295,7 +293,7 @@ class MethodAnalysisPanel(QWidget):
         row.addWidget(kinds)
         row.addWidget(methods)
         note = QLabel(
-            "平均売上・アベ比は有効値の単純平均。PO率は売上加重を優先し、原価率は同じ有効対象の合計原価÷合計売上を優先します。欠損値は0で埋めません。異なる期間・期間不明の別ファイルは合算しません。"
+            "アベ比は有効値の単純平均。売上は集計金額。PO率は売上加重を優先し、原価率は同じ有効対象の合計原価÷合計売上を優先します。欠損値は0で埋めません。異なる期間・期間不明の別ファイルは合算しません。"
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -330,7 +328,6 @@ class MethodAnalysisPanel(QWidget):
                     [
                         r["method"],
                         (r["count"], r["count"]),
-                        (money(r["average_sales"]), r["average_sales"]),
                         (money(r["sales"]), r["sales"]),
                         (percent_text(r["po_rate"]), r["po_rate"]),
                         (percent_text(r["po_arithmetic"]), r["po_arithmetic"]),
@@ -352,7 +349,6 @@ class MethodAnalysisPanel(QWidget):
                 [
                     "運営方法",
                     "ブース数",
-                    "平均売上",
                     "総売上",
                     "PO率（優先方式）",
                     "PO率単純平均",

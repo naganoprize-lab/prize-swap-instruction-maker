@@ -99,10 +99,10 @@ def test_tolerance_and_legacy_snapshot_migration(tmp_path):
     "key,value,color",
     [
         ("po_rate", 0, "#8FC5F4"),
-        ("po_rate", 0.02999, "#8FC5F4"),
-        ("po_rate", 0.03, "#94D8A0"),
-        ("po_rate", 0.07, "#94D8A0"),
-        ("po_rate", 0.07001, "#F4A6A6"),
+        ("po_rate", 0.03999, "#8FC5F4"),
+        ("po_rate", 0.04, "#94D8A0"),
+        ("po_rate", 0.06, "#94D8A0"),
+        ("po_rate", 0.06001, "#F4A6A6"),
         ("po_rate", None, "#B8BEC6"),
         ("cost_rate", 0.3999, "#8FC5F4"),
         ("cost_rate", 0.4, "#C5E2FA"),
@@ -116,7 +116,7 @@ def test_tolerance_and_legacy_snapshot_migration(tmp_path):
 def test_rate_filter_boundaries_and_markers(key, value, color):
     from prize_swap.floor_status import filter_status
 
-    m = Machine(**{key: value})
+    m = Machine(unit_price=1200, **{key: value})
     colour, label = filter_status(m, key, date(2026, 11, 7), True)
     assert colour == color and "投入予定" in label
 
@@ -127,14 +127,12 @@ def test_sales_benchmark_is_independent_and_no_implicit_reference():
 
     m = Machine(average=500, ratio=200)
     assert filter_status(m, "sales_metric", date.today())[0] == "#B8BEC6"
-    s = validate_settings({"sales_benchmark": 1000})
-    for average, color in [
-        (499, "#F4A6A6"),
-        (500, "#F7D5A0"),
-        (1000, "#94D8A0"),
-        (2000, "#FFE16A"),
-    ]:
-        m.average = average
+    s = validate_settings(
+        {"sales_mode": "fixed", "sales_low": 500, "sales_middle": 1000, "sales_high": 2000}
+    )
+    for sales, color in [(499, "#F4A6A6"), (500, "#FFFFFF"), (1000, "#FFFFFF"), (2000, "#94D8A0")]:
+        m.sales = sales
+        m.average = 999999  # Retained field never determines the sales color.
         assert filter_status(m, "sales_metric", date.today(), settings=s)[0] == color
         assert ratio(m) == 200
 
@@ -320,7 +318,9 @@ def test_quantile_print_subset_uses_full_floor_population(tmp_path):
     w = FloorWidget(lambda: [], date.today, tmp_path / "auto.json")
     try:
         w.machines = [
-            Machine(number=f"{20000+i}右", average=i * 100, product=f"商品{i}", x=i * 200)
+            Machine(
+                number=f"{20000+i}右", sales=i * 100, average=999999, product=f"商品{i}", x=i * 200
+            )
             for i in range(8)
         ]
         w.analysis_settings["sales_mode"] = "quantile"

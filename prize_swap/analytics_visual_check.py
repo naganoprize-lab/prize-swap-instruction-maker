@@ -131,6 +131,39 @@ def run(output):
         QTest.qWait(50)
         assert window.tabs.currentWidget() is p and p.detail_table.rowCount() == 300
 
+        assert p.workspace_tabs.currentWidget() is p.distributions
+        report["distribution_tiles"] = {}
+        for theme in ("light", "dark"):
+            manager().set_mode(theme, persist=False)
+            p.refresh()
+            for key, (card, info, chart, legend) in p.distributions.cards.items():
+                if key == "method":
+                    continue
+                p.distributions.ensureWidgetVisible(card, 5, 5)
+                app.processEvents()
+                assert not card.visibleRegion().isEmpty() and not chart.grab().isNull()
+                assert sum(r["value"] for r in chart.rows) == 300
+                assert all(chart.rows)
+                report["distribution_tiles"][theme + "-" + key] = len(chart.rows)
+            p.distributions.verticalScrollBar().setValue(0)
+            window.grab().save(str(output / f"{theme}-distributions.png"))
+        window.floor.show_candidates()
+        c = window.candidate_page
+        assert window.tabs.currentWidget() is c and not c.isWindow() and c.table.rowCount() == 300
+        c.table.selectRow(0)
+        excluded_key = __import__(
+            "prize_swap.candidate_page", fromlist=["candidate_key"]
+        ).candidate_key(c.selected_machines()[0])
+        assert c.set_exclusions("実描画検証の除外理由") and c.table.rowCount() == 299
+        assert f.candidate_ui["exclusions"][excluded_key]["reason"]
+        c.show_excluded.setChecked(True)
+        c.refresh()
+        assert c.table.rowCount() == 300
+        window.grab().save(str(output / "replacement-candidates.png"))
+        report["candidates_embedded"] = True
+        window.navigation.buttons["analysis"].click()
+        app.processEvents()
+
         def settle_history():
             for _ in range(500):
                 app.processEvents()
@@ -139,6 +172,7 @@ def run(output):
                 QTest.qWait(10)
             raise AssertionError("History worker did not finish")
 
+        p.workspace_tabs.setCurrentWidget(p.detail_page)
         p.refresh()
         settle_history()
         assert len(p.timeline) == 600
@@ -153,7 +187,7 @@ def run(output):
                     continue
                 p.clear_focus()
                 p.axis.setCurrentIndex(p.axis.findData("machine_type"))
-                p.metric_choice.setCurrentIndex(p.metric_choice.findData("average"))
+                p.metric_choice.setCurrentIndex(p.metric_choice.findData("sales"))
                 p.operation.setCurrentIndex(
                     p.operation.findData("count" if kind in ("pie", "donut") else "mean")
                 )
@@ -249,7 +283,7 @@ def run(output):
         QTest.qWait(40)
         assert (
             d.kpis["sales"].value.text() == "7,800 円"
-            and d.kpis["average"].value.text() == "2,600 円"
+            and d.kpis["po_target"].value.text() == "12.00%"
         )
         assert d.values["source_key"].text() == "L_0" and len(d.radar.axes) == 5
         assert not d.kpis["ratio"].visibleRegion().isEmpty() and all(
@@ -308,7 +342,9 @@ def run(output):
         state = f.state()
         second = Window(layout_storage=f.storage)
         assert (
-            second.floor.analytics_ui == state["analytics_ui"] and len(second.floor.machines) == 300
+            second.floor.analytics_ui == state["analytics_ui"]
+            and second.floor.candidate_ui == state["candidate_ui"]
+            and len(second.floor.machines) == 300
         )
         second.dirty = False
         second.floor.timer.stop()

@@ -36,6 +36,8 @@ class KpiCard(QFrame):
         self.value.setWordWrap(True)
         self.note = QLabel()
         self.note.setWordWrap(True)
+        self.note.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         for label in (self.title, self.value, self.note):
             layout.addWidget(label)
 
@@ -104,13 +106,15 @@ def build_overview(dialog, tabs, scroll, panel):
     left_layout.setContentsMargins(0, 0, 0, 0)
     grid = QGridLayout()
     grid.setSpacing(6)
+    for column in range(3):
+        grid.setColumnStretch(column, 1)
     left_layout.addLayout(grid)
     d.kpis = {}
     for index, (key, label) in enumerate(
         (
             ("ratio", "アベ比"),
             ("sales", "売上金額"),
-            ("average", "平均売上"),
+            ("po_target", "理論PO目安"),
             ("cost_rate", "原価率"),
             ("po_rate", "PO率"),
             ("days", "投入日数"),
@@ -142,7 +146,7 @@ def build_overview(dialog, tabs, scroll, panel):
     d.evaluation_layout.addWidget(d.radar)
     from .analysis_views import make_table
 
-    d.score_table = make_table(["項目", "実測値", "スコア", "目標・意味"], [])
+    d.score_table = make_table(["項目", "実測値", "状態", "目標・意味"], [])
     d.score_table.setMinimumHeight(200)
     d.evaluation_layout.addWidget(d.score_table)
     d.evaluation_layout.addStretch()
@@ -170,11 +174,16 @@ def refresh_overview(d):
         f'管理 {m.source_key or "—"} ｜ {r["machine_type"] or "機種 —"} ｜ {d.method.currentText() or "方法 —"}\n'
         f'{MATCH_LABELS[m.match_method]} ｜ 更新 {r["updated_at"] or "不明"}'
     )
+    from .po_evaluation import evaluate_po
+
+    po = evaluate_po(m, o.analysis_settings)
+    r["po_target"] = po["target"]
+    r["sources"]["po_target"] = dict(source=po["cost_source"] + " / " + po["price_source"])
     for key, card in d.kpis.items():
         mode = {
             "ratio": "ratio",
             "sales": "sales_metric",
-            "average": "sales_metric",
+            "po_target": "po_rate",
             "cost_rate": "cost_rate",
             "po_rate": "po_rate",
             "days": "age",
@@ -185,7 +194,21 @@ def refresh_overview(d):
             "_sales_bounds": sales_boundaries(o.machines, o.analysis_settings)
         }
         color, label = filter_status(m, mode, o.reference_day(), settings=metric_settings)
-        text = formatted(key, r[key])
+        text = formatted("po_rate" if key == "po_target" else key, r[key])
+        if key == "po_target":
+            label = (
+                (
+                    f'原価 {po["prize_cost"]:,.0f}円'
+                    if po["prize_cost"] is not None
+                    else "原価未確認"
+                )
+                + (
+                    f'／1プレイ {po["play_price"]:,.0f}円'
+                    if po["play_price"] is not None
+                    else "／料金不明"
+                )
+                + ("（仮設定）" if po["provisional"] else "")
+            )
         if r[key] is not None and key in ("sales", "average"):
             text += " 円"
         elif r[key] is not None and key == "days" and r[key] >= 0:
@@ -209,7 +232,7 @@ def refresh_overview(d):
                 (
                     a["label"],
                     a["actual"],
-                    "未評価" if a["score"] is None else f'{a["score"]:.1f}点',
+                    "未評価" if a["score"] is None else "評価可能",
                     a["goal"],
                 )
             ):

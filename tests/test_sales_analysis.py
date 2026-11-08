@@ -284,7 +284,7 @@ def test_invalid_header_preserves_current_import_and_result_dialog(
 
     monkeypatch.setattr(QDialog, "exec", observe)
     floor.show_analysis_report()
-    assert observed[0][:2] == [(5, 1), (3, 0)]
+    assert observed[0][:2] == [(4, 1), (3, 0)]  # average remains stored, excluded from report UI
     assert observed[0][2][0] == 5
 
 

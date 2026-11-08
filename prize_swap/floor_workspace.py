@@ -87,8 +87,8 @@ class FullscreenHost(QDialog):
             button.clicked.connect(callback)
             row.addWidget(button)
             self.buttons[key] = button
-        self.clear_analysis=QToolButton()
-        self.clear_analysis.setText('分析強調を解除')
+        self.clear_analysis = QToolButton()
+        self.clear_analysis.setText("分析強調を解除")
         self.clear_analysis.clicked.connect(floor.clear_analysis_highlight)
         row.addWidget(self.clear_analysis)
         self.edit = QCheckBox("配置編集")
@@ -249,7 +249,7 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         if self.analysis_highlight_uids is not None:
             self.analysis_highlight_uids &= set(self.nodes)
             if not self.analysis_highlight_uids:
-                self.analysis_highlight_uids=None
+                self.analysis_highlight_uids = None
                 self.analysis_clear.hide()
         width = self.view.viewport().width()
         rects = project_machines(visible, self.presentation, self.reference_day(), width)
@@ -261,8 +261,12 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
                     node.setSelected(False)
                 node.setVisible(visible)
                 node.search_match = active and uid in matched
-                analysis=getattr(self,'analysis_highlight_uids',None)
-                node.setOpacity(1 if (uid in analysis if analysis is not None else not active or uid in matched) else 0.35)
+                analysis = getattr(self, "analysis_highlight_uids", None)
+                node.setOpacity(
+                    1
+                    if (uid in analysis if analysis is not None else not active or uid in matched)
+                    else 0.35
+                )
                 if not visible:
                     continue
                 rect = rects[uid]
@@ -290,20 +294,23 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         for node in self.nodes.values():
             node.update()
 
-    def set_analysis_highlight(self,uids):
-        valid=set(uids)&set(self.nodes)
-        if not valid:return False
-        self.analysis_highlight_uids=valid
+    def set_analysis_highlight(self, uids):
+        valid = set(uids) & set(self.nodes)
+        if not valid:
+            return False
+        self.analysis_highlight_uids = valid
         self.analysis_clear.setText(f"分析強調 {len(valid)}台を解除")
         self.analysis_clear.show()
-        if self._fullscreen_host:self._fullscreen_host.clear_analysis.show()
+        if self._fullscreen_host:
+            self._fullscreen_host.clear_analysis.show()
         self.apply_presentation()
         return True
 
     def clear_analysis_highlight(self):
-        self.analysis_highlight_uids=None
+        self.analysis_highlight_uids = None
         self.analysis_clear.hide()
-        if self._fullscreen_host:self._fullscreen_host.clear_analysis.hide()
+        if self._fullscreen_host:
+            self._fullscreen_host.clear_analysis.hide()
         self.apply_presentation()
 
     def next_match(self, direction=1):
@@ -365,14 +372,21 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         manual_period(self)
 
     def show_method_analysis(self):
-        if getattr(self,"analysis_page",None) is not None:
-            self.analytics_requested.emit("","all")
+        if getattr(self, "analysis_page", None) is not None:
+            self.analytics_requested.emit("", "all")
             return
         from .analysis_views import show_method_analysis
 
         show_method_analysis(self)
 
     def show_candidates(self):
+        if getattr(self, "candidate_page", None) is not None:
+            page = self.candidate_page
+            if self._fullscreen_host is not None:
+                self.leave_fullscreen()
+            page.host_window.tabs.setCurrentWidget(page)
+            page.refresh()
+            return
         from .analysis_views import show_candidates
 
         show_candidates(self)

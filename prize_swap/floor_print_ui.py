@@ -109,7 +109,10 @@ class FloorPrintControls(QWidget):
             check = QCheckBox(FIELD_LABELS[field])
             check.setChecked(field in options.fields)
             self.fields[field] = check
-            form.addRow(check)
+            if field == "average":
+                check.hide()
+            else:
+                form.addRow(check)
         hint = QLabel(
             "画面の倍率・スクロール・表示モード・文字サイズとは独立します。\n100%は画面100%時のカード寸法相当です。実際の筐体寸法ではありません。\n分割印刷ではカードを切らず、各カードを1回ずつ印刷します。"
         )

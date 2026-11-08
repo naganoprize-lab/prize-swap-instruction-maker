@@ -1,6 +1,6 @@
 from datetime import date
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate
 from PySide6.QtWidgets import QApplication
 from prize_swap.floor import FloorWidget
 from prize_swap.floor_data import Machine
@@ -13,6 +13,8 @@ DAY = date(2026, 11, 7)
 @pytest.fixture
 def owner(tmp_path):
     w = FloorWidget(lambda: [], lambda: DAY, tmp_path / "auto.json")
+    w.follow_today = False
+    w.reference_date.setDate(QDate(DAY))
     w.machines = [
         Machine(
             source_key="L_66",

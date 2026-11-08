@@ -378,17 +378,20 @@ class Window(QMainWindow):
             self.floor._fullscreen_host.close()
         self.tabs.setCurrentWidget(self.analysis_page)
         if uid:
-            self.analysis_page.focus_machine(uid,scope)
+            self.analysis_page.focus_machine(uid, scope)
 
-    def highlight_analysis_machines(self,uids,select=False):
-        valid=set(uids)&set(self.floor.nodes)
+    def highlight_analysis_machines(self, uids, select=False):
+        valid = set(uids) & set(self.floor.nodes)
         if not valid:
-            self.analysis_page.notice.setText('対象マシンを特定できないため、売り場への連携を行いません。')
+            self.analysis_page.notice.setText(
+                "対象マシンを特定できないため、売り場への連携を行いません。"
+            )
             return
-        if self.floor._fullscreen_host:self.floor._fullscreen_host.close()
+        if self.floor._fullscreen_host:
+            self.floor._fullscreen_host.close()
         self.tabs.setCurrentWidget(self.floor)
         self.floor.set_analysis_highlight(valid)
-        if select and len(valid)==1:
+        if select and len(valid) == 1:
             self.floor.nodes[next(iter(valid))].setSelected(True)
 
     def theme_changed(self, *_):
@@ -436,9 +439,12 @@ class Window(QMainWindow):
                 "dashboard": "ダッシュボード",
                 "settings": "設定",
                 "analysis": "売上分析",
+                "candidates": "入替候補",
             }[key]
         )
-        self.page_search.setVisible(key in ("instructions", "floor", "dashboard", "analysis"))
+        self.page_search.setVisible(
+            key in ("instructions", "floor", "dashboard", "analysis", "candidates")
+        )
         self.sync_page_search()
         for b in self.print_buttons:
             b.setEnabled(key in ("instructions", "floor", "labels"))
@@ -456,6 +462,8 @@ class Window(QMainWindow):
             self.floor.floor_search.setText(text)
         elif self.tabs.currentWidget() is self.analysis_page:
             self.analysis_page.search.setText(text)
+        elif self.tabs.currentWidget() is self.candidate_page:
+            self.candidate_page.search.setText(text)
 
     def sync_page_search(self, *_):
         if not hasattr(self, "page_search"):
@@ -464,7 +472,15 @@ class Window(QMainWindow):
         text = (
             self.search.text()
             if widget is self.instruction_page
-            else self.floor.floor_search.text() if widget is self.floor else self.analysis_page.search.text() if widget is self.analysis_page else ""
+            else (
+                self.floor.floor_search.text()
+                if widget is self.floor
+                else (
+                    self.analysis_page.search.text()
+                    if widget is self.analysis_page
+                    else self.candidate_page.search.text() if widget is self.candidate_page else ""
+                )
+            )
         )
         self.page_search.blockSignals(True)
         self.page_search.setText(text)

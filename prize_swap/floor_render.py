@@ -80,8 +80,6 @@ class CardRenderer:
         financial = []
         if "sales" in fields:
             financial.append("売上 " + money(effective_stat(machine, "sales")))
-        if "average" in fields:
-            financial.append("アベレージ " + money(effective_stat(machine, "average")))
         if financial:
             records.append(("　".join(financial), base * 0.85, False))
         if "installed_on" in fields:

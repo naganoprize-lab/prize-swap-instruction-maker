@@ -93,6 +93,7 @@ def test_graph_choices_constraints_expansion_image_and_cross(window, tmp_path):
     w = window
     p = w.analysis_page
     w.show_sales_analysis()
+    p.workspace_tabs.setCurrentWidget(p.detail_page)
     QApplication.processEvents()
     assert p.chart_type.count() == 11
     assert not p.chart_type.model().item(p.chart_type.findData("line")).isEnabled()
@@ -128,7 +129,7 @@ def test_graph_choices_constraints_expansion_image_and_cross(window, tmp_path):
 
 
 def test_all_fields_compound_conditions_and_saved_state(window):
-    from prize_swap.analytics_data import FIELDS
+    from prize_swap.analytics_data import DISPLAY_FIELDS as FIELDS
 
     w = window
     p = w.analysis_page
@@ -163,7 +164,7 @@ def test_all_fields_compound_conditions_and_saved_state(window):
 def test_csv_excel_missing_zero_provenance_and_formula_safety(window, tmp_path):
     import csv
     from openpyxl import load_workbook
-    from prize_swap.analytics_data import FIELDS
+    from prize_swap.analytics_data import DISPLAY_FIELDS as FIELDS
 
     p = window.analysis_page
     m = window.floor.machines[0]
@@ -180,7 +181,7 @@ def test_csv_excel_missing_zero_provenance_and_formula_safety(window, tmp_path):
     s = b["詳細"]
     headers = [c.value for c in s[1]]
     assert s.cell(2, headers.index("売上金額") + 1).value == 0
-    assert s.cell(2, headers.index("平均売上") + 1).value is None
+    assert "平均売上" not in headers and m.average is None
     cell = s.cell(2, headers.index("商品名") + 1)
     assert cell.value == m.product and cell.data_type == "s"
     po = s.cell(2, headers.index("PO率（内部比率 0.05=5%）") + 1)
@@ -322,7 +323,7 @@ def test_history_lines_are_background_cached_period_checked_and_clickable(window
         r["operation_context"] = m.operation_method
         f.performance_history.append(dict(id=identity(s), snapshot=s, deleted=False))
     w.show_sales_analysis(m.uid)
-    p.metric_choice.setCurrentIndex(p.metric_choice.findData("average"))
+    p.metric_choice.setCurrentIndex(p.metric_choice.findData("sales"))
     p.refresh()
     for _ in range(100):
         QApplication.processEvents()
@@ -355,6 +356,7 @@ def test_small_analysis_workspace_keeps_chart_and_footer_accessible(window):
     w.show_sales_analysis()
     QTest.qWait(50)
     p = w.analysis_page
+    p.workspace_tabs.setCurrentWidget(p.detail_page)
     assert not p.action_panel.isVisible() and p.chart_scroll.viewport().height() > 90
     assert (
         w.centralWidget()
@@ -397,7 +399,7 @@ def test_sparse_300_machine_cross_table_keeps_real_groups_and_missing_combinatio
 
 def test_numeric_detail_sort_uses_values_and_keeps_matching_identity(window):
     from PySide6.QtCore import Qt
-    from prize_swap.analytics_data import FIELDS
+    from prize_swap.analytics_data import DISPLAY_FIELDS as FIELDS
 
     w = window
     p = w.analysis_page
@@ -412,10 +414,10 @@ def test_numeric_detail_sort_uses_values_and_keeps_matching_identity(window):
     p.detail_table.sortItems(column, Qt.SortOrder.AscendingOrder)
     assert p.detail_table.item(0, column).text() == "900"
     assert p.detail_table.item(0, 0).data(Qt.ItemDataRole.UserRole) == [f.machines[0].uid]
-    p.legacy.table.sortItems(4, Qt.SortOrder.AscendingOrder)
+    p.legacy.table.sortItems(3, Qt.SortOrder.AscendingOrder)
     assert (
         p.legacy.table.item(0, 0).text() == "リング"
-        and p.legacy.table.item(0, 4).sort_value == 0.09
+        and p.legacy.table.item(0, 3).sort_value == 0.09
     )
     p.detail_clicked(0, column)
     assert f.analysis_highlight_uids == {f.machines[0].uid}

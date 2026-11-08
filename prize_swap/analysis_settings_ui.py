@@ -29,6 +29,8 @@ NUMBERS = {
     "cost_near": ("原価率・目標付近下限 (%)", 100),
     "cost_high": ("原価率・高い境界 (%)", 100),
     "cost_target": ("目標原価率 (%)", 100),
+    "default_play_price": ("標準プレイ料金（円・仮設定）", 1),
+    "po_tolerance": ("理論PO率からの許容偏差 (%)", 100),
     "sales_benchmark": ("基準平均売上 (円・0で未設定)", 1),
     "sales_low": ("固定金額・低い境界 (円)", 1),
     "sales_middle": ("固定金額・中間境界 (円)", 1),
@@ -54,7 +56,20 @@ def edit_analysis_settings(owner):
     outer.addWidget(tabs, 1)
     controls = {}
     s = owner.analysis_settings
-    for title, keys in [("指標と照合", list(NUMBERS)[:14]), ("入替判定", list(NUMBERS)[14:])]:
+    disabled = {"po_low", "po_high", "po_reference", "sales_benchmark", "sales_middle"}
+    rule_keys = {
+        "poor_ratio",
+        "consider_ratio",
+        "poor_days",
+        "consider_days",
+        "stale_days",
+        "decline_ratio",
+        "long_days",
+    }
+    for title, keys in [
+        ("指標と照合", [k for k in NUMBERS if k not in disabled | rule_keys]),
+        ("入替判定", [k for k in NUMBERS if k in rule_keys]),
+    ]:
         page = QWidget()
         form = QFormLayout(page)
         scroll = QScrollArea()
@@ -73,16 +88,15 @@ def edit_analysis_settings(owner):
         if title == "指標と照合":
             mode = QComboBox()
             for label, key in [
-                ("設定基準平均売上との比率", "benchmark"),
                 ("固定金額", "fixed"),
-                ("四分位（現在の有効実績）", "quantile"),
+                ("全台の売上金額・上位25%／中位50%／下位25%", "quantile"),
             ]:
                 mode.addItem(label, key)
             mode.setCurrentIndex(mode.findData(s["sales_mode"]))
             form.addRow("売上比較方式", mode)
             form.addRow(
                 QLabel(
-                    "基準額を未設定のままにすると、売上フィルターは灰色です。\nPO率と原価率は入替確定に使いません。"
+                    "売上は現在のExcelの集計期間ごとに比較します。\nPO率は原価・料金から算出する理論目安です。未確認原価や料金は確定扱いしません。"
                 )
             )
     types = QTableWidget(0, 4)
@@ -115,29 +129,12 @@ def edit_analysis_settings(owner):
     tabs.addTab(typepage, "機種・色")
     radar_page = QWidget()
     radar_form = QFormLayout(radar_page)
-    min_peers = QSpinBox()
-    min_peers.setRange(3, 10000)
-    min_peers.setValue(s["radar_min_peers"])
-    radar_form.addRow("売上スコアの最少比較台数（自身を含む）", min_peers)
     radar_note = QLabel(
-        "POスコアは『指標と照合』のPO基準値を目標にします。各境界は基準値に対する倍率です。中央100%は最高100点。例：基準5%×40%=PO率2%。"
+        "レーダーは5項目の状態を示します。内部正規化は座標だけに使い、画面には実測値を表示します。\n売上：同じExcel・期間の全台順位。投入日数：新しさ。原価率：目標への適合度。\n理論PO率＝1プレイ料金×目標原価率÷景品1個の原価。PO評価は理論値からの相対偏差です。\n景品原価と料金はマシン詳細で確認・設定します。標準料金は仮設定です。"
     )
     radar_note.setWordWrap(True)
     radar_form.addRow(radar_note)
-    knot_controls = []
-    for i, (v, score) in enumerate(zip(s["radar_po_knots"], [20, 60, 80, 100, 80, 60, 20])):
-        c = QDoubleSpinBox()
-        c.setRange(0, 2000)
-        c.setDecimals(2)
-        c.setSuffix(" %")
-        c.setValue(v * 100)
-        c.setEnabled(i != 3)
-        knot_controls.append(c)
-        radar_form.addRow(f"PO境界 {i+1}（{score}点）・基準に対する倍率", c)
-    radar_form.addRow(
-        QLabel("投入日数は新しさ、原価率は目標への適合度です。総合点は計算しません。")
-    )
-    tabs.addTab(radar_page, "5軸スコア")
+    tabs.addTab(radar_page, "5項目の状態分析")
     buttons = QDialogButtonBox(
         QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
     )
@@ -152,8 +149,6 @@ def edit_analysis_settings(owner):
             if data["sales_benchmark"] == 0:
                 data["sales_benchmark"] = None
             data["sales_mode"] = mode.currentData()
-            data["radar_min_peers"] = min_peers.value()
-            data["radar_po_knots"] = [c.value() / 100 for c in knot_controls]
             data["aliases"] = {}
             data["types"] = {}
             for i in range(types.rowCount()):

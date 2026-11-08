@@ -47,6 +47,8 @@ CATEGORIES = {
     "period_text": "集計期間",
 }
 FIELDS = {k: v[0] for k, v in NUMERIC.items()} | CATEGORIES
+DISPLAY_FIELDS = {k: v for k, v in FIELDS.items() if k != "average"}
+DISPLAY_NUMERIC = {k: v for k, v in NUMERIC.items() if k != "average"}
 AXES = {
     "machine_type": "機種別",
     "method": "運営方法別",
@@ -135,6 +137,11 @@ def machine_record(machine, reference, settings, assignments=None, history=None)
         )
         for key in NUMERIC
     }
+    from .po_evaluation import evaluate_po
+    from .sales_evaluation import cohort
+
+    record["po_guidance"] = evaluate_po(m, settings)
+    record["sales_cohort"] = cohort(m)
     return record
 
 
@@ -186,11 +193,11 @@ def bucket(r, axis, settings):
         "po_bin": "po_rate",
         "cost_bin": "cost_rate",
         "days_bin": "days",
-        "sales_bin": "average",
+        "sales_bin": "sales",
     }[axis]
     value = r.get(key)
     if value is None:
-        return "不明"
+        return "計算不可" if axis == "po_bin" else "不明"
     if axis == "ratio_bin":
         return (
             "50%未満"
@@ -198,11 +205,7 @@ def bucket(r, axis, settings):
             else "50〜100%未満" if value < 100 else "100〜200%未満" if value < 200 else "200%以上"
         )
     if axis == "po_bin":
-        return (
-            "低い"
-            if value < settings["po_low"]
-            else "適正範囲" if value <= settings["po_high"] else "高い"
-        )
+        return r.get("po_guidance", {}).get("label", "計算不可")
     if axis == "cost_bin":
         return (
             "低すぎる・要確認"
@@ -220,24 +223,20 @@ def bucket(r, axis, settings):
             else (
                 "0〜6日"
                 if value < 7
-                else "7〜13日" if value < 14 else "14〜27日" if value < 28 else "28日以上"
+                else (
+                    "7〜13日"
+                    if value < 14
+                    else "14〜20日" if value < 21 else "21〜27日" if value < 28 else "28日以上"
+                )
             )
         )
-    benchmark = settings["sales_benchmark"]
-    if benchmark is None:
-        return "基準未設定"
-    return (
-        "基準50%未満"
-        if value < benchmark * 0.5
-        else (
-            "基準50〜100%未満"
-            if value < benchmark
-            else "基準100〜200%未満" if value < benchmark * 2 else "基準200%以上"
-        )
-    )
+    from .sales_evaluation import classify
+
+    bounds = settings.get("_sales_record_bounds", {}).get(r.get("sales_cohort"))
+    return classify(value, bounds, settings["sales_mode"])[1]
 
 
-def aggregate(records, axis, metric, operation, settings, stack=None):
+def aggregate(records, axis, metric, operation, settings, stack=None, population=None):
     if axis not in AXES or metric not in FIELDS or operation not in AGGREGATIONS:
         raise AppError("集計条件が不正です。")
     if operation == "sum" and (metric in RATIOS or metric not in NUMERIC):
@@ -246,6 +245,22 @@ def aggregate(records, axis, metric, operation, settings, stack=None):
         raise AppError("文字項目は件数または件数割合で集計してください。")
     if operation == "recalculate" and metric != "cost_rate":
         raise AppError("再計算は原価率に対応します。")
+    from .sales_evaluation import quartiles
+
+    sales_groups = defaultdict(list)
+    for r in (records if population is None else population):
+        if r.get("sales") is not None:
+            sales_groups[r.get("sales_cohort")].append(r["sales"])
+    settings = settings | {
+        "_sales_record_bounds": {
+            k: (
+                quartiles(v)
+                if settings["sales_mode"] != "fixed"
+                else [settings[t] for t in ("sales_low", "sales_middle", "sales_high")]
+            )
+            for k, v in sales_groups.items()
+        }
+    }
     groups = defaultdict(list)
     denominators = defaultdict(int)
     for r in records:
@@ -340,6 +355,9 @@ class AnalyticsService:
                     m.ratio_from_excel,
                     m.layout_loaded_at,
                     repr(m.manual_updates),
+                    m.prize_cost,
+                    m.prize_cost_product,
+                    repr(m.play_pricing),
                     m.average,
                     m.sales,
                     m.reference_average,
@@ -391,7 +409,7 @@ class AnalyticsService:
         search="",
         uids=None,
         axis="method",
-        metric="average",
+        metric="sales",
         operation="mean",
         stack=None,
     ):
@@ -411,7 +429,15 @@ class AnalyticsService:
             selected = filter_records(records, conditions, search, uids)
             result = (
                 selected,
-                aggregate(selected, axis, metric, operation, self.owner.analysis_settings, stack),
+                aggregate(
+                    selected,
+                    axis,
+                    metric,
+                    operation,
+                    self.owner.analysis_settings,
+                    stack,
+                    population=records,
+                ),
             )
             self.cache[key] = result
             if len(self.cache) > 32:
@@ -502,7 +528,7 @@ def validate_ui_state(value=None):
         version=1,
         chart="horizontal",
         axis="method",
-        metric="average",
+        metric="sales",
         operation="mean",
         stack="machine_type",
         x_metric="ratio",
@@ -514,6 +540,9 @@ def validate_ui_state(value=None):
         sort="descending",
         focus_uids=None,
         detail_size=[1120, 800],
+        overview_chart="horizontal",
+        overview_methods=False,
+        suspended_average_conditions=[],
     )
     if value is None:
         return defaults
@@ -522,6 +551,11 @@ def validate_ui_state(value=None):
     s = defaults | deepcopy(value)
     if "sort" not in value:
         s["sort"] = "descending" if s["descending"] else "ascending"
+    if (
+        s["overview_chart"] not in ("horizontal", "pie", "donut")
+        or type(s["overview_methods"]) is not bool
+    ):
+        raise AppError("分布表示設定が不正です。")
     if (
         s["version"] != 1
         or s["axis"] not in AXES
@@ -568,9 +602,11 @@ def validate_ui_state(value=None):
         or any(type(v) is not int or not 300 <= v <= 8000 for v in s["detail_size"])
     ):
         raise AppError("詳細画面サイズが不正です。")
+    if not isinstance(s["suspended_average_conditions"], list) or len(s["suspended_average_conditions"]) > 50:
+        raise AppError("休止中の分析条件が不正です。")
     if not isinstance(s["conditions"], list) or len(s["conditions"]) > 50:
         raise AppError("絞り込み条件は50件までです。")
-    for c in s["conditions"]:
+    for c in s["conditions"] + s["suspended_average_conditions"]:
         if (
             not isinstance(c, dict)
             or c.get("field") not in FIELDS
@@ -591,4 +627,9 @@ def validate_ui_state(value=None):
             not isinstance(c.get("value"), (str, int, float, bool)) or len(str(c["value"])) > 1000
         ):
             raise AppError("検索条件の値が不正です。")
+    s["suspended_average_conditions"] += [c for c in s["conditions"] if c["field"] == "average"]
+    s["conditions"] = [c for c in s["conditions"] if c["field"] != "average"]
+    for key in ("metric", "x_metric", "y_metric"):
+        if s[key] == "average":
+            s[key] = "sales"
     return s

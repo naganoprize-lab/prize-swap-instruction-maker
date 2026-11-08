@@ -89,8 +89,13 @@ def assess(machine, reference, settings=None, history=()):
     if not machine.analysis:
         reasons.append("実績データの取得元：レイアウト由来")
     po, cost = effective_stat(machine, "po_rate"), effective_stat(machine, "cost_rate")
-    if po is not None and po > s["po_high"]:
-        reasons.append(f"PO率{po:.1%}：設定上限を超過（要確認）")
+    from .po_evaluation import evaluate_po
+
+    guidance = evaluate_po(machine, s)
+    if guidance["label"] in ("低い", "高い"):
+        reasons.append(f"PO率{po:.2%}：理論目安から{guidance['label']}（原価・料金条件を確認）")
+    elif po is not None and guidance["target"] is None:
+        reasons.append("PO率の理論目安：原価・料金条件不足で未評価")
     if cost is not None and (cost < s["cost_near"] or cost > s["cost_high"]):
         reasons.append(
             f'原価率{cost:.1%}：目標{s["cost_target"]:.0%}との差を確認（入替確定条件ではありません）'
@@ -100,11 +105,11 @@ def assess(machine, reference, settings=None, history=()):
     stamp = freshness(overlay, s["stale_days"])
     if "古い" in stamp or "不明" in stamp or "未来" in stamp:
         reasons.append(stamp)
-    trend, sources = comparable_trend(machine, history)
+    trend, sources = None, []
     if trend is None:
         reasons.append("売上推移：未評価（比較可能な別期間・同一商品の履歴不足）")
     elif trend < s["decline_ratio"]:
-        reasons.append(f"平均売上が前回比{trend:.1%}に低下")
+        reasons.append("別期間の実績を検出（売上推移の評価は一時停止）")
     return dict(
         machine_id=machine_key(machine),
         uid=machine.uid,

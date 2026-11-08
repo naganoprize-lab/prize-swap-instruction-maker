@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 from .analytics_data import (
-    FIELDS,
+    DISPLAY_FIELDS as FIELDS,
+    DISPLAY_NUMERIC,
     NUMERIC,
     AXES,
     RATIOS,
@@ -69,7 +70,17 @@ class SalesPage(QWidget):
         self.history_pool = QThreadPool(self)
         self.history_pool.setMaxThreadCount(1)
         self._advanced_manual = False
-        outer = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        self.workspace_tabs = QTabWidget()
+        root.addWidget(self.workspace_tabs)
+        self.detail_page = QWidget()
+        from .distributions import DistributionPage
+
+        self.distributions = DistributionPage(self)
+        self.workspace_tabs.addTab(self.distributions, "売り場全体の分布")
+        self.workspace_tabs.addTab(self.detail_page, "詳細分析")
+        outer = QVBoxLayout(self.detail_page)
         outer.setContentsMargins(6, 6, 6, 6)
         outer.setSpacing(5)
         self.metadata = QLabel()
@@ -143,8 +154,8 @@ class SalesPage(QWidget):
         self.y_metric = QComboBox()
         for c, values in (
             (self.stack_axis, AXES),
-            (self.x_metric, {k: v[0] for k, v in NUMERIC.items()}),
-            (self.y_metric, {k: v[0] for k, v in NUMERIC.items()}),
+            (self.x_metric, {k: v[0] for k, v in DISPLAY_NUMERIC.items()}),
+            (self.y_metric, {k: v[0] for k, v in DISPLAY_NUMERIC.items()}),
         ):
             for key, text in values.items():
                 c.addItem(text, key)
@@ -272,25 +283,77 @@ class SalesPage(QWidget):
             c.currentIndexChanged.connect(self.changed)
         self.legend.toggled.connect(self.changed)
         self.advanced_toggle.toggled.connect(self.toggle_advanced)
+        self.more_metrics = QCheckBox("その他の指標・集計軸")
+        actions.insertWidget(0, self.more_metrics)
+        self.more_metrics.toggled.connect(self.show_more_metrics)
+        self.show_more_metrics(False)
         self.theme_changed()
+
+    def show_more_metrics(self, expanded):
+        core = {
+            "ratio",
+            "sales",
+            "po_rate",
+            "cost_rate",
+            "days",
+            "machine_type",
+            "method",
+            "number",
+        }
+        core_axes = {
+            "machine_type",
+            "method",
+            "ratio_bin",
+            "sales_bin",
+            "po_bin",
+            "cost_bin",
+            "days_bin",
+        }
+        for control in (self.metric_choice, self.filter_field, self.x_metric, self.y_metric):
+            for i in range(control.count()):
+                control.view().setRowHidden(i, not expanded and control.itemData(i) not in core)
+        for control in (self.axis, self.stack_axis):
+            for i in range(control.count()):
+                control.view().setRowHidden(
+                    i, not expanded and control.itemData(i) not in core_axes
+                )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if hasattr(self, "splitter") and self.height() < 480:
+            self.splitter.setSizes([max(140, self.height() - 165), 70])
         if hasattr(self, "advanced_toggle") and not self._advanced_manual:
             expanded = self.height() >= 480
             self.advanced_toggle.blockSignals(True)
             self.advanced_toggle.setChecked(expanded)
             self.advanced_toggle.blockSignals(False)
+            self.notice.setMaximumHeight(40 if expanded else 18)
+            self.metadata.setVisible(expanded)
+            self.notice.setVisible(expanded)
+            self.data_tabs.setVisible(expanded)
+            self.expand_button.blockSignals(True)
+            self.expand_button.setChecked(not expanded)
+            self.expand_button.setText("グラフを拡大" if expanded else "集計表を表示")
+            self.expand_button.blockSignals(False)
             self.action_panel.setVisible(expanded)
             self.filter_panel.setVisible(expanded)
 
     def toggle_advanced(self, value):
+        self.workspace_tabs.setCurrentWidget(self.detail_page)
         self._advanced_manual = True
         self.action_panel.setVisible(value)
         self.filter_panel.setVisible(value)
 
     def load_state(self):
         self._loading = True
+        for control in (self.distributions.form, self.distributions.method_button):
+            control.blockSignals(True)
+        self.distributions.form.setCurrentIndex(
+            self.distributions.form.findData(self.owner.analytics_ui["overview_chart"])
+        )
+        self.distributions.method_button.setChecked(self.owner.analytics_ui["overview_methods"])
+        for control in (self.distributions.form, self.distributions.method_button):
+            control.blockSignals(False)
         s = self.owner.analytics_ui
         for key, control in (
             ("axis", self.axis),
@@ -313,6 +376,8 @@ class SalesPage(QWidget):
     def changed(self, *_):
         if self._loading:
             return
+        if self.metric_choice.currentIndex() < 0:
+            self.metric_choice.setCurrentIndex(self.metric_choice.findData("sales"))
         metric = self.metric_choice.currentData()
         op = self.operation.currentData()
         if (
@@ -371,6 +436,7 @@ class SalesPage(QWidget):
         self.refresh()
 
     def focus_machine(self, uid, scope="machine"):
+        self.workspace_tabs.setCurrentWidget(self.detail_page)
         rs = self.owner.analytics.records()
         r = next((r for r in rs if r["uid"] == uid), None)
         if r is None:
@@ -484,6 +550,7 @@ class SalesPage(QWidget):
         self.detail_table.setSortingEnabled(True)
         self.update_chart()
         self.legacy.refresh()
+        self.distributions.refresh()
         self._render_build = self.owner.analytics.builds
         self.notice.setToolTip(self.notice.text())
 
@@ -852,6 +919,7 @@ class SalesPage(QWidget):
             item.setToolTip(r["period_text"] + " / " + r["mode"])
 
     def expand_chart(self, expanded):
+        self.expand_button.setText("集計表を表示" if expanded else "グラフを拡大")
         self.data_tabs.setVisible(not expanded)
         self.expand_button.setText("通常表示へ戻す" if expanded else "グラフを拡大")
 

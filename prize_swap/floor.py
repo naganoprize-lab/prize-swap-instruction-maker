@@ -72,7 +72,6 @@ from .floor_toolbar import build_toolbar
 from .floor_workspace import FloorWorkspaceMixin
 from .floor_presentation import DEFAULTS
 
-
 GRID = 20
 
 
@@ -168,7 +167,7 @@ class MachineNode(QGraphicsObject):
         plans = self.owner.assignments().get(machine_key(m), [])
         installed = m.installed_on or "—"
         self.setToolTip(
-            f"{display_identity(m)} / {m.kind}\n{m.product}\n売上 {money(effective_stat(m,"sales"))} / アベレージ {money(effective_stat(m,"average"))} / アベ比 {ratio_text(m)}\n設置日 {installed} / 投入日数 {days_text(m,self.owner.reference_day())}\n参照ID：{m.source_key or '追加マシン'}"
+            f"{display_identity(m)} / {m.kind}\n{m.product}\n売上 {money(effective_stat(m,"sales"))} / アベ比 {ratio_text(m)}\n設置日 {installed} / 投入日数 {days_text(m,self.owner.reference_day())}\n参照ID：{m.source_key or '追加マシン'}"
             + (
                 "\n入替予定："
                 + "、".join(
@@ -453,6 +452,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
         self.analytics = AnalyticsService(self)
         self.analytics_ui = validate_ui_state()
+        from .candidate_page import validate_candidate_state
+
+        self.candidate_ui = validate_candidate_state()
 
         build_toolbar(self, layout)
         from .floor_dashboard import FloorDashboard
@@ -562,6 +564,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             version=3,
             theme_mode=theme_manager().mode,
             analytics_ui=deepcopy(self.analytics_ui),
+            candidate_ui=deepcopy(self.candidate_ui),
             number_references=deepcopy(self.number_references),
             performance_history=deepcopy(self.performance_history),
             analysis_settings=deepcopy(self.analysis_settings),
@@ -595,6 +598,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         from .analytics_data import validate_ui_state
 
         self.analytics_ui = validate_ui_state(state.get("analytics_ui"))
+        from .candidate_page import validate_candidate_state
+
+        self.candidate_ui = validate_candidate_state(state.get("candidate_ui"))
         self.analysis_state = deepcopy(validate_snapshot(state.get("sales_analysis")))
         from .performance_history import validate_history
 
@@ -672,7 +678,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             f"表示 {len(self.visible_nodes())}/{len(self.machines)}台 ／ 番号未設定 {unresolved}台"
         )
         if self.presentation["legend"]:
-            text += "　" + filter_legend(self.presentation["color_filter"], self.analysis_settings)
+            text += "　" + filter_legend(
+                self.presentation["color_filter"],
+                self.analysis_settings,
+                self._effective_metric_settings.get("_sales_bounds"),
+            )
         if self.overlaps:
             text += (
                 f"　重なり {len(self.overlaps)}台：ドラッグまたはカードサイズで調整してください。"
@@ -1009,7 +1019,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.capture_view(False)
 
     def machine_dialog(self, machine, title):
-        initial_data=deepcopy(machine)
+        initial_data = deepcopy(machine)
         dlg = QDialog(self)
         dlg.setWindowTitle(title)
         form = QFormLayout(dlg)
@@ -1042,7 +1052,7 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         if machine.analysis:
             form.addRow(QLabel("以下は従来データです。売上分析Excelの実績値が優先されます。"))
         form.addRow("売上", sales)
-        form.addRow("アベレージ", average)
+        # Average sales is retained internally, temporarily excluded from editing UI.
         form.addRow("アベ比（%）", ratio_input)
         form.addRow("設置日", installed)
         form.addRow(error)
@@ -1084,7 +1094,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 machine.ratio_from_excel = bool(ratio_input.text().strip())
                 machine.installed_on = installation.isoformat() if installation else None
                 from .machine_matching import mark_manual_updates
-                mark_manual_updates(machine,initial_data)
+
+                mark_manual_updates(machine, initial_data)
                 dlg.accept()
             except AppError as exc:
                 error.setText(str(exc))
@@ -1107,7 +1118,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         if not self.machine_dialog(updated, "マシン編集"):
             return
         from .machine_matching import mark_manual_updates
-        mark_manual_updates(updated,old)
+
+        mark_manual_updates(updated, old)
         if updated.number != old.number:
             updated.resolved_number = ""
             updated.manual_number = None

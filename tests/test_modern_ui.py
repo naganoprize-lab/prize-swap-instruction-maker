@@ -38,7 +38,7 @@ def window(tmp_path):
 
 def test_navigation_routes_existing_functions_without_empty_pages(window, monkeypatch):
     before = [asdict(m) for m in window.floor.machines]
-    for key in ("dashboard", "floor", "instructions", "labels", "settings"):
+    for key in ("dashboard", "floor", "instructions", "labels", "settings", "candidates"):
         window.navigation.buttons[key].click()
         QApplication.processEvents()
         assert (
@@ -49,13 +49,12 @@ def test_navigation_routes_existing_functions_without_empty_pages(window, monkey
         assert window.navigation.buttons[key].isChecked()
     called = []
     for key, method in (
-        ("candidates", "show_candidates"),
         ("analysis", "show_method_analysis"),
         ("matching", "show_matching"),
     ):
         monkeypatch.setattr(window.floor, method, lambda k=key: called.append(k))
         window.navigation.buttons[key].click()
-    assert called == ["candidates", "analysis", "matching"]
+    assert called == ["analysis", "matching"]
     assert [asdict(m) for m in window.floor.machines] == before
 
 

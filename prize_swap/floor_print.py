@@ -247,7 +247,7 @@ def plan_floor(
         raise AppError("印刷対象のマシンがありません。選択範囲印刷ではマシンを選択してください。")
     width, height = page_size or options.printable_points()
     heading = f"売り場レイアウト　基準日 {reference:%Y/%m/%d}"
-    note = "売上・アベレージ・アベ比は読込時の値です。基準日は投入日数だけに適用。" + (
+    note = "売上・アベ比は読込時の値です。基準日は投入日数だけに適用。" + (
         f" 読込：{loaded_at}" if loaded_at else ""
     )
     headers = [
@@ -257,7 +257,9 @@ def plan_floor(
     header_height = sum(b.height for b in headers) + 8
     footers = [
         text_block(
-            filter_legend(options.color_filter, options.analysis_settings),
+            filter_legend(
+                options.color_filter, options.analysis_settings, metrics_settings["_sales_bounds"]
+            ),
             width,
             print_font(9),
             renderer.device,

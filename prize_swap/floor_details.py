@@ -9,6 +9,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QDoubleSpinBox,
+    QSpinBox,
+    QCheckBox,
     QLabel,
     QMessageBox,
     QLineEdit,
@@ -209,7 +212,11 @@ class MachineDetailDialog(QDialog):
                     + " / 更新（読込） "
                     + (metric_info(machine, key)["updated_at"] or "不明")
                 )
-            form.addRow(label, widget)
+            if key != "average":
+                form.addRow(label, widget)
+            else:
+                widget.setParent(self)
+                widget.hide()
         for key, label in (
             ("operating_days", "稼働日数（売上集計期間）"),
             ("gross_profit", "粗利益"),
@@ -248,6 +255,51 @@ class MachineDetailDialog(QDialog):
                 quality = QLabel("\n".join(i["message"] for i in source["quality_issues"]))
                 quality.setWordWrap(True)
                 form.addRow("実績の要確認事項", quality)
+        from .po_evaluation import evaluate_po
+
+        po = evaluate_po(machine, owner.analysis_settings)
+        self.po_origin = QLabel()
+        self.po_origin.setWordWrap(True)
+        form.addRow("原価・料金の取得元", self.po_origin)
+        self.confirmed_cost = QDoubleSpinBox()
+        self.confirmed_cost.setRange(0, 10000000)
+        self.confirmed_cost.setSpecialValueText("未設定")
+        self.confirmed_cost.setValue(
+            (machine.prize_cost or 0) if machine.prize_cost_product == machine.product else 0
+        )
+        form.addRow("確認済み景品原価（円）", self.confirmed_cost)
+        self.cost_candidate_button = QPushButton("商品名の原価候補を確認して設定")
+        form.addRow(self.cost_candidate_button)
+
+        def confirm_candidate():
+            from .po_evaluation import cost_candidate
+
+            candidate = cost_candidate(self.name.toPlainText())
+            if candidate is None:
+                QMessageBox.information(self, "原価候補", "末尾に独立した金額候補はありません。")
+            elif (
+                QMessageBox.question(
+                    self,
+                    "景品原価の確認",
+                    f"{candidate:,.0f}円は型番や数量ではなく、景品1個の原価ですか？",
+                )
+                == QMessageBox.StandardButton.Yes
+            ):
+                self.confirmed_cost.setValue(candidate)
+
+        self.cost_candidate_button.clicked.connect(confirm_candidate)
+        self.play_amount = QDoubleSpinBox()
+        self.play_amount.setRange(0, 1000000)
+        self.play_amount.setSpecialValueText("アプリ標準（仮設定）")
+        self.play_amount.setValue((machine.play_pricing or {}).get("amount", 0))
+        form.addRow("マシン料金（円／下記回数）", self.play_amount)
+        self.play_count = QSpinBox()
+        self.play_count.setRange(1, 10000)
+        self.play_count.setValue((machine.play_pricing or {}).get("plays", 1))
+        form.addRow("上記料金でのプレイ回数", self.play_count)
+        self.price_confirmed = QCheckBox("料金条件を確認済み")
+        self.price_confirmed.setChecked((machine.play_pricing or {}).get("confirmed", False))
+        form.addRow(self.price_confirmed)
         self.name = QPlainTextEdit(machine.product)
         self.name.setMaximumHeight(130)
         self.name.setPlaceholderText("—")
@@ -312,6 +364,11 @@ class MachineDetailDialog(QDialog):
         from .detail_widgets import build_overview
 
         build_overview(self, tabs, scroll, panel)
+        for control in (self.confirmed_cost, self.play_amount, self.play_count):
+            control.valueChanged.connect(self.refresh_po_inputs)
+        self.price_confirmed.toggled.connect(self.refresh_po_inputs)
+        self.name.textChanged.connect(self.po_product_changed)
+        self.refresh_po_inputs()
         self.update_responsive_layout()
 
     def refresh_overview(self, *_):
@@ -398,8 +455,44 @@ class MachineDetailDialog(QDialog):
                     )
             self.refresh_overview()
 
+    def po_product_changed(self):
+        self.updated.product = self.name.toPlainText().strip()
+        self.confirmed_cost.blockSignals(True)
+        self.confirmed_cost.setValue(0)
+        self.confirmed_cost.blockSignals(False)
+        self.refresh_po_inputs()
+
+    def refresh_po_inputs(self, *_):
+        self.updated.prize_cost = self.confirmed_cost.value() or None
+        self.updated.prize_cost_product = (
+            self.name.toPlainText().strip() if self.updated.prize_cost is not None else ""
+        )
+        self.updated.play_pricing = (
+            dict(
+                amount=self.play_amount.value(),
+                plays=self.play_count.value(),
+                confirmed=self.price_confirmed.isChecked(),
+            )
+            if self.play_amount.value()
+            else None
+        )
+        from .po_evaluation import evaluate_po
+
+        po = evaluate_po(self.updated, self.owner.analysis_settings)
+        self.po_origin.setText(
+            po["cost_source"]
+            + " / "
+            + po["price_source"]
+            + "\n"
+            + " / ".join(po["warnings"])
+            + "\n"
+            + po["explanation"]
+        )
+        self.refresh_overview()
+
     def accept(self):
         try:
+            self.refresh_po_inputs()
             if self.updated.number != self.original.number:
                 self.updated.resolved_number = ""
                 self.updated.manual_number = None

@@ -241,7 +241,8 @@ class ChartCanvas(QWidget):
         t = tokens()
         p.fillRect(self.rect(), QColor(t["card"]))
         font = p.font()
-        font.setPointSizeF(9)
+        font.setPointSizeF(10)
+        font.setBold(True)
         p.setFont(font)
         p.setPen(QColor(t["text"]))
         p.drawText(
@@ -318,7 +319,9 @@ class ChartCanvas(QWidget):
                 p.setPen(QColor(t["text"]))
                 p.drawText(
                     QRectF(4, y, 165, step - 2),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    Qt.AlignmentFlag.AlignRight
+                    | Qt.AlignmentFlag.AlignVCenter
+                    | Qt.TextFlag.TextWordWrap,
                     d["label"],
                 )
                 self.add_rect(QRectF(plot.left(), y, plot.width(), step), d)
@@ -334,12 +337,19 @@ class ChartCanvas(QWidget):
                 )
                 p.fillRect(bar, self.color(d["label"]))
                 self.add_rect(QRectF(x, plot.top(), step, plot.height()), d)
-                p.save()
-                p.translate(x + step * 0.7, plot.bottom() + 8)
-                p.rotate(24)
                 p.setPen(QColor(t["text"]))
-                p.drawText(QRectF(0, 0, 120, 30), Qt.TextFlag.TextSingleLine, d["label"])
-                p.restore()
+                from PySide6.QtGui import QFontMetricsF
+
+                label = QFontMetricsF(p.font()).elidedText(
+                    d["label"], Qt.TextElideMode.ElideRight, step - 4
+                )
+                p.drawText(
+                    QRectF(x + 2, plot.bottom() + 5, step - 4, 48),
+                    Qt.AlignmentFlag.AlignHCenter
+                    | Qt.AlignmentFlag.AlignTop
+                    | Qt.TextFlag.TextWordWrap,
+                    label,
+                )
         elif self.kind == "stacked":
             step = plot.width() / len(groups)
             for i, ((period, label), group) in enumerate(groups.items()):
