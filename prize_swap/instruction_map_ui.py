@@ -284,7 +284,9 @@ class InstructionMapPage(QWidget):
                     machine.height,
                     machine.number,
                     machine.source_key,
+                    machine.resolved_number,
                     machine.kind,
+                    (machine.analysis or {}).get("machine_name"),
                     repr(w.floor.analysis_settings.get("types")),
                     repr(w.floor.analysis_settings.get("aliases")),
                 )

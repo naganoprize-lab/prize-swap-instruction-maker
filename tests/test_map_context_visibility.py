@@ -108,3 +108,19 @@ def test_pdf_context_keeps_target_fit_and_machine_type_without_product_or_remote
         and "周辺商品を印刷しない" not in text
         and "99999右" not in text
     )
+
+
+def test_neighbor_import_identity_and_type_updates_invalidate_cached_card(window):
+    p = window.instruction_map
+    m = window.floor.machines[1]
+    m.number = ""
+    m.resolved_number = "20111右"
+    m.analysis = {"machine_name": "UFO9 third"}
+    p.refresh()
+    item = p.context_items[m.uid]
+    m.resolved_number = "20110左"
+    m.analysis["machine_name"] = "UFO10"
+    p.refresh()
+    assert p.context_items[m.uid] is item
+    assert "20110左" in item.toolTip() and "UFO10" in item.toolTip()
+    assert "20111右" not in item.toolTip()
