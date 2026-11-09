@@ -19,6 +19,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          # The legacy "tools" package is no longer published by Google.
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - uses: gradle/actions/wrapper-validation@v4
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests, APK and UI test APK
@@ -32,7 +35,7 @@ jobs:
           python -m pip install -r requirements.txt
           python scripts/verify_mobile_roundtrip.py android/app/build/outputs/interop/android-roundtrip.zip
       - uses: actions/upload-artifact@v6
-        if: always()
+        if: ${{ always() && (hashFiles('android/app/build/reports/**', 'android/app/build/test-results/**', 'android/app/build/outputs/interop/**') != '') }}
         with:
           name: Android-test-results
           path: |
