@@ -384,12 +384,12 @@ def block_metrics(ws, cell, epoch):
     return result
 
 
-def import_layout(path, with_references=False):
+def import_layout(path, with_references=False, sheet_name="投入中レイアウト"):
     wb = load_workbook(path, data_only=True, read_only=False)
     try:
-        if "投入中レイアウト" not in wb.sheetnames:
+        if sheet_name not in wb.sheetnames:
             raise AppError("「投入中レイアウト」シートがありません。")
-        ws = wb["投入中レイアウト"]
+        ws = wb[sheet_name]
         from .machine_matching import (
             read_reference_rows,
             reference_index,
