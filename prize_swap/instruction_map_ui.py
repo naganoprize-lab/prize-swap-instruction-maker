@@ -180,6 +180,10 @@ class InstructionMapPage(QWidget):
             control.currentIndexChanged.connect(self.settings_changed)
         for control in (self.all_entries, self.context):
             control.toggled.connect(self.settings_changed)
+        self.fit_timer = QTimer(self)
+        self.fit_timer.setSingleShot(True)
+        self.fit_timer.setInterval(0)
+        self.fit_timer.timeout.connect(self.fit)
         window.floor.changed.connect(self.refresh)
         manager().changed.connect(self.theme_changed)
         self.load_options()
@@ -222,7 +226,7 @@ class InstructionMapPage(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self.refresh()
-        QTimer.singleShot(0, self.fit)
+        self.fit_timer.start()
 
     def refresh(self, *_):
         if self._building:
@@ -309,7 +313,7 @@ class InstructionMapPage(QWidget):
         self.entries = entries
         if changed_targets:
             self.fit()
-            QTimer.singleShot(0, self.fit)
+            self.fit_timer.start()
         self.unresolved_rows = [b for b in entries if not b.machine]
         self.unresolved.setRowCount(len(self.unresolved_rows))
         self.unresolved.setVisible(bool(self.unresolved_rows))

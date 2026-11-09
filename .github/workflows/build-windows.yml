@@ -63,9 +63,10 @@ jobs:
           tests/test_themes.py
           tests/test_modern_ui.py
       - name: Test
+        timeout-minutes: 20
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q --junitxml=build-tests/pytest.xml
+        run: python -m pytest -q -o faulthandler_timeout=120 --junitxml=build-tests/pytest.xml
       - name: Report test failures
         if: ${{ always() && hashFiles('build-tests/*.xml') != '' }}
         run: python scripts/report_test_failures.py
