@@ -162,7 +162,7 @@ def evaluation(machine, settings, bounds):
                     index=None,
                     provisional=True,
                 )
-            provisional = not all(period) or not machine.analysis
+            provisional = not all(period) or not all(current) or not machine.analysis
             selected = bounds.primary
         else:
             selected = bounds.groups.get(cohort(machine))
@@ -171,7 +171,8 @@ def evaluation(machine, settings, bounds):
     )
     result["provisional"] = provisional
     if provisional:
-        result["basis"] += "（レイアウト由来・期間未確認の参考比較）"
+        source = "レイアウト由来" if not machine.analysis else "景品運営分析表"
+        result["basis"] += f"（{source}・期間未確認の参考比較）"
     return result
 
 

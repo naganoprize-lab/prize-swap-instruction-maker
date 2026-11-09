@@ -152,3 +152,13 @@ def test_snapshot_only_change_invalidates_floor_analysis_and_print_basis(tmp_pat
         f.timer.stop()
         f.day_timer.stop()
         f.close()
+
+
+def test_unknown_excel_period_is_provisional_without_claiming_layout_origin():
+    s = validate_settings()
+    report = snapshot([0, 100, 200])
+    report["period_start"] = report["period_end"] = None
+    m = Machine(analysis=overlay(100))
+    r = evaluation(m, s, sales_boundaries([m], s, report))
+    assert r["provisional"] and "期間未確認" in r["basis"]
+    assert "景品運営分析表" in r["basis"] and "レイアウト由来" not in r["basis"]
