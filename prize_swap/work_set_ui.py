@@ -75,7 +75,7 @@ class WorkSetMixin:
         return render_output(
             printer,
             self.visible,
-            self.floor.machines,
+            self.floor.physical_machines,
             self.floor.number_references,
             self.selected_day(),
             self.page_rows.value(),
@@ -116,7 +116,7 @@ class WorkSetMixin:
             plan = output_plan(
                 printer,
                 self.visible,
-                self.floor.machines,
+                self.floor.physical_machines,
                 self.floor.number_references,
                 self.selected_day(),
                 self.page_rows.value(),

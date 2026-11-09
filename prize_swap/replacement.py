@@ -168,6 +168,31 @@ def assess(machine, reference, settings=None, history=(), sales_bounds=None):
         "投入日数："
         + (f"{age}日" if age is not None else "不明（日数条件を満たしたとは扱いません）")
     )
+    temporal = getattr(machine, "temporal_summary", None)
+    if temporal:
+        reasons.append(
+            f'日別参照：取得{temporal["acquired"]}/{temporal["expected"]}日・未取得{temporal["missing"]}日（欠損日は0として補いません）'
+        )
+        comparison = temporal.get("comparison")
+        if comparison:
+            reasons.append(
+                f'前回取得日 {comparison["previous_date"]} → {comparison["current_date"]}'
+            )
+            if comparison["comparable"]:
+                if comparison["sales_delta"] is not None:
+                    reasons.append(
+                        f'直近売上差 {comparison["sales_delta"]:+,.0f}円（同じ景品・運営方法）'
+                    )
+                if comparison["ratio_delta"] is not None:
+                    reasons.append(f'アベ比変化 {comparison["ratio_delta"]:+.1f}pt')
+            else:
+                reasons.append(comparison["reason"])
+            if comparison["current_rank"] is not None:
+                reasons.append(
+                    f'最新日の全台売上順位 {comparison["current_rank"]}位 / 前回 {comparison["previous_rank"] or "不明"}位'
+                )
+        else:
+            reasons.append("直近推移：データ不足。従来の単日ルールによる参考判定を維持。")
     conditions = f'要確認：アベ比{s["poor_ratio"]:g}%未満・{s["poor_days"]}日以上／入替検討：{s["poor_ratio"]:g}〜{s["consider_ratio"]:g}%未満・{s["consider_days"]}日以上'
     reasons.append(
         ("暫定・要追加確認" if provisional else "設定ルールによる参考判定") + " / " + conditions

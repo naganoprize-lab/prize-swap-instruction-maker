@@ -357,6 +357,8 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
         self.view.ensureVisible(node, 40, 40)
 
     def apply_matching(self, rows, overrides):
+        if getattr(self, "temporal", None) and self.temporal.active:
+            raise ValueError("照合の編集は現在の編集データに戻って行ってください。")
         from .machine_matching import validate_references, prepare_references, normalize_number
         from .floor_data import validate_machines
         from dataclasses import asdict
@@ -645,7 +647,13 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
             self.message.emit("マシンを選択してください。")
 
     def open_details(self, uid):
-        return self.detail_controller.show_machine(uid)
+        t = getattr(self, "temporal", None)
+        if t and t.playing:
+            t.pause()
+        result = self.detail_controller.show_machine(uid)
+        if t and t.active:
+            t.protect_detail()
+        return result
 
     def print_machines(self):
         if self.print_options.visible_only:

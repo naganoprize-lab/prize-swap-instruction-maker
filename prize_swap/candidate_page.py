@@ -182,6 +182,9 @@ class CandidatePage(QWidget):
         self.status = QComboBox()
         for c in (self.kinds, self.methods, self.status):
             row.addWidget(c)
+        self.declining_first = QCheckBox("売上低下を優先確認")
+        row.addWidget(self.declining_first)
+        self.declining_first.toggled.connect(lambda *_: self.refresh())
         self.show_excluded = QCheckBox("除外済みも表示")
         row.addWidget(self.show_excluded)
         self.table = make_table([], [])
@@ -391,7 +394,20 @@ class CandidatePage(QWidget):
         identities = []
         colors = []
         counts = {k: 0 for k in self.cards}
-        for m in self.owner.machines:
+        candidate_machines = self.owner.machines
+        if self.declining_first.isChecked():
+
+            def decline_key(m):
+                change = (
+                    getattr(m, "temporal_summary", {}).get("comparison", {}).get("sales_change")
+                )
+                return (
+                    byuid[m.uid]["assessment_detail"]["priority"],
+                    change if change is not None else float("inf"),
+                )
+
+            candidate_machines = sorted(candidate_machines, key=decline_key)
+        for m in candidate_machines:
             r = byuid[m.uid]
             a = r["assessment_detail"]
             status = a["status"]
@@ -513,7 +529,10 @@ class CandidatePage(QWidget):
                     QBrush(QColor(contrast_text(analysis_color(color))))
                 )
         self.table.setSortingEnabled(True)
-        self.table.sortItems(max(0, sort_column), sort_order)
+        if not self.declining_first.isChecked():
+            self.table.sortItems(max(0, sort_column), sort_order)
+        else:
+            self.table.setSortingEnabled(False)
         self.table.setColumnWidth(3, 280)
         self.table.setColumnWidth(9, 410)
         if focus_uid:

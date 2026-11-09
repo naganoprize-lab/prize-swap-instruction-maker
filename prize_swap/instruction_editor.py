@@ -286,13 +286,13 @@ class InstructionEditorMixin:
         seen = {
             b.machine.uid if b.machine else b.token
             for b in booths(
-                others, self.floor.machines, self.floor.number_references, all_entries=True
+                others, self.floor.physical_machines, self.floor.number_references, all_entries=True
             )
             if b.product.day in {p.day for p in entries} and (b.machine or b.token)
         }
         conflicts = []
         for b in booths(
-            entries, self.floor.machines, self.floor.number_references, all_entries=True
+            entries, self.floor.physical_machines, self.floor.number_references, all_entries=True
         ):
             key = b.machine.uid if b.machine else b.token
             if key and key in seen:
@@ -481,7 +481,10 @@ class InstructionEditorMixin:
         from .instructions import booths
 
         refs = booths(
-            self.visible, self.floor.machines, self.floor.number_references, all_entries=True
+            self.visible,
+            self.floor.physical_machines,
+            self.floor.number_references,
+            all_entries=True,
         )
         text = f"登録{len(self.visible)} / 出力{sum(p.included for p in self.visible)} / 手動{sum(p.source_type=='manual' for p in self.visible)} / 商品未定{sum(not p.name for p in self.visible)} / 位置未特定{sum(b.machine is None for b in refs)}"
         self.instruction_status.setText(text)

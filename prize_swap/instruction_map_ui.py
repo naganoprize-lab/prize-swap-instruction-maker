@@ -234,7 +234,10 @@ class InstructionMapPage(QWidget):
         w = self.owner
         self.load_options()
         entries = booths(
-            w.visible, w.floor.machines, w.floor.number_references, self.all_entries.isChecked()
+            w.visible,
+            w.floor.physical_machines,
+            w.floor.number_references,
+            self.all_entries.isChecked(),
         )
         groups = grouped_booths(entries)
         target_signature = tuple(
@@ -267,7 +270,7 @@ class InstructionMapPage(QWidget):
                     item.update()
                 item.setPos(group.machine.x, group.machine.y)
         neighbors = (
-            {m.uid: m for m in w.floor.machines if m.uid not in targets}
+            {m.uid: m for m in w.floor.physical_machines if m.uid not in targets}
             if self.context.isChecked() and groups
             else {}
         )
@@ -307,7 +310,7 @@ class InstructionMapPage(QWidget):
         # Keep the scrollable scene stable when neighbors are toggled. Only the
         # target rectangle controls fitting; no surrounding machine changes zoom.
         physical = QRectF()
-        for machine in w.floor.machines:
+        for machine in w.floor.physical_machines:
             physical = physical.united(QRectF(machine.x, machine.y, machine.width, machine.height))
         scene_bounds = physical.united(self.target_bounds).adjusted(-40, -40, 40, 40)
         if self.scene.sceneRect() != scene_bounds:
@@ -333,7 +336,7 @@ class InstructionMapPage(QWidget):
         s = w.floor.instruction_print_options
         return plan_map(
             w.visible,
-            w.floor.machines,
+            w.floor.physical_machines,
             w.floor.number_references,
             w.selected_day(),
             s["paper"],
@@ -381,7 +384,7 @@ class InstructionMapPage(QWidget):
 
     def resolve_position(self, row, column):
         b = self.unresolved_rows[row]
-        candidates = list(b.choices) or self.owner.floor.machines
+        candidates = list(b.choices) or self.owner.floor.physical_machines
         if not candidates:
             return
         labels = [

@@ -63,7 +63,8 @@ class PreflightPanel(QWidget):
                 {
                     "products": [asdict(p) | {"day": p.day.isoformat()} for p in w.visible],
                     "machines": [
-                        (m.uid, m.number, m.source_key, m.resolved_number) for m in w.floor.machines
+                        (m.uid, m.number, m.source_key, m.resolved_number)
+                        for m in w.floor.physical_machines
                     ],
                     "refs": w.floor.number_references,
                 },
@@ -73,7 +74,7 @@ class PreflightPanel(QWidget):
             ).encode()
         ).hexdigest()
         self.issues = validate_instructions(
-            w.visible, w.floor.machines, w.floor.number_references, w.selected_day()
+            w.visible, w.floor.physical_machines, w.floor.number_references, w.selected_day()
         )
         self.fill()
         self.validated.emit()

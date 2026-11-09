@@ -35,6 +35,9 @@ class SalesAnalysisMixin:
         from .sales_analysis import validate_snapshot
 
         snapshot = deepcopy(validate_snapshot(snapshot))
+        if getattr(self, "temporal", None) and self.temporal.active:
+            if not self.temporal.to_live():
+                return False
         before = self.state()
         from .replacement import episode
         from .performance_history import archive, identity

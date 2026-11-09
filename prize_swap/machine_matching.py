@@ -307,6 +307,15 @@ def metric_info(machine, key):
     from .floor_status import ratio, effective_stat
 
     value = ratio(machine) if key == "ratio" else effective_stat(machine, key)
+    summary = getattr(machine, "temporal_summary", None)
+    if summary and hasattr(machine, "temporal_metrics"):
+        count = summary.get("valid_counts", {}).get(key, summary.get("sales_days", 0))
+        return dict(
+            value=value,
+            source=f'日別参照の期間集計（有効{count}日／取得{summary["acquired"]}日・未取得{summary["missing"]}日）',
+            updated_at=(machine.analysis or {}).get("loaded_at", ""),
+            match_method=machine.match_method,
+        )
     source = value_source(machine, key)
     updated = (
         (machine.analysis or {}).get("loaded_at", "")

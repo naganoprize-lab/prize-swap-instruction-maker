@@ -58,6 +58,7 @@ def evidence(machine, record, reference, settings):
         explanation=explanation,
         reasons=deepcopy(a["reasons"]),
         source_record_ids=deepcopy(a["source_record_ids"]),
+        temporal_summary=deepcopy(getattr(machine, "temporal_summary", {})),
     )
     signature = sha256(
         json.dumps(data, ensure_ascii=False, sort_keys=True, default=str).encode()

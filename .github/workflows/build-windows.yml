@@ -184,6 +184,22 @@ jobs:
               throw "Filter/map validation failed ($scale)"
             }
           }
+      - name: Native daily reference, periods and timelapse validation
+        timeout-minutes: 5
+        env:
+          QT_QPA_PLATFORM: windows
+        run: |
+          foreach ($scale in @('1', '1.25', '1.5')) {
+            $env:QT_SCALE_FACTOR = $scale
+            $outputPath = "build-visual/daily-$scale"
+            python -m prize_swap.daily_visual_check $outputPath
+            $code = $LASTEXITCODE
+            $report = Get-Content "$outputPath/report.json" -Raw | ConvertFrom-Json
+            if ($code -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+              Write-Output "::error::$($report.error -replace "`n", ' | ')"
+              throw "Daily reference validation failed ($scale)"
+            }
+          }
       - name: Comparable Windows 300 booth performance baseline and modes
         timeout-minutes: 10
         shell: pwsh
@@ -326,6 +342,21 @@ jobs:
           if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
             Write-Output "::error::$($report.error -replace "`n", ' | ')"
             throw "Packaged filter/map validation failed"
+          }
+      - name: Validate packaged daily reference and timelapse at native 150 percent
+        timeout-minutes: 5
+        env:
+          QT_QPA_PLATFORM: windows
+          QT_SCALE_FACTOR: '1.5'
+        run: |
+          $exe = (Get-ChildItem dist -Filter PrizeSwapInstructionMaker.exe -Recurse | Select-Object -First 1).FullName
+          $process = Start-Process -FilePath $exe -ArgumentList @('--daily-visual-test', 'build-smoke/daily-150') -PassThru
+          if (!$process.WaitForExit(240000)) { $process.Kill(); throw "Packaged daily validation timed out" }
+          if (!(Test-Path build-smoke/daily-150/report.json)) { throw "Packaged daily report missing" }
+          $report = Get-Content build-smoke/daily-150/report.json -Raw | ConvertFrom-Json
+          if ($process.ExitCode -ne 0 -or !$report.ok -or $report.platform -ne 'windows') {
+            Write-Output "::error::$($report.error -replace "`n", ' | ')"
+            throw "Packaged daily validation failed"
           }
       - uses: actions/upload-artifact@v6
         if: ${{ always() && hashFiles('build-smoke/**') != '' }}

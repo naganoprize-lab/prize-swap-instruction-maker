@@ -311,6 +311,8 @@ class ExcelImportMixin:
         from .labels_data import LabelStore
 
         validate_profile(prepared.profile)
+        if self.floor.temporal.active and not self.floor.temporal.to_live():
+            return False
         before = all_state(self)
         floor_before = self.floor.state()
         workflow_before = self.workflow.state()

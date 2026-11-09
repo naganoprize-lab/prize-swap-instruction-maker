@@ -302,6 +302,9 @@ class DetailDockController:
 
             p = self.panel
             o = self.owner
+            if getattr(o, "temporal", None) and o.temporal.active:
+                o.temporal.save_daily(p)
+                return
             current = next((m for m in o.machines if m.uid == p.original.uid), None)
             if current is None:
                 return

@@ -370,6 +370,9 @@ class Window(ExcelImportMixin, WorkSetMixin, InstructionEditorMixin, QMainWindow
         from .modern_ui import build_shell
 
         build_shell(self, outer, header, footer)
+        from .temporal_ui import install as install_temporal
+
+        install_temporal(self)
         self.setup_instruction_map(list_layout)
         from .preflight_ui import PreflightPanel
 
@@ -768,7 +771,7 @@ class Window(ExcelImportMixin, WorkSetMixin, InstructionEditorMixin, QMainWindow
             plan = render_output(
                 printer,
                 list(self.visible),
-                self.floor.machines,
+                self.floor.physical_machines,
                 self.floor.number_references,
                 self.selected_day(),
                 self.page_rows.value(),
@@ -843,7 +846,7 @@ class Window(ExcelImportMixin, WorkSetMixin, InstructionEditorMixin, QMainWindow
             plan = output_plan(
                 printer,
                 self.visible,
-                self.floor.machines,
+                self.floor.physical_machines,
                 self.floor.number_references,
                 self.selected_day(),
                 self.page_rows.value(),
@@ -926,6 +929,8 @@ class Window(ExcelImportMixin, WorkSetMixin, InstructionEditorMixin, QMainWindow
             if self.floor.timer.isActive():
                 self.floor.timer.stop()
                 self.floor.autosave()
+            if getattr(self.floor, "temporal", None):
+                self.floor.temporal.shutdown()
             event.accept()
         else:
             event.ignore()

@@ -201,6 +201,10 @@ def validate_machines(records):
 
 def validate_state(state):
     from .detail_dock import validate_preferences
+    from .temporal_controller import preferences as temporal_preferences
+
+    if isinstance(state, dict):
+        temporal_preferences(state.get("temporal_settings"))
 
     if isinstance(state, dict):
         validate_preferences(state.get("detail_dock"))

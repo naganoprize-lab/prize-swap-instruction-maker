@@ -187,6 +187,16 @@ class MachineNode(QGraphicsObject):
             )
         )
 
+        temporal = getattr(self.owner, "temporal", None)
+        if temporal and temporal.active:
+            summary = getattr(m, "temporal_summary", {})
+            self.setToolTip(
+                self.toolTip()
+                + f'\n対象期間 {temporal.frame.start}〜{temporal.frame.end} / 取得{summary.get("acquired",0)}/{summary.get("expected",0)}日 / 未取得{summary.get("missing",0)}日'
+                + "\n"
+                + "\n".join(temporal.differences.get(m.uid, []))
+            )
+
     def paint(self, painter, option, widget=None):
         background, status, priority, fields, font, methods = self.owner.card_context(self.machine)
         if self.owner.presentation["render_mode"] == "light":
@@ -220,6 +230,18 @@ class MachineNode(QGraphicsObject):
                 or self.machine.uid in getattr(self.owner, "_highlight_uids", set())
                 or self.machine.uid in (self.owner.analysis_highlight_uids or set()),
             )
+        temporal = getattr(self.owner, "temporal", None)
+        if (
+            temporal
+            and temporal.active
+            and temporal.settings["highlight"]
+            and self.machine.uid in temporal.differences
+        ):
+            painter.save()
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor("#F59E0B"), 3, Qt.PenStyle.DashLine))
+            painter.drawRoundedRect(self.boundingRect().adjusted(7, 7, -7, -7), 5, 5)
+            painter.restore()
         if self.isSelected():
             painter.save()
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -516,6 +538,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
         self.analysis_settings = validate_settings()
         self.presentation = dict(DEFAULTS)
+        from .temporal_controller import preferences as temporal_preferences
+
+        self.temporal_settings = temporal_preferences()
         self.card_presets = {}
         self._view_center = None
         self._projecting = False
@@ -578,6 +603,15 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             except Exception as exc:
                 self.info.setText(f"自動保存を復元できません：{exc}")
 
+        from .temporal_controller import TemporalController
+
+        self.temporal = TemporalController(self)
+
+    @property
+    def physical_machines(self):
+        t = getattr(self, "temporal", None)
+        return t.physical_machines if t else self.machines
+
     def theme_changing(self):
         if hasattr(self, "view"):
             self._theme_camera = (
@@ -601,6 +635,8 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.timer.start(800)
 
     def closeEvent(self, event):
+        if getattr(self, "temporal", None):
+            self.temporal.shutdown()
         self.day_timer.stop()
         super().closeEvent(event)
 
@@ -632,9 +668,10 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
 
         from .machine_matching import prepare_references
 
-        if self.number_references:
-            prepare_references(self.machines, self.number_references)
-        apply_snapshot(self.machines, self.analysis_state)
+        if not (getattr(self, "temporal", None) and self.temporal.active):
+            if self.number_references:
+                prepare_references(self.machines, self.number_references)
+            apply_snapshot(self.machines, self.analysis_state)
         result = {}
         for p in self.products():
             if p.day == self.selected_day() and p.included:
@@ -646,7 +683,10 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         return [p for p in self.products() if any(n in numbers for n in p.machines)]
 
     def state(self):
+        t = getattr(self, "temporal", None)
+        master = t.master if t and t.active else None
         return dict(
+            temporal_settings=deepcopy(self.temporal_settings),
             version=3,
             detail_dock=deepcopy(self.detail_settings),
             instruction_print_options=deepcopy(self.instruction_print_options),
@@ -656,26 +696,39 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             number_references=deepcopy(self.number_references),
             performance_history=deepcopy(self.performance_history),
             analysis_settings=deepcopy(self.analysis_settings),
-            sales_analysis=deepcopy(self.analysis_state),
+            sales_analysis=deepcopy(master["analysis"] if master else self.analysis_state),
             initialized=self.initialized,
             source=self.source,
-            machines=[asdict(m) for m in self.machines],
+            machines=[asdict(m) for m in (master["machines"] if master else self.machines)],
             original=deepcopy(self.original),
             snap=self.snap.isChecked(),
             show_methods=self.show_methods.isChecked(),
             display_mode=self.display_mode.currentData(),
-            reference_date=self.reference_day().isoformat(),
-            follow_today=self.follow_today,
+            reference_date=(
+                master["reference"].toString("yyyy-MM-dd")
+                if master
+                else self.reference_day().isoformat()
+            ),
+            follow_today=master["follow"] if master else self.follow_today,
             zoom=self._zoom,
             loaded_at=self.loaded_at,
             print_options=asdict(self.print_options),
-            presentation=dict(self.presentation),
+            presentation=dict(self.presentation) | ({"edit": master["edit"]} if master else {}),
             card_presets=deepcopy(self.card_presets),
             view_center=deepcopy(self._view_center),
         )
 
     def restore(self, state, keep_history=False):
         state = validate_state(state)
+        t = getattr(self, "temporal", None)
+        if t and t.active:
+            t.to_live(save=False)
+        from .temporal_controller import preferences as temporal_preferences
+
+        self.temporal_settings = temporal_preferences(state.get("temporal_settings"))
+        if t:
+            t.settings = self.temporal_settings
+            t.cache.clear()
         from .sales_analysis import validate_snapshot
 
         from .theme import manager
@@ -750,6 +803,10 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.restore_view_center()
         self.update_print_note()
         self.changed.emit()
+        if t:
+            t.configure_watch()
+            if t.settings["mode"] != "live" and t.settings["folder"]:
+                t.apply(t.settings["mode"], t.settings["start"], t.settings["end"])
 
     def rebuild(self):
         self._syncing_selection = True
@@ -1116,6 +1173,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             )
 
     def apply_card_settings(self, ids, width=None, height=None, font=None):
+        if getattr(self, "temporal", None) and self.temporal.active:
+            self.message.emit(
+                "配置の編集は『現在の編集データ』で行ってください。履歴の配置は変更していません。"
+            )
+            return False
         before = self.state()
         updated = deepcopy(self.machines)
         for m in updated:
@@ -1141,6 +1203,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         ]
 
     def add_machine(self, machine):
+        if getattr(self, "temporal", None) and self.temporal.active:
+            self.message.emit(
+                "配置の編集は『現在の編集データ』で行ってください。履歴の配置は変更していません。"
+            )
+            return False
         validate_machines([asdict(m) for m in self.machines] + [asdict(machine)])
         if machine_key(machine) and any(
             machine_key(m) == machine_key(machine) for m in self.machines
@@ -1250,6 +1317,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             self.add_machine(m)
 
     def edit_machine(self, uid):
+        if getattr(self, "temporal", None) and self.temporal.active:
+            self.message.emit(
+                "配置の編集は『現在の編集データ』で行ってください。履歴の配置は変更していません。"
+            )
+            return False
         old = next(m for m in self.machines if m.uid == uid)
         updated = deepcopy(old)
         if not self.machine_dialog(updated, "マシン編集"):
@@ -1278,6 +1350,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.record(before, "マシン編集")
 
     def delete_selected(self):
+        if getattr(self, "temporal", None) and self.temporal.active:
+            self.message.emit(
+                "配置の編集は『現在の編集データ』で行ってください。履歴の配置は変更していません。"
+            )
+            return False
         selected = self.selected()
         if not selected:
             return
@@ -1307,6 +1384,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             )
 
     def duplicate_selected(self):
+        if getattr(self, "temporal", None) and self.temporal.active:
+            self.message.emit(
+                "配置の編集は『現在の編集データ』で行ってください。履歴の配置は変更していません。"
+            )
+            return False
         selected = self.selected()
         if not selected:
             return
@@ -1332,6 +1414,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         )
 
     def align_selected(self, mode):
+        if getattr(self, "temporal", None) and self.temporal.active:
+            self.message.emit(
+                "配置の編集は『現在の編集データ』で行ってください。履歴の配置は変更していません。"
+            )
+            return False
         self.align.setCurrentIndex(0)
         selected = self.selected()
         if mode == 0 or len(selected) < 2:
@@ -1367,6 +1454,9 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         return self.apply_layout_import(path, machines, warnings, references, preserve)
 
     def apply_layout_import(self, path, machines, warnings, references, preserve=False):
+        if getattr(self, "temporal", None) and self.temporal.active:
+            if not self.temporal.to_live():
+                return False
         validate_machines([asdict(m) for m in machines])
         from .machine_matching import validate_references
 
@@ -1454,6 +1544,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
             QMessageBox.warning(self, "レイアウト読込エラー", str(exc))
 
     def reset_original(self):
+        if getattr(self, "temporal", None) and self.temporal.active:
+            self.message.emit(
+                "配置の編集は『現在の編集データ』で行ってください。履歴の配置は変更していません。"
+            )
+            return False
         if not self.original:
             return
         if (
