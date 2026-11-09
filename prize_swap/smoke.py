@@ -67,6 +67,8 @@ def run(output):
         assert "20085" in "".join(floor_pdf["pages"][0]["text"].split())
         report["floor_pdf_fonts"] = floor_pdf["fonts"]
         report["floor_machines"] = len(w.floor.machines)
+        from .mobile_smoke import check as check_mobile
+        report["android_exchange"] = check_mobile(w, output)
         w.floor.reference_date.setDate(QDate(2026,11,5))
         w.floor.display_mode.setCurrentIndex(w.floor.display_mode.findData("analysis"))
         w.floor.set_print_options(FloorPrintOptions(paper="A3",orientation="portrait"))

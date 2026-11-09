@@ -408,6 +408,9 @@ class Window(ExcelImportMixin, WorkSetMixin, InstructionEditorMixin, QMainWindow
         self.themes.load(self.appearance_path)
         self.theme_changed()
         self.restore_instruction_autosave()
+        from .mobile_ui import install as install_mobile
+
+        install_mobile(self)
 
     def show_settings(self):
         if hasattr(self, "settings_page"):
@@ -485,6 +488,7 @@ class Window(ExcelImportMixin, WorkSetMixin, InstructionEditorMixin, QMainWindow
                 "settings": "設定",
                 "analysis": "売上分析",
                 "candidates": "入替候補",
+                "mobile": "Android連携",
             }[key]
         )
         self.page_search.setVisible(

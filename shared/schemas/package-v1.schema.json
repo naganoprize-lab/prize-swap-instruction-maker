@@ -1,0 +1,986 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:prizeswap:package:1",
+  "$defs": {
+    "product": {
+      "type": "object",
+      "properties": {
+        "day": {
+          "type": "string",
+          "format": "date"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "units": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "const": ""
+            }
+          ]
+        },
+        "cases": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "const": ""
+            }
+          ]
+        },
+        "maker": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "machines": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 1000000,
+            "pattern": "^(?:[0-9]+[左右]?|[LR]_[0-9]+)$"
+          },
+          "maxItems": 5000
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 1000000
+          },
+          "maxItems": 100
+        },
+        "priority": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "string",
+          "maxLength": 1000000,
+          "enum": [
+            "制限なし",
+            "各①",
+            "各②",
+            "各③",
+            "各④",
+            "各⑤",
+            "各⑥",
+            "各⑦",
+            "各⑧",
+            "各⑨",
+            "各⑩",
+            "トータル①",
+            "トータル②",
+            "トータル③",
+            "トータル④",
+            "トータル⑤",
+            "トータル⑥",
+            "トータル⑦",
+            "トータル⑧",
+            "トータル⑨",
+            "トータル⑩"
+          ]
+        },
+        "included": {
+          "type": "boolean"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "source_row": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "planned_booths": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "additionalProperties": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        },
+        "machine_methods": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?:[0-9]+[左右]?|[LR]_[0-9]+)$"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "retired_machine_methods": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?:[0-9]+[左右]?|[LR]_[0-9]+)$"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "candidate_assignment": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "management_number": {
+              "type": "string"
+            },
+            "machine_key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_candidate_status": {
+              "type": "string"
+            },
+            "operating_method": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "installed_days": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "machine_display_number": {
+              "type": "string"
+            },
+            "confirmed_replacement_date": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "assignment_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_candidate_reason": {
+              "type": "string"
+            },
+            "replacement_product_name": {
+              "type": "string"
+            },
+            "sales_amount": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "current_product_name": {
+              "type": "string"
+            },
+            "average_ratio": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "machine_number": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "assignment_id",
+            "average_ratio",
+            "confirmed_replacement_date",
+            "created_at",
+            "current_product_name",
+            "installed_days",
+            "machine_display_number",
+            "machine_key",
+            "machine_number",
+            "management_number",
+            "operating_method",
+            "replacement_product_name",
+            "sales_amount",
+            "source_candidate_reason",
+            "source_candidate_status"
+          ],
+          "additionalProperties": false
+        },
+        "entry_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "source_type": {
+          "enum": [
+            "auto",
+            "candidate",
+            "manual"
+          ]
+        },
+        "source_method": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "management_numbers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 1000000,
+            "pattern": "^[LR]_[0-9]+$"
+          },
+          "maxItems": 5000
+        },
+        "manually_edited_fields": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "booth_assignments",
+              "cases",
+              "day",
+              "included",
+              "limit",
+              "machine_methods",
+              "machines",
+              "maker",
+              "management_numbers",
+              "methods",
+              "name",
+              "notes",
+              "order",
+              "planned_booths",
+              "priority",
+              "retired_machine_methods",
+              "units"
+            ]
+          },
+          "maxItems": 10000
+        },
+        "booth_assignments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "assignment_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "token": {
+                "type": "string",
+                "maxLength": 1000000
+              },
+              "machine_key": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "machine_number": {
+                "type": "string",
+                "maxLength": 1000000
+              },
+              "management_number": {
+                "type": "string",
+                "maxLength": 1000000
+              }
+            },
+            "required": [
+              "assignment_id",
+              "token",
+              "machine_key",
+              "machine_number",
+              "management_number"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 5000
+        },
+        "import_snapshot": {
+          "type": "object"
+        },
+        "created_at": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "updated_at": {
+          "type": "string",
+          "maxLength": 1000000
+        }
+      },
+      "required": [
+        "day",
+        "name",
+        "units",
+        "cases",
+        "maker",
+        "machines",
+        "methods",
+        "priority",
+        "limit",
+        "included",
+        "order",
+        "source_row",
+        "planned_booths",
+        "machine_methods",
+        "retired_machine_methods",
+        "candidate_assignment",
+        "entry_id",
+        "source_type",
+        "source_method",
+        "notes",
+        "management_numbers",
+        "manually_edited_fields",
+        "booth_assignments",
+        "import_snapshot",
+        "created_at",
+        "updated_at"
+      ],
+      "additionalProperties": false
+    },
+    "body": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/product"
+          },
+          "maxItems": 5000
+        },
+        "entry_extras": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "title",
+        "date",
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "document": {
+      "type": "object",
+      "properties": {
+        "document_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "revision_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000000
+        },
+        "ancestors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "maxItems": 128
+        },
+        "updated_at": {
+          "type": "string",
+          "maxLength": 1000000,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$"
+        },
+        "updated_by": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "body": {
+          "$ref": "#/$defs/body"
+        }
+      },
+      "required": [
+        "document_id",
+        "revision_id",
+        "revision",
+        "ancestors",
+        "updated_at",
+        "updated_by",
+        "deleted",
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "manifest": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "PrizeSwapPackage"
+        },
+        "version": {
+          "const": 1
+        },
+        "min_reader_version": {
+          "const": 1
+        },
+        "package_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "dataset_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "created_at": {
+          "type": "string",
+          "maxLength": 1000000,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$"
+        },
+        "source_app": {
+          "enum": [
+            "windows",
+            "android"
+          ]
+        },
+        "source_device_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "kind": {
+          "enum": [
+            "full",
+            "reference",
+            "instructions"
+          ]
+        },
+        "data_updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$"
+        },
+        "app_version": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "enum": [
+                  "data/machines.json",
+                  "data/layout.json",
+                  "data/sales.json",
+                  "data/history.json",
+                  "data/settings.json",
+                  "data/instructions.json"
+                ]
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 33554432
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "size"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 6
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "min_reader_version",
+        "package_id",
+        "dataset_id",
+        "created_at",
+        "source_app",
+        "source_device_id",
+        "kind",
+        "data_updated_at",
+        "app_version",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "machines": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "machine_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "number": {
+                "type": "string",
+                "maxLength": 1000000
+              },
+              "management_number": {
+                "type": "string",
+                "maxLength": 1000000
+              },
+              "machine_type": {
+                "type": "string",
+                "maxLength": 1000000
+              },
+              "product_name": {
+                "type": "string",
+                "maxLength": 1000000
+              },
+              "installed_on": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "operating_method": {
+                "type": "string",
+                "maxLength": 1000000
+              },
+              "windows_fields": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "machine_id",
+              "number",
+              "management_number",
+              "machine_type",
+              "product_name",
+              "installed_on",
+              "operating_method",
+              "windows_fields"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 5000
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source_key": {
+                "type": "string",
+                "maxLength": 1000000
+              },
+              "number": {
+                "type": "string",
+                "maxLength": 1000000
+              }
+            },
+            "required": [
+              "source_key",
+              "number"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 10000
+        }
+      },
+      "required": [
+        "items",
+        "references"
+      ],
+      "additionalProperties": false
+    },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "coordinate_unit": {
+          "const": "windows-scene"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "machine_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "width": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "height": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "font_size": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 200
+              }
+            },
+            "required": [
+              "machine_id",
+              "x",
+              "y",
+              "width",
+              "height",
+              "font_size"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 5000
+        }
+      },
+      "required": [
+        "coordinate_unit",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "sales": {
+      "type": "object",
+      "properties": {
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/frame"
+          },
+          "maxItems": 400
+        }
+      },
+      "required": [
+        "frames"
+      ],
+      "additionalProperties": false
+    },
+    "history": {
+      "type": "object",
+      "properties": {
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/frame"
+          },
+          "maxItems": 400
+        }
+      },
+      "required": [
+        "frames"
+      ],
+      "additionalProperties": false
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "analysis": {
+          "type": "object"
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 1000000
+          },
+          "maxItems": 100
+        },
+        "theme": {
+          "enum": [
+            "system",
+            "light",
+            "dark"
+          ]
+        }
+      },
+      "required": [
+        "analysis",
+        "methods",
+        "theme"
+      ],
+      "additionalProperties": false
+    },
+    "instructions": {
+      "type": "object",
+      "properties": {
+        "documents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/document"
+          },
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "documents"
+      ],
+      "additionalProperties": false
+    },
+    "frame": {
+      "type": "object",
+      "properties": {
+        "frame_id": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "period_start": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "period_end": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "coverage": {
+          "type": "object"
+        },
+        "reference_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ratio": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "sales": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "average": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "operating_days": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "days": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cost_rate": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "po_rate": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "excel_po_rate": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "target_po_rate": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "po_deviation": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "gross_profit": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "dispensed": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "per_item": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "unit_price": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cost": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "machine_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "grades": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "color": {
+                      "type": "string",
+                      "pattern": "^#[0-9A-Fa-f]{6}$"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "color",
+                    "label"
+                  ]
+                }
+              },
+              "radar": {
+                "type": "array",
+                "maxItems": 5,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "score": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "actual": {
+                      "type": "string"
+                    },
+                    "goal": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "label",
+                    "score",
+                    "actual",
+                    "goal",
+                    "note",
+                    "warning"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "machine_id",
+              "grades"
+            ]
+          },
+          "maxItems": 5000
+        }
+      },
+      "required": [
+        "frame_id",
+        "label",
+        "period_start",
+        "period_end",
+        "reference_date",
+        "coverage",
+        "reference_count",
+        "records"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

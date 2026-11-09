@@ -9,3 +9,10 @@ build-diagnostics/
 build-smoke/
 
 build-visual/
+android/.gradle/
+android/local.properties
+android/**/build/
+*.jks
+*.keystore
+android/.kotlin/
+android/.idea/

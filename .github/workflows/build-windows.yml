@@ -2,8 +2,10 @@ name: Windows portable EXE
 on:
   push:
     branches: ['**']
+    paths: ['prize_swap/**', 'tests/**', 'scripts/**', 'shared/**', 'main.py', 'requirements.txt', 'pyproject.toml', '.github/workflows/build-windows.yml']
     tags: ['v*']
   pull_request:
+    paths: ['prize_swap/**', 'tests/**', 'scripts/**', 'shared/**', 'main.py', 'requirements.txt', 'pyproject.toml', '.github/workflows/build-windows.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -221,7 +223,7 @@ jobs:
           path: build-visual/
           if-no-files-found: error
       - name: Build portable EXE
-        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --noupx --name PrizeSwapInstructionMaker main.py
+        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --noupx --name PrizeSwapInstructionMaker --add-data "shared;shared" --collect-data jsonschema_specifications main.py
       - name: Smoke test packaged Windows EXE
         shell: pwsh
         env:
