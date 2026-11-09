@@ -144,6 +144,9 @@ def value_evaluation(value, bounds, mode="quantile", settings=None):
 
 
 def evaluation(machine, settings, bounds):
+    summary = getattr(machine, "temporal_summary", {})
+    if summary and not summary.get("sales_comparable", True):
+        return dict(value=valid(effective_stat(machine,"sales")),color=UNKNOWN,label="不明：取得日数不足",basis="部分データの合計を全期間の売上順位と比較しません",rank=None,count=0,top_percent=None,index=None,provisional=True)
     selected = bounds
     provisional = False
     if isinstance(bounds, SalesBounds):

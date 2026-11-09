@@ -186,6 +186,10 @@ def evaluate_po(machine, settings=None):
             from .analysis_bands import po_band
 
             color, label = po_band((actual - expected) / expected, settings)
+    temporal = getattr(machine, "temporal_summary", {})
+    if temporal.get("context_changed"):
+        score, label, color = None, "期間内の運営条件変更・未評価", "#B8BEC6"
+        warning.append("期間中の商品・設置日・運営方法が異なるため、単一原価の理論PO率による適合度は評価しません。")
     if expected is None:
         warning.append("原価・料金・目標原価率の有効値が不足しています。")
     if actual is None:

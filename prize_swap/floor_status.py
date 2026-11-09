@@ -240,6 +240,9 @@ def raw_stat(machine, key):
 
 
 def effective_stat(machine, key):
+    temporal = getattr(machine, "temporal_metrics", None)
+    if temporal is not None and key in temporal:
+        return temporal[key]
     if key in ("cost_rate", "cost"):
         from .costing import cost_profile
 
@@ -267,6 +270,9 @@ def reference_average(machine):
 
 
 def ratio(machine):
+    temporal = getattr(machine, "temporal_metrics", None)
+    if temporal is not None:
+        return temporal.get("ratio")
     if getattr(machine, "analysis", None):
         explicit = machine.analysis.get("imported_ratio")
         if type(explicit) in (int, float) and math.isfinite(explicit) and explicit >= 0:

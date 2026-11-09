@@ -187,7 +187,10 @@ def machine_record(machine, reference, settings, assignments=None, history=None,
         record["sales_evaluation"] = evaluation(m, settings, sales_bounds)
     record["assessment_detail"] = assess(m, reference, settings, history or [], sales_bounds)
     record["assessment"] = record["assessment_detail"]["status"]
+    record["temporal_summary"] = deepcopy(getattr(m, "temporal_summary", {}))
     record["score_comparable"] = not (
+        not getattr(m, "temporal_summary", {}).get("sales_comparable", True)
+        or
         (m.analysis or {}).get("quality_issues")
         or (m.analysis or {}).get("product_context") is not None
         and m.analysis["product_context"] != episode(m)
