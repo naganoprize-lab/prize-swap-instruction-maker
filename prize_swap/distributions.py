@@ -351,6 +351,12 @@ class DistributionPage(QScrollArea):
             card.setMaximumHeight(300 if axis != "machine_type" else 350)
             self.cards[axis] = (card, info, chart, legend)
         self.reflow()
+        self.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if obj is self.viewport() and event.type() == event.Type.Resize:
+            self.reflow()
+        return super().eventFilter(obj, event)
 
     def move_tile(self, axis):
         order = self.page.owner.analytics_ui["tile_order"]
@@ -406,7 +412,12 @@ class DistributionPage(QScrollArea):
     def reflow(self):
         if not hasattr(self, "cards"):
             return
-        cols = 3 if self.viewport().width() >= 1350 else 2 if self.viewport().width() >= 820 else 1
+        # Reserve the scrollbar even before QAbstractScrollArea updates its viewport.
+        # This also avoids oscillating column counts at a scrollbar-width boundary.
+        available = max(
+            0, self.width() - self.verticalScrollBar().sizeHint().width() - 2 * self.frameWidth()
+        )
+        cols = 3 if available >= 1350 else 2 if available >= 820 else 1
         axes = [
             a
             for a in self.page.owner.analytics_ui["tile_order"]

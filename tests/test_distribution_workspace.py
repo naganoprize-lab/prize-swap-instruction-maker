@@ -100,15 +100,19 @@ def test_default_tiles_responsive_and_no_average_ui(window):
     assert w.tabs.currentWidget() is p and p.workspace_tabs.currentWidget() is p.distributions
     assert all(p.metric_choice.itemData(i) != "average" for i in range(p.metric_choice.count()))
     assert p.distributions.cards["sales_bin"][2].rows
-    p.distributions.resize(1600, 700)
-    QApplication.processEvents()
-    assert p.distributions.columns == 3
-    p.distributions.resize(1000, 700)
-    QApplication.processEvents()
-    assert p.distributions.columns == 2
-    p.distributions.resize(700, 700)
-    QApplication.processEvents()
-    assert p.distributions.columns == 1
+    # A managed child is otherwise resized back by the main window layout.
+    from viewport_helpers import distribution_viewport
+
+    with distribution_viewport(p):
+        p.distributions.resize(1600, 700)
+        QApplication.processEvents()
+        assert p.distributions.columns == 3
+        p.distributions.resize(1000, 700)
+        QApplication.processEvents()
+        assert p.distributions.columns == 2
+        p.distributions.resize(700, 700)
+        QApplication.processEvents()
+        assert p.distributions.columns == 1
     p.distributions.open_detail("sales_bin")
     assert p.workspace_tabs.currentWidget() is p.detail_page and p.axis.currentData() == "sales_bin"
 
