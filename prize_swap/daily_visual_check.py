@@ -76,7 +76,7 @@ def run(output):
     if sys.platform != "win32":
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
-    from PySide6.QtCore import QTimer
+    from PySide6.QtCore import QTimer, QDate
     from PySide6.QtTest import QTest
     from .ui import Window
     from .fonts import initialize_fonts
@@ -196,6 +196,11 @@ def run(output):
                 2 * (i + 1) * 100 + 500 for i in range(24)
             )
             w.grab().save(str(output / "selected-daily-trends.png"))
+            f.today()
+            wait(lambda: not c.aggregate_busy)
+            assert c.frame.start == c.frame.end == QDate.currentDate().toString("yyyy-MM-dd")
+            assert f.reference_day().isoformat() == c.frame.end
+            report["legacy_today_synced"] = True
             c.to_live()
             assert [asdict(m) for m in f.machines] == original
             assert before == {p.name: digest(p.read_bytes().hex()) for p in refs.iterdir()}

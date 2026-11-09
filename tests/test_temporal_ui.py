@@ -265,3 +265,17 @@ def test_first_import_opens_full_cumulative_period_instead_of_empty_last_day(tmp
         w.floor.timer.stop()
         w.close()
         wait_until(lambda: not c._jobs)
+
+
+def test_legacy_today_button_uses_shared_period_in_history_view(historical_window):
+    from PySide6.QtCore import QDate
+
+    f = historical_window.floor
+    c = f.temporal
+    before = [asdict(m) for m in c.physical_machines]
+    f.today()
+    wait_until(lambda: not c.aggregate_busy)
+    today = QDate.currentDate().toString("yyyy-MM-dd")
+    assert c.frame.start == c.frame.end == today
+    assert f.reference_day().isoformat() == today
+    assert [asdict(m) for m in c.physical_machines] == before

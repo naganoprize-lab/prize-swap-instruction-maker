@@ -985,6 +985,10 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.display_changed()
 
     def today(self):
+        temporal = getattr(self, "temporal", None)
+        if temporal and temporal.active:
+            day = QDate.currentDate().toString("yyyy-MM-dd")
+            return temporal.request_apply("day", day, day)
         self.follow_today = True
         self._setting_day = True
         self.reference_date.setDate(QDate.currentDate())
