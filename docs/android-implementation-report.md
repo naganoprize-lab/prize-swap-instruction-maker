@@ -1,6 +1,6 @@
 # Windows連携型Android版 実装・検証報告
 
-対象ブランチは `feat/android-offline-companion`、基点は既存Windows版の `3cc1606cfcdec6ce1d5dc85f699420df06fce1e6`。既存Windowsソースは移動していない。GitHubへのpush・CI起動・mainへのマージは未実行。ユーザー指定に従い、pushとCI起動は承認後に行う。
+対象ブランチは `feat/android-offline-companion`、基点は既存Windows版の `3cc1606cfcdec6ce1d5dc85f699420df06fce1e6`。既存Windowsソースは移動していない。ユーザーの明示承認後に専用ブランチをpushし、Windows/Android CIが成功した。mainへのpush・マージは行っていない。実行URL・成果物・修正したCI設定は [CIビルド結果](android-ci-report.md) を参照。
 
 ## 実装内容とファイル
 
@@ -60,7 +60,7 @@ USB初回設定と固定パスは [USB手順](usb-transfer.md)、形式は [ZIP�
 
 ローカルAndroid Debug APKは `android/app/build/outputs/apk/debug/app-debug.apk`。渡しやすいコピーを `/workspace/PrizeSwapCompanion-android-debug.apk` に保存する。
 
-GitHub Actionsは未起動のため、今回の実行URL・CI成果物はまだない。承認後にこの作業ブランチをpushすると、Windows/Androidの対応するワークフローが起動する。成功時の成果物名は次の予定。
+GitHub ActionsのWindows #56とAndroid #4が成功した。実行URLと成果物リンクは [CIビルド結果](android-ci-report.md) を参照。成果物名は次の通り。
 
 - `PrizeSwapCompanion-android-debug`：Android Debug APK
 - `Android-test-results`：JVMテスト・Lint等のレポート（端末UIテストは今回ローカル実施）
@@ -69,7 +69,7 @@ GitHub Actionsは未起動のため、今回の実行URL・CI成果物はまだ�
 
 ## 既知の制約
 
-- 今回のブランチのWindowsネイティブEXEビルド・起動確認は承認後のCIで実施する。物理プリンター、実端末カメラ、OEM固有ストレージ制限・Windows USBドライバーは未検証。
+- 今回のブランチのWindowsネイティブEXEビルド・起動・画面検証はCIで成功した。物理プリンター、実端末カメラ、OEM固有ストレージ制限・Windows USBドライバーは未検証。
 - 日別・月別・選択期間はWindowsが計算して出力したフレームを切り替える。Android独自の任意期間再集計・タイムラプス再生は行わない。
 - 履歴範囲は最大90日・初期7日。詳細が多くZIP上限を超える場合は、Windowsで月別または選択期間のみを指定する。超過時に既存データを削除したり無断で履歴を間引いたりしない。
 - ZIPは暗号化・電子署名されない。保存先・共有相手を確認する。サイズ上限は圧縮前後64MiB、1ファイル32MiB。
