@@ -112,7 +112,20 @@ def read_document(path, fingerprint=None):
     sales_hash = digest({n: r["values"].get("sales") for n, r in snapshot["records"].items()})
     payload_hash = digest(
         dict(
-            records={n: r["values"] for n, r in snapshot["records"].items()},
+            records={
+                n: {
+                    k: r.get(k)
+                    for k in (
+                        "values",
+                        "po_inputs",
+                        "imported_ratio",
+                        "reference_product_name",
+                        "machine_name",
+                    )
+                }
+                for n, r in snapshot["records"].items()
+            },
+            po_definition=snapshot["po_definition"],
             layout=clean_layout,
             refs=refs,
         )

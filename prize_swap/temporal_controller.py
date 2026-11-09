@@ -75,7 +75,7 @@ def period_range(mode, start, end, today=None):
     if mode == "day":
         b = a
     elif mode in ("7days", "30days"):
-        b = a
+        b = date.fromisoformat(end) if end else a
         a = b - timedelta(days=6 if mode == "7days" else 29)
     elif mode == "month":
         a = today.replace(day=1)
@@ -238,6 +238,8 @@ class TemporalController(QObject):
         self.cache.clear()
         self._token += 1
         self._cancel.set()
+        self._revision += 1
+        self.reload_documents()
         self.configure_watch()
         self.floor.schedule_save()
         self.scan_async(initial=True)
@@ -282,8 +284,16 @@ class TemporalController(QObject):
             if self._initial_scan and self.settings["mode"] == "live":
                 usable, _ = self.library.usable(self.settings["folder"], full=False)
                 if usable:
-                    day = max(d["metadata"]["end"] for d in usable)
-                    self.request_apply("day", day, day)
+                    latest = max(
+                        usable,
+                        key=lambda d: (
+                            d["metadata"]["end"],
+                            d["metadata"]["data_type"] == "daily",
+                            d["metadata"]["start"],
+                        ),
+                    )
+                    a, b = latest["metadata"]["start"], latest["metadata"]["end"]
+                    self.request_apply("day" if a == b else "custom", a, b)
             elif self.active:
                 self.request_apply(
                     self.settings["mode"], self.settings["start"], self.settings["end"]
@@ -330,6 +340,7 @@ class TemporalController(QObject):
             self._revision,
             digest([asdict(m) for m in self.physical_machines]),
             digest(self.floor.analysis_settings),
+            self.settings["folder"],
         )
 
     def queue_frame(self, key):
@@ -388,6 +399,9 @@ class TemporalController(QObject):
                 self.cache.popitem(last=False)
         if self._requested and self._requested[0] == key:
             _, mode, a, b, playing = self._requested
+            if frame is None and key == self.frame_key(a, b) and error and "キャンセル" in error:
+                self.queue_frame(key)
+                return
             self._requested = None
             self.aggregate_busy = False
             if frame is not None and key in self.cache:
@@ -591,7 +605,19 @@ class TemporalController(QObject):
                 super().__init__("日別実績の手動補正")
 
             def set_value(self, value):
+                previous = controller.library.preference(key, {})
                 controller.library.set_preference(key, value)
+                page = getattr(controller.floor, "analysis_page", None)
+                workflow = getattr(page.host_window, "workflow", None) if page else None
+                if workflow and previous != value:
+                    workflow.append(
+                        getattr(controller.floor.history, "audit_kind", "") or "edit",
+                        f"{a} 日別実績の補正",
+                        "daily_reference",
+                        panel.original.uid,
+                        previous,
+                        value,
+                    )
                 controller.cache.clear()
                 controller._revision += 1
                 # Discard only the just-saved draft before refreshing the same machine.
@@ -713,12 +739,22 @@ class TemporalController(QObject):
             return
         self.playing = True
         self.play_timer.start(round(1000 / self.settings["speed"]))
+        self.prefetch_timer.start(0)
         self.changed.emit()
 
     def pause(self):
         self.playing = False
         self.play_timer.stop()
         self.prefetch_timer.stop()
+        if self._requested and self._requested[4]:
+            self._requested = None
+            self.aggregate_busy = False
+        requested = self._requested[0] if self._requested else None
+        for key, (_, cancel) in self._jobs.items():
+            if key != requested:
+                cancel.set()
+        if self.frame and (self.frame.start, self.frame.end) in self.frames:
+            self.frame_index = self.frames.index((self.frame.start, self.frame.end))
         if not self._closed:
             self.changed.emit()
 
@@ -743,10 +779,13 @@ class TemporalController(QObject):
         self.changed.emit()
 
     def prefetch(self):
-        if self.playing and self.frames and self.frame_index + 1 < len(self.frames):
-            key = self.frame_key(*self.frames[self.frame_index + 1])
-            if key not in self.cache:
-                self.queue_frame(key)
+        if not self.playing or not self.frames:
+            return
+        for index in (self.frame_index - 1, self.frame_index + 1):
+            if 0 <= index < len(self.frames):
+                key = self.frame_key(*self.frames[index])
+                if key not in self.cache:
+                    self.queue_frame(key)
 
     def shutdown(self):
         self._closed = True

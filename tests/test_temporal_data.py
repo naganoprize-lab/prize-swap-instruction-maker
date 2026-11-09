@@ -105,3 +105,39 @@ def test_partial_machine_coverage_is_not_ranked_against_whole_period(tmp_path):
     b = sales_boundaries(f.machines, s, f.snapshot)
     assert effective_stat(m, "sales") == 300
     assert not m.temporal_summary["sales_comparable"] and evaluation(m, s, b)["index"] is None
+
+
+def test_cost_confirmation_does_not_leak_from_current_master_into_other_day(tmp_path):
+    from prize_swap.temporal_data import day_projection
+    from prize_swap.daily_reference import read_document
+    from test_daily_reference import workbook
+    from prize_swap.costing import cost_profile
+
+    master = Machine(
+        source_key="R_66",
+        product="景品 100",
+        prize_cost=900,
+        prize_cost_product="景品 100",
+        manual_updates={"prize_cost": "2026-11-09T10:00:00+09:00"},
+    )
+    doc = read_document(workbook(tmp_path / "one.xlsx"))
+    projection, _ = day_projection([master], doc)
+    assert projection[0].prize_cost is None and cost_profile(projection[0])["effective"] == 100
+
+
+def test_history_method_totals_use_play_denominators_and_layout_has_confirmed_period(tmp_path):
+    from prize_swap.method_analysis import totals, period_key
+    from prize_swap.analytics_data import machine_record
+
+    master, docs, coverage = frame(tmp_path)
+    matched = build_frame([master], docs, "2026-11-06", "2026-11-07", coverage)
+    result = totals(matched.machines, validate_settings())[0]
+    assert result["po_rate"] == 2 / 40 and "期間プレイ回数" in result["po_mode"]
+    assert result["period"] == ("2026-11-06", "2026-11-07", "confirmed")
+    # A known file day also belongs to an unmatched layout value, without inventing a match.
+    docs[0]["snapshot"]["records"] = {}
+    c = dict(expected=1, acquired=1, missing=0, partial=False, warnings=[], dates=["2026-11-06"])
+    single = build_frame([master], [docs[0]], "2026-11-06", "2026-11-06", c).machines[0]
+    record = machine_record(single, date(2026, 11, 6), validate_settings())
+    assert single.analysis is None and record["period"][:2] == ("2026-11-06", "2026-11-06")
+    assert record["metric_periods"]["sales"][:2] == ("2026-11-06", "2026-11-06")

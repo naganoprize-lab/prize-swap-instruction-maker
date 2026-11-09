@@ -11,6 +11,9 @@ from .floor_status import effective_stat, numeric
 
 
 def cohort(machine):
+    temporal = getattr(machine, "temporal_summary", {})
+    if temporal.get("period_start") and temporal.get("period_end"):
+        return (temporal["period_start"], temporal["period_end"], "confirmed")
     a = machine.analysis or {}
     if a:
         return (
@@ -146,7 +149,17 @@ def value_evaluation(value, bounds, mode="quantile", settings=None):
 def evaluation(machine, settings, bounds):
     summary = getattr(machine, "temporal_summary", {})
     if summary and not summary.get("sales_comparable", True):
-        return dict(value=valid(effective_stat(machine,"sales")),color=UNKNOWN,label="不明：取得日数不足",basis="部分データの合計を全期間の売上順位と比較しません",rank=None,count=0,top_percent=None,index=None,provisional=True)
+        return dict(
+            value=valid(effective_stat(machine, "sales")),
+            color=UNKNOWN,
+            label="不明：取得日数不足",
+            basis="部分データの合計を全期間の売上順位と比較しません",
+            rank=None,
+            count=0,
+            top_percent=None,
+            index=None,
+            provisional=True,
+        )
     selected = bounds
     provisional = False
     if isinstance(bounds, SalesBounds):
@@ -175,7 +188,8 @@ def evaluation(machine, settings, bounds):
     result["provisional"] = provisional
     if provisional:
         source = "レイアウト由来" if not machine.analysis else "景品運営分析表"
-        result["basis"] += f"（{source}・期間未確認の参考比較）"
+        note = "同一対象日の参考比較" if summary.get("period_start") else "期間未確認の参考比較"
+        result["basis"] += f"（{source}・{note}）"
     return result
 
 

@@ -154,7 +154,7 @@ class WorkflowStore(QObject):
 
     def floor_snapshot(self):
         result = {}
-        for m in self.owner.floor.machines:
+        for m in self.owner.floor.physical_machines:
             value = asdict(m)
             if value.get("analysis"):
                 value["analysis"] = {
@@ -230,7 +230,8 @@ class WorkflowStore(QObject):
 
     def import_marker(self):
         f = self.owner.floor
-        a = f.analysis_state
+        temporal = getattr(f, "temporal", None)
+        a = temporal.master["analysis"] if temporal and temporal.active else f.analysis_state
         return (a.get("source", ""), a.get("loaded_at", ""), f.source, f.loaded_at)
 
     def detect_import(self, *_):

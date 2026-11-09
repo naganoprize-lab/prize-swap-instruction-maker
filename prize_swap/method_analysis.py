@@ -11,6 +11,9 @@ def mean(values):
 
 
 def period_key(machine):
+    temporal = getattr(machine, "temporal_summary", {})
+    if temporal.get("period_start") and temporal.get("period_end"):
+        return (temporal["period_start"], temporal["period_end"], "confirmed")
     a = machine.analysis or {}
     start, end = a.get("period_start"), a.get("period_end")
     if start and end and a.get("period_source") in ("excel", "manual"):
@@ -76,6 +79,23 @@ def totals(machines, settings=None, type_filter="", method_filter=""):
         )
         if po is None:
             po = mean(values("po_rate"))
+        if all(getattr(m, "temporal_summary", None) for m in group):
+            # History uses the actual aligned denominators, never averages daily ratios.
+            from .temporal_data import rollup_samples
+
+            history_values, _ = rollup_samples(group, [1] * len(group))
+            po = history_values["po_rate"]
+            cost = history_values["cost_rate"]
+            po_mode = (
+                "期間獲得個数合計÷期間プレイ回数合計"
+                if po is not None
+                else "未評価（実プレイ回数の分母不足）"
+            )
+            cost_mode = (
+                "期間合計原価÷期間合計売上"
+                if cost is not None
+                else "未評価（対応する原価・売上不足）"
+            )
         products = sorted(set(m.product for m in group if m.product))
         output.append(
             dict(

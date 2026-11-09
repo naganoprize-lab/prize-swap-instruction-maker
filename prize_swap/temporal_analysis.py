@@ -23,6 +23,13 @@ from .analysis_settings import sales_boundaries
 from .theme import tokens, manager
 from .analytics_charts import series_color
 from .distributions import COLORS
+from .analysis_bands import SALES_LABELS, SALES_COLORS
+
+COLORS = (
+    COLORS
+    | dict(zip(SALES_LABELS, SALES_COLORS))
+    | {"要確認": "#F4A6A6", "入替検討": "#F6BE78", "好調": "#94D8A0", "判定保留": "#AEB7C2"}
+)
 
 
 def series_summary(frame, settings, uids=None):
@@ -292,6 +299,8 @@ class TemporalAnalysis(QScrollArea):
         self.grid = QGridLayout(self.tiles)
         root.addWidget(self.tiles)
         self.charts = []
+        self.cards = []
+        self.legends = []
         for key, title in [
             ("sales", "日別売上推移"),
             ("monthly_sales", "月別売上推移"),
@@ -305,6 +314,17 @@ class TemporalAnalysis(QScrollArea):
             chart.series_key = key
             chart.activated.connect(self.navigate)
             self.charts.append(chart)
+            card = QFrame()
+            card.setObjectName("card")
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(chart)
+            legend = QLabel()
+            legend.setWordWrap(True)
+            legend.setContentsMargins(8, 0, 8, 6)
+            layout.addWidget(legend)
+            self.cards.append(card)
+            self.legends.append(legend)
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.setInterval(120)
@@ -329,8 +349,8 @@ class TemporalAnalysis(QScrollArea):
 
     def reflow(self):
         cols = 3 if self.viewport().width() >= 1300 else 2 if self.viewport().width() >= 650 else 1
-        for i, chart in enumerate(self.charts):
-            self.grid.addWidget(chart, i // cols, i % cols)
+        for i, card in enumerate(self.cards):
+            self.grid.addWidget(card, i // cols, i % cols)
 
     def refresh(self):
         c = self.c
@@ -378,8 +398,24 @@ class TemporalAnalysis(QScrollArea):
         self.note.setText(
             "選択期間内の実データのみ。欠損箇所では線を接続しません。比率は対応する分子・分母から算出します。分布をクリックすると当日・該当台を表示します。"
         )
-        for chart in self.charts:
-            chart.set_rows(data["monthly" if chart.series_key == "monthly_sales" else "daily"])
+        from html import escape
+
+        for chart, legend in zip(self.charts, self.legends):
+            rows = data["monthly" if chart.series_key == "monthly_sales" else "daily"]
+            chart.set_rows(rows)
+            if chart.key.endswith("_bins"):
+                labels = list(dict.fromkeys(label for row in rows for label in row[chart.key]))
+                legend.setText(
+                    " ／ ".join(
+                        f'<span style="color:{COLORS.get(label,series_color(label).name())}">■</span> {escape(label)}'
+                        for label in labels
+                    )
+                )
+            else:
+                legend.setText(
+                    "取得した期間内の合計値"
+                    + ("（未取得日あり）" if any(r["coverage"]["partial"] for r in rows) else "")
+                )
 
     def navigate(self, payload):
         row, uids = payload

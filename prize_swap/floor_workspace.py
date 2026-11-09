@@ -95,6 +95,7 @@ class FullscreenHost(QDialog):
         row.addWidget(self.clear_analysis)
         self.edit = QCheckBox("配置編集")
         self.edit.setChecked(floor.edit_mode.isChecked())
+        self.edit.setEnabled(not (getattr(floor, "temporal", None) and floor.temporal.active))
         self.edit.toggled.connect(floor.edit_mode.setChecked)
         row.addWidget(self.edit)
         dashboard = QToolButton()
@@ -161,6 +162,10 @@ class FloorWorkspaceMixin(SalesAnalysisMixin):
             p = self.view.mapToScene(self.view.viewport().rect().center())
             self._pre_search_view = (self._zoom, [p.x(), p.y()])
 
+        if getattr(self, "temporal", None) and self.temporal.active and self.edit_mode.isChecked():
+            self.edit_mode.blockSignals(True)
+            self.edit_mode.setChecked(False)
+            self.edit_mode.blockSignals(False)
         self.presentation.update(
             mode=self.layout_mode.currentData(),
             render_mode=self.render_mode.currentData(),

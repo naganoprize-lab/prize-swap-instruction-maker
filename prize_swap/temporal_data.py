@@ -224,10 +224,11 @@ def rollup_samples(samples, spans):
             ref * span if ref is not None and ref > 0 and v["sales"] is not None else None
         )
     denominator = complete_sum(baseline)
-    if all_sales is not None and denominator is not None and denominator > 0:
-        result["ratio"] = all_sales / denominator * 100
-    elif count == 1:
+    if count == 1:
+        # One cumulative report already has an authoritative period average/ratio.
         result["ratio"] = ratio(samples[0])
+    elif all_sales is not None and denominator is not None and denominator > 0:
+        result["ratio"] = all_sales / denominator * 100
     contexts = {(m.product, m.installed_on, m.operation_method) for m in samples}
     details = dict(
         sales_days=sales_days,

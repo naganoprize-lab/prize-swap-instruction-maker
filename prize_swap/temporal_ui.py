@@ -111,8 +111,8 @@ class PeriodControl(QFrame):
         for control, key in ((self.start, "start"), (self.end, "end")):
             if s[key]:
                 control.setDate(QDate.fromString(s[key], "yyyy-MM-dd"))
-        self.start.setEnabled(s["mode"] not in ("live", "month", "last_month"))
-        self.end.setEnabled(s["mode"] == "custom")
+        self.start.setEnabled(s["mode"] in ("day", "custom"))
+        self.end.setEnabled(s["mode"] in ("custom", "7days", "30days"))
         if c.aggregate_busy:
             self.note.setText("集計中…（現在の表示と編集データを保持しています）")
         elif c.aggregate_error:
@@ -342,7 +342,7 @@ class DailySettings(QFrame):
                 self.controller._revision += 1
                 self.controller.reload_documents()
                 if self.controller.active:
-                    self.controller.apply(
+                    self.controller.request_apply(
                         self.controller.settings["mode"],
                         self.controller.settings["start"],
                         self.controller.settings["end"],
@@ -434,6 +434,7 @@ class Timeline(QFrame):
         if self._building:
             return
         old_mode = self.c.settings["play_mode"]
+        old_skip = self.c.settings["skip_missing"]
         self.c.settings.update(
             play_mode=self.mode.currentData(),
             speed=self.speed.currentData(),
@@ -443,8 +444,13 @@ class Timeline(QFrame):
         )
         if self.c.playing:
             self.c.play_timer.setInterval(round(1000 / self.c.settings["speed"]))
-        if old_mode != self.c.settings["play_mode"]:
+        if old_mode != self.c.settings["play_mode"] or old_skip != self.c.settings["skip_missing"]:
+            current = (self.c.frame.start, self.c.frame.end) if self.c.frame else None
             self.set_range()
+            if current in self.c.frames:
+                self.c.seek(self.c.frames.index(current))
+        for node in self.c.floor.nodes.values():
+            node.update()
         self.c.floor.view.viewport().update()
         self.c.floor.schedule_save()
 
@@ -498,8 +504,11 @@ class Timeline(QFrame):
             self.note.setText(c.aggregate_error)
         elif c.active:
             v = c.frame.coverage
+            frame_label = (
+                f"{c.frame_index+1}/{len(c.frames)}フレーム" if c.frames else "再生範囲未設定"
+            )
             self.note.setText(
-                f'{c.frame.start}〜{c.frame.end} ／ {c.frame_index+1}/{len(c.frames)}フレーム ／ 取得{v["acquired"]}/{v["expected"]}日'
+                f'{c.frame.start}〜{c.frame.end} ／ {frame_label} ／ 取得{v["acquired"]}/{v["expected"]}日'
                 + (" ／ 部分集計" if v["partial"] else "")
                 + " ／ ズーム・配置・選択を保持"
             )

@@ -804,9 +804,11 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
         self.update_print_note()
         self.changed.emit()
         if t:
+            t._revision += 1
+            t.reload_documents()
             t.configure_watch()
             if t.settings["mode"] != "live" and t.settings["folder"]:
-                t.apply(t.settings["mode"], t.settings["start"], t.settings["end"])
+                t.request_apply(t.settings["mode"], t.settings["start"], t.settings["end"])
 
     def rebuild(self):
         self._syncing_selection = True

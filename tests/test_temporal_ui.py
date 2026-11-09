@@ -155,3 +155,113 @@ def test_japanese_calendar_period_presets():
     assert period_range("7days", "2026-11-09", "", today) == ("2026-11-03", "2026-11-09")
     assert period_range("month", "", "", today) == ("2026-11-01", "2026-11-30")
     assert period_range("last_month", "", "", today) == ("2026-10-01", "2026-10-31")
+
+
+def test_rapid_background_a_b_a_returns_to_last_requested_day(historical_window):
+    c = historical_window.floor.temporal
+    c.cache.clear()
+    c.request_apply("day", "2026-11-06")
+    c.request_apply("day", "2026-11-08")
+    c.request_apply("day", "2026-11-06")
+    wait_until(lambda: not c.aggregate_busy)
+    assert c.frame.start == "2026-11-06" and not c.aggregate_error
+    assert effective_stat(c.floor.machines[0], "sales") == 100
+
+
+def test_history_details_never_change_current_instruction_map_or_print_source(historical_window):
+    from prize_swap.core import Product
+    from datetime import date
+    from prize_swap.instructions import booths
+
+    w = historical_window
+    f = w.floor
+    c = f.temporal
+    master = c.physical_machines[0]
+    p = Product(date(2026, 11, 9), "次の景品", 24, 1, machines=["R_66"])
+    current = booths([p], f.physical_machines, [], all_entries=True)[0].machine
+    assert current is master and current.product == "現行商品 270"
+    c.apply("day", "2026-11-06")
+    historical = f.machines[0]
+    assert historical.uid == current.uid and historical.product == "景品 100"
+    assert booths([p], f.physical_machines, [], all_entries=True)[0].machine is master
+
+
+def test_preset_refresh_does_not_shift_range_and_camera_stays_on_same_scene_point(
+    historical_window,
+):
+    f = historical_window.floor
+    c = f.temporal
+    assert c.apply("7days", "2026-11-07")
+    first = (c.frame.start, c.frame.end)
+    assert first == ("2026-11-01", "2026-11-07")
+    c.apply(c.settings["mode"], c.settings["start"], c.settings["end"])
+    assert (c.frame.start, c.frame.end) == first
+    f.set_zoom(250, save=False)
+    f.view.centerOn(500, 234)
+    QApplication.processEvents()
+    before = f.view.mapToScene(f.view.viewport().rect().center())
+    c.apply("day", "2026-11-06")
+    QApplication.processEvents()
+    after = f.view.mapToScene(f.view.viewport().rect().center())
+    assert abs(before.x() - after.x()) < 2 and abs(before.y() - after.y()) < 2
+    f.edit_mode.setChecked(True)
+    assert not f.presentation["edit"]
+
+
+def test_date_navigation_does_not_claim_a_new_excel_import_and_daily_audit_is_scoped(
+    historical_window,
+):
+    w = historical_window
+    f = w.floor
+    c = f.temporal
+    recent = deepcopy(w.workflow.data["recent"])
+    snapshot = w.workflow.floor_snapshot()
+    c.apply("day", "2026-11-06")
+    c.apply("day", "2026-11-07")
+    assert w.workflow.data["recent"] == recent
+    assert w.workflow.floor_snapshot() == snapshot
+    f.open_details(f.machines[0].uid)
+    p = f.detail_controller.panel
+    p.confirmed_cost.setValue(200)
+    f.detail_controller.save()
+    entries = [r for r in w.workflow.data["audit_log"] if r["target_type"] == "daily_reference"]
+    assert entries and entries[-1]["target_id"] == f.machines[0].uid
+    assert entries[-1]["before_value"] != entries[-1]["after_value"]
+
+
+def test_pause_cancels_pending_player_frame_and_keeps_last_displayed_day(historical_window):
+    c = historical_window.floor.temporal
+    c.prepare_playback("2026-11-06", "2026-11-07")
+    wait_until(lambda: not c.aggregate_busy)
+    c.cache.clear()
+    c.play()
+    c.next_frame()
+    c.pause()
+    wait_until(lambda: not c._jobs)
+    assert not c.playing and not c.aggregate_busy
+    assert c.frame.start == "2026-11-06" and c.frame_index == 0
+
+
+def test_first_import_opens_full_cumulative_period_instead_of_empty_last_day(tmp_path):
+    folder = tmp_path / "refs"
+    folder.mkdir()
+    workbook(folder / "period.xlsx", day="2026/11/06", end="2026/11/08", sales=900)
+    w = Window(layout_storage=tmp_path / "floor.json")
+    c = w.floor.temporal
+    try:
+        c.set_folder(folder)
+        wait_until(lambda: not c._busy and not c.aggregate_busy)
+        assert (c.frame.start, c.frame.end) == ("2026-11-06", "2026-11-08")
+        assert (
+            c.frame.coverage["acquired"] == 3
+            and effective_stat(c.frame.machines[0], "sales") == 900
+        )
+        from prize_swap.floor_status import ratio
+
+        assert ratio(c.frame.machines[0]) == 100
+    finally:
+        w.dirty = False
+        w.instruction_save_timer.stop()
+        w.floor.timer.stop()
+        w.close()
+        wait_until(lambda: not c._jobs)

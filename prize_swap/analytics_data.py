@@ -180,6 +180,8 @@ def machine_record(machine, reference, settings, assignments=None, history=None,
     if po["cost_details"]["overridden"]:
         for key in ("cost_rate", "cost"):
             record["metric_periods"][key] = record["period"]
+    if getattr(m, "temporal_summary", None):
+        record["metric_periods"] = {k: record["period"] for k in NUMERIC}
     record["cost_details"] = po["cost_details"]
     from .sales_evaluation import evaluation, boundaries
 
@@ -190,8 +192,7 @@ def machine_record(machine, reference, settings, assignments=None, history=None,
     record["temporal_summary"] = deepcopy(getattr(m, "temporal_summary", {}))
     record["score_comparable"] = not (
         not getattr(m, "temporal_summary", {}).get("sales_comparable", True)
-        or
-        (m.analysis or {}).get("quality_issues")
+        or (m.analysis or {}).get("quality_issues")
         or (m.analysis or {}).get("product_context") is not None
         and m.analysis["product_context"] != episode(m)
         or m.match_method == "review"

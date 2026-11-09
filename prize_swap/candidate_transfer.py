@@ -61,7 +61,9 @@ def registered_ids(floor):
     products = [p for p in floor.products() if p.day == floor.selected_day()]
     return {
         b.machine.uid
-        for b in booths(products, floor.machines, floor.number_references, all_entries=True)
+        for b in booths(
+            products, floor.physical_machines, floor.number_references, all_entries=True
+        )
         if b.machine is not None
     }
 

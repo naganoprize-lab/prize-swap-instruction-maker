@@ -178,3 +178,20 @@ def test_daily_folder_reuses_header_profiles_for_renamed_reordered_sheets(tmp_pa
     doc = read_document(p)
     assert doc["snapshot"]["records"]["20111右"]["values"]["sales"] == 6000
     assert doc["layouts"][0]["x"] == 500 and doc["metadata"]["start"] == "2026-11-06"
+
+
+def test_same_day_different_play_denominator_requires_file_choice(tmp_path):
+    from openpyxl import load_workbook
+
+    for name, plays in [("a.xlsx", 100), ("b.xlsx", 200)]:
+        path = workbook(tmp_path / name)
+        b = load_workbook(path)
+        s = b["景品運営分析表"]
+        s.cell(1, 17, "プレイ回数")
+        s.cell(2, 17, plays)
+        b.save(path)
+        b.close()
+    lib = ReferenceLibrary(tmp_path / "cache.sqlite3")
+    lib.scan(tmp_path)
+    assert len({d["content_hash"] for d in lib.documents(tmp_path)}) == 2
+    assert not lib.usable(tmp_path)[0]

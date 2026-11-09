@@ -248,6 +248,8 @@ def resolve_matches(machines, records):
 
 
 def value_source(machine, key):
+    if getattr(machine, "temporal_summary", None) and key in machine.manual_updates:
+        return "手動入力（日別補正）"
     if key in ("cost_rate", "cost"):
         from .costing import cost_profile
 
