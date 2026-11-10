@@ -34,7 +34,9 @@ def test_fullhd_layout_in_isolated_qt_process(tmp_path, scale):
         [sys.executable, str(root / "scripts/verify_fullhd_layout.py"), str(output)],
         cwd=tmp_path,
         env=os.environ
-        | {"QT_QPA_PLATFORM": f"offscreen:configfile={config}", "QT_SCALE_FACTOR": scale},
+            # Qt splits platform arguments at colons, including Windows C:.
+            # The child runs in tmp_path, so a relative filename is portable.
+            | {"QT_QPA_PLATFORM": f"offscreen:configfile={config.name}", "QT_SCALE_FACTOR": scale},
         capture_output=True,
         text=True,
         timeout=90,
