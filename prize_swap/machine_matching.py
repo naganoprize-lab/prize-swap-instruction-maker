@@ -54,14 +54,18 @@ def clean(value):
         .replace("－", "-")
         .replace("−", "-")
         .replace("‐", "-")
+        .replace("‑", "-")
+        .replace("‒", "-")
+        .replace("–", "-")
+        .replace("—", "-")
     )
 
 
 def normalize_number(value, allow_bare=False):
     text = clean(value)
-    m = re.fullmatch(r"(\d+)-(01|02)", text)
+    m = re.fullmatch(r"([0-9]+)-0?([12])", text)
     if m:
-        return m[1] + ("左" if m[2] == "01" else "右")
+        return m[1] + ("左" if m[2] == "1" else "右")
     if re.fullmatch(r"\d+[左右]", text):
         return text
     if allow_bare and re.fullmatch(r"\d+", text):
@@ -112,7 +116,7 @@ def reference_index(rows):
     problems = defaultdict(list)
     for row in rows:
         key = normalize_reference(row["source_key"])
-        number = normalize_number(row["number"])
+        number = normalize_number(row["number"], allow_bare=True)
         if not key:
             continue
         if not number:
@@ -184,17 +188,29 @@ class Match:
     matched: bool = False
 
 
-def resolve_matches(machines, records):
+def resolve_snapshot(machines, snapshot):
+    """Rejected rows still count as candidates, never as usable sales."""
+    return resolve_matches(
+        machines, snapshot["records"], [r["number"] for r in snapshot.get("errors", [])]
+    )
+
+
+def resolve_matches(machines, records, rejected_numbers=()):
     results = {}
     claims = defaultdict(list)
     keys = defaultdict(list)
+    by_base = defaultdict(list)
+    for number in set(records) | set(rejected_numbers):
+        base = re.fullmatch(r"([0-9]+)[左右]", number)
+        if base:
+            by_base[base[1]].append(number)
     for m in machines:
         if normalize_reference(m.source_key):
             keys[normalize_reference(m.source_key)].append(m.uid)
     for m in machines:
         manual = getattr(m, "manual_number", None)
         direct = (
-            normalize_number(m.number)
+            normalize_number(m.number or getattr(m, "direct_number_raw", ""), allow_bare=True)
             if getattr(m, "number_origin", "direct") == "direct"
             else None
         )
@@ -212,12 +228,23 @@ def resolve_matches(machines, records):
         else:
             if m.number and getattr(m, "number_origin", "direct") == "direct" and not direct:
                 problem = "機械番号が不正、または左右が不明です。"
-            if getattr(m, "direct_number_raw", "") and not normalize_number(m.direct_number_raw):
+            if getattr(m, "direct_number_raw", "") and not normalize_number(
+                m.direct_number_raw, allow_bare=True
+            ):
                 problem = "レイアウトの機械番号が不正、または左右が不明です。"
             if direct and ref and direct != ref:
                 problem = "直接の機械番号と管理ナンバー参考表の対応が異なります。"
             if len(keys.get(normalize_reference(m.source_key), [])) > 1:
                 problem = "同じ管理ナンバーのマシン枠が複数あります。"
+        # Bare reference numbers are valid for single-booth machines. Resolve
+        # them only against one actual sales key; never invent a left/right side
+        # or choose between multiple records. Keep the original reference value.
+        if not problem and number and number.isascii() and number.isdigit():
+            candidates = by_base.get(number, [])
+            if len(candidates) == 1:
+                number = candidates[0]
+            elif len(candidates) > 1:
+                problem = "左右なしの1ブース番号に売上の左右両方があり、複数候補のため自動照合できません。"
         if problem:
             results[m.uid] = Match("", "review", problem)
             continue
@@ -242,7 +269,9 @@ def resolve_matches(machines, records):
         if len(uids) > 1:
             for uid in uids:
                 results[uid] = Match(
-                    "", "review", f"機械番号 {number} が複数のマシン枠へ割り当てられています。"
+                    "",
+                    "review",
+                    f"機械番号 {number} が複数のマシン枠へ割り当てられています。",
                 )
     return results
 
@@ -326,9 +355,15 @@ def metric_info(machine, key):
     )
     if source.startswith("手動入力"):
         updated = machine.manual_updates.get(key) or max(
-            (machine.manual_updates.get(k, "") for k in ("sales", "average")), default=""
+            (machine.manual_updates.get(k, "") for k in ("sales", "average")),
+            default="",
         )
-    return dict(value=value, source=source, updated_at=updated, match_method=machine.match_method)
+    return dict(
+        value=value,
+        source=source,
+        updated_at=updated,
+        match_method=machine.match_method,
+    )
 
 
 def machine_updated_at(machine):

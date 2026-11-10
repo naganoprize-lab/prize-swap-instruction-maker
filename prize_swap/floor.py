@@ -345,6 +345,7 @@ class FloorView(QGraphicsView):
 
         self.setBackgroundBrush(QColor(tokens()["canvas"]))
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
 
     def wheelEvent(self, event):
@@ -656,9 +657,13 @@ class FloorWidget(FloorWorkspaceMixin, QWidget):
                 not compact and not self._fullscreen_host and not self._fullscreen_transition
             )
             if hasattr(self, "selection_bar") and not self._fullscreen_host:
-                short = self.height() < 420
+                short = self.height() < 520
                 self.selection_bar.setVisible(not short)
                 self.selection_popup.setVisible(short)
+                compact_tools = self.width() < 1150 or self.height() < 520
+                for control in self.compact_toolbar_controls:
+                    control.setVisible(not compact_tools)
+                self.analysis_import_button.setText("実績読込" if compact_tools else "売上分析Excel読込")
 
     def assignments(self):
         return self._assignments

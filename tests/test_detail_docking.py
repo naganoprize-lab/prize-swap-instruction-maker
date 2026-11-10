@@ -225,3 +225,19 @@ def test_first_open_keeps_requested_half_ratio_after_transient_native_geometry(w
     QTest.qWait(120)
     assert 0.45 < c.dock.width() / c.host.width() < 0.55
     assert 0.45 < w.floor.detail_settings["ratio"] < 0.55
+
+
+def test_native_float_signal_releases_docked_width_limit(window):
+    f = window.floor
+    f.open_details(f.machines[0].uid)
+    QTest.qWait(80)
+    c = f.detail_controller
+    assert c.dock.maximumWidth() <= c.host.width() - 280
+    # This signal path is also used by a native title-bar drag, rather than
+    # invoking the controller's position selector.
+    c.dock.setFloating(True)
+    QTest.qWait(30)
+    assert c.dock.maximumWidth() > c.host.width()
+    c.dock.setFloating(False)
+    QTest.qWait(30)
+    assert c.dock.maximumWidth() <= c.host.width() - 280

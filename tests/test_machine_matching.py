@@ -81,7 +81,6 @@ def test_direct_priority_and_unmatched_layout_metric_fallback(tmp_path):
     [
         [("L_66", "20111右"), ("L_66", "20088左")],
         [("L_66", "20111右"), ("R_66", "20111右")],
-        [("L_66", "20111")],
         [("L_66", "20111-03")],
     ],
 )

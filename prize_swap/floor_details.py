@@ -24,9 +24,21 @@ from PySide6.QtWidgets import (
 )
 from .core import AppError, LIMITS, METHODS, quantity
 from .floor_data import validate_machines
-from .machine_matching import display_identity, machine_key, MATCH_LABELS, value_source, metric_info
+from .machine_matching import (
+    display_identity,
+    machine_key,
+    MATCH_LABELS,
+    value_source,
+    metric_info,
+)
 from .machine_matching import machine_updated_at
-from .floor_status import money, ratio_text, days_text, effective_stat, reference_average
+from .floor_status import (
+    money,
+    ratio_text,
+    days_text,
+    effective_stat,
+    reference_average,
+)
 from .methods import editor_state, set_allocations, format_counts, plans
 from .methods_editor import MethodsCombo
 
@@ -165,6 +177,8 @@ class MachineDetailPanel(QWidget):
         scroll.setWidgetResizable(True)
         panel = QWidget()
         form = QFormLayout(panel)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         scroll.setWidget(panel)
         tabs.addTab(scroll, "現在投入中の商品")
         self.values = {}
@@ -185,7 +199,9 @@ class MachineDetailPanel(QWidget):
                 (
                     "景品運営分析表"
                     if machine.analysis
-                    else "手動入力・レイアウト情報" if machine.manual_updates else "レイアウト由来"
+                    else (
+                        "手動入力・レイアウト情報" if machine.manual_updates else "レイアウト由来"
+                    )
                 ),
             ),
             ("ratio_source", "アベ比の取得元", value_source(machine, "ratio")),
@@ -358,7 +374,8 @@ class MachineDetailPanel(QWidget):
         self.method.lineEdit().setPlaceholderText("— / 自由記載")
         form.addRow("現在の運営方法", self.method)
         form.addRow(
-            "現在商品の予定ブース数", QLabel("—（Excelから未取得。入替予定は別タブで編集）")
+            "現在商品の予定ブース数",
+            QLabel("—（Excelから未取得。入替予定は別タブで編集）"),
         )
         edit = QPushButton("番号・稼働値を編集")
         form.addRow(edit)
@@ -432,22 +449,38 @@ class MachineDetailPanel(QWidget):
 
     def update_responsive_layout(self):
         if hasattr(self, "splitter"):
-            columns = 1 if self.width() < 500 else 2 if self.width() < 960 else 3
+            columns = 1 if self.width() < 500 else 2 if self.width() <= 800 else 3
             if columns != getattr(self, "_kpi_columns", None):
                 for i, card in enumerate(self.kpis.values()):
                     self.kpi_grid.removeWidget(card)
                     self.kpi_grid.addWidget(card, i // columns, i % columns)
                 self._kpi_columns = columns
             orientation = (
-                Qt.Orientation.Vertical if self.width() < 960 else Qt.Orientation.Horizontal
+                Qt.Orientation.Vertical if self.width() <= 800 else Qt.Orientation.Horizontal
             )
             reflow = orientation != self.splitter.orientation() or not getattr(
                 self, "_split_initialized", False
             )
             self.splitter.setOrientation(orientation)
-            self.splitter.setMinimumHeight(500 if self.width() < 960 else 320)
+            # On narrow docks show the chart after the KPIs, before the long
+            # editing form. On wider docks keep the form on the left.
+            self.splitter.insertWidget(0 if self.width() <= 800 else 1, self.evaluation_panel)
+            # A single outer scroll area owns the full content height. Never
+            # squeeze the radar and form into separately scrolling viewports.
+            content_height = sum(
+                self.splitter.widget(i).minimumSizeHint().height()
+                for i in range(self.splitter.count())
+            )
+            self.splitter.setMinimumHeight(
+                content_height
+                if self.width() <= 800
+                else max(
+                    self.splitter.widget(i).minimumSizeHint().height()
+                    for i in range(self.splitter.count())
+                )
+            )
             if reflow:
-                self.splitter.setSizes([320, 400] if self.width() < 960 else [560, 440])
+                self.splitter.setSizes([900, 700] if self.width() <= 800 else [560, 440])
                 self._split_initialized = True
             self.analysis_scope.setMinimumContentsLength(3)
             self.analysis_scope.setSizeAdjustPolicy(

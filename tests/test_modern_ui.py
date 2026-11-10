@@ -151,3 +151,23 @@ def test_product_table_sorts_numeric_and_names_without_changing_print_order(wind
     window.table.sortByColumn(3, Qt.SortOrder.AscendingOrder)
     assert window.proxy.index(0, 3).data() == "商品A"
     assert [p.name for p in window.visible] == ["商品B", "商品A"]
+
+
+def test_compact_toolbar_menu_preserves_layout_modes_and_check_state(window):
+    from PySide6.QtWidgets import QToolButton
+
+    window.resize(1100, 700)
+    window.tabs.setCurrentWidget(window.floor)
+    QApplication.processEvents()
+    f = window.floor
+    menu = next(b.menu() for b in f.findChildren(QToolButton) if b.text() == "表示設定")
+    actions = {a.text(): a for a in menu.actions()}
+    for index in (2, 1, 0):
+        actions["配置：" + f.layout_mode.itemText(index)].trigger()
+        assert f.layout_mode.currentIndex() == index
+    for label, control in [("配置編集の切替", f.edit_mode), ("凡例の表示切替", f.legend_toggle)]:
+        before = control.isChecked()
+        actions[label].trigger()
+        assert control.isChecked() != before and actions[label].isChecked() == control.isChecked()
+        control.setChecked(before)
+        assert actions[label].isChecked() == before

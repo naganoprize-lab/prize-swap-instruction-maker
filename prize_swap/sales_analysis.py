@@ -263,9 +263,18 @@ def load_analysis(path, tolerance=None):
         if sheet.max_row > 10001:
             raise AppError("売上分析は10000行以下で読み込んでください。")
         rows = list(sheet.iter_rows())
-        labels = {canonical(c.value).replace("/", ""): i for i, c in enumerate(rows[0])}
+        labels = {}
+        for i, c in enumerate(rows[0]):
+            label = canonical(c.value).replace("/", "")
+            if label and label in labels:
+                raise AppError(f"ヘッダー「{c.value}」が重複しています。列を一意にしてください。")
+            labels[label] = i
         columns = {}
-        for key, label in {"number": "機器番号", "reference_name": "商品名", **METRICS}.items():
+        for key, label in {
+            "number": "機器番号",
+            "reference_name": "商品名",
+            **METRICS,
+        }.items():
             match = labels.get(canonical(label).replace("/", ""))
             if match is None:
                 raise AppError(f"ヘッダー「{label}」がありません。")
@@ -321,14 +330,14 @@ def load_analysis(path, tolerance=None):
                     result["ignored_rows"] += 1
                     # Ancillary conditions have no numeric sales; malformed IDs with actual values are reported.
                     if (
-                        raw is not None
-                        and re.match(r"^\s*\d", str(raw))
-                        and numeric(cell("sales")) is not None
-                    ):
-                        result["unmatched_rows"].append(dict(number=str(raw), row=row_index))
+                        re.match(r"^\s*\d", str(raw or ""))
+                        or cell("machine_name") not in (None, "")
+                        and cell("reference_name") not in (None, "")
+                    ) and numeric(cell("sales")) is not None:
+                        result["unmatched_rows"].append(dict(number=str(raw or ""), row=row_index))
                         result["issues"].append(
                             issue(
-                                str(raw),
+                                str(raw or ""),
                                 "number_format",
                                 "機器番号を正規化できません。",
                                 "エラー",
@@ -337,7 +346,7 @@ def load_analysis(path, tolerance=None):
                         )
                 continue
             values = {
-                k: ratio_value(cell(k)) if k in ("po_rate", "cost_rate") else numeric(cell(k))
+                k: (ratio_value(cell(k)) if k in ("po_rate", "cost_rate") else numeric(cell(k)))
                 for k in METRICS
             }
             try:
@@ -494,9 +503,9 @@ def apply_snapshot(machines, snapshot):
     records = snapshot["records"]
     if records:
         ensure_references(machines)
-    from .machine_matching import resolve_matches
+    from .machine_matching import resolve_snapshot
 
-    matches = resolve_matches(machines, records)
+    matches = resolve_snapshot(machines, snapshot)
     for machine in machines:
         match = matches[machine.uid]
         machine.resolved_number = match.number
@@ -505,11 +514,11 @@ def apply_snapshot(machines, snapshot):
         record = records.get(match.number) if match.matched else None
         machine.analysis = (
             dict(
-                values=deepcopy(record["values"]) if record else {k: None for k in METRICS},
+                values=(deepcopy(record["values"]) if record else {k: None for k in METRICS}),
                 po_inputs=deepcopy(record.get("po_inputs", {})) if record else {},
                 po_definition=snapshot.get("po_definition", "unknown"),
                 machine_name=record.get("machine_name", "") if record else "",
-                reference_product_name=record.get("reference_name", "") if record else "",
+                reference_product_name=(record.get("reference_name", "") if record else ""),
                 imported_ratio=record.get("imported_ratio") if record else None,
                 file_name=snapshot["file_name"],
                 loaded_at=snapshot["loaded_at"],
@@ -518,7 +527,7 @@ def apply_snapshot(machines, snapshot):
                 period_end=snapshot.get("period_end"),
                 extracted_at=snapshot.get("extracted_at"),
                 fingerprint=snapshot.get("fingerprint", ""),
-                product_context=deepcopy(record.get("product_context")) if record else None,
+                product_context=(deepcopy(record.get("product_context")) if record else None),
                 operation_context=record.get("operation_context") if record else None,
                 quality_issues=[
                     i
@@ -532,9 +541,9 @@ def apply_snapshot(machines, snapshot):
 
 
 def import_summary(machines, snapshot):
-    from .machine_matching import resolve_matches
+    from .machine_matching import resolve_snapshot
 
-    matches = resolve_matches(machines, snapshot["records"])
+    matches = resolve_snapshot(machines, snapshot)
     numbers = {r.number for r in matches.values() if r.number}
     matched = {r.number for r in matches.values() if r.matched}
     unmatched = sorted(set(snapshot["records"]) - matched)

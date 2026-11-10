@@ -396,6 +396,7 @@ def import_layout(path, with_references=False, sheet_name="投入中レイアウ
         ws = wb[sheet_name]
         from .machine_matching import (
             read_reference_rows,
+            clean,
             reference_index,
             normalize_reference,
             normalize_number,
@@ -419,6 +420,19 @@ def import_layout(path, with_references=False, sheet_name="投入中レイアウ
             if isinstance(c.value, str)
             and normalize_number(c.value) is not None
             and not in_reference_card(c)
+            # Short suffixes also occur in layout annotations (e.g. "11-1"
+            # beside 設置日/設定2). Only broaden automatic card discovery when
+            # the same column actually contains a card's metric labels.
+            and (
+                not re.fullmatch(r"[0-9]+-[12]", clean(c.value))
+                or any(
+                    unicodedata.normalize("NFKC", str(ws.cell(r, c.column).value or "")).replace(
+                        " ", ""
+                    )
+                    in ("売上/アベレージ", "PO率/アベ比", "売上金額", "機械番号", "機器番号")
+                    for r in range(c.row + 1, min(ws.max_row, c.row + 4) + 1)
+                )
+            )
         ]
         cells = sorted(reference_cells + direct_cells, key=lambda c: (c.row, c.column))
         if not cells:

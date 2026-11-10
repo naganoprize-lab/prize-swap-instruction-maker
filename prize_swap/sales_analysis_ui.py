@@ -48,9 +48,9 @@ class SalesAnalysisMixin:
             snapshot.update(
                 {k: existing[k] for k in ("period_start", "period_end", "period_source")}
             )
-        from .machine_matching import resolve_matches
+        from .machine_matching import resolve_snapshot
 
-        matches = resolve_matches(self.machines, snapshot["records"])
+        matches = resolve_snapshot(self.machines, snapshot)
         by_number = {matches[m.uid].number: m for m in self.machines if matches[m.uid].matched}
         if existing and snapshot.get("po_definition", "unknown") == "unknown":
             snapshot["po_definition"] = existing.get("po_definition", "unknown")
@@ -131,8 +131,12 @@ class SalesAnalysisMixin:
 
     def show_analysis_report(self, *_):
         dialog = QDialog(self)
+        dialog.setObjectName("analysisImportReport")
         dialog.setWindowTitle("売上分析Excelの読込結果")
-        dialog.resize(1000, 650)
+        available = self.screen().availableGeometry()
+        dialog.resize(min(1100, available.width() - 32), min(720, available.height() - 48))
+        dialog.setMaximumSize(available.width() - 16, available.height() - 32)
+        dialog.setSizeGripEnabled(True)
         layout = QVBoxLayout(dialog)
         summary = QLabel(self.analysis_summary_text())
         summary.setWordWrap(True)
@@ -162,7 +166,12 @@ class SalesAnalysisMixin:
 
                     item = ValueItem(value)
                     widget.setItem(i, j, item)
-            widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            widget.horizontalHeader().setStretchLastSection(True)
+            widget.setWordWrap(False)
+            widget.setMinimumSize(0, 0)
+            for column in range(len(headers)):
+                widget.setColumnWidth(column, 220 if column >= 3 else 155)
             widget.setSortingEnabled(True)
 
             def filter_rows(text):
@@ -200,22 +209,72 @@ class SalesAnalysisMixin:
         )
         errors = [(r["row"], r["number"], r["message"]) for r in self.analysis_state["errors"]]
         tabs.addTab(
-            table(["Excel行", "番号", "読込エラー"], errors), f"読込エラー（{len(errors)}件）"
+            table(["Excel行", "番号", "読込エラー"], errors),
+            f"読込エラー（{len(errors)}件）",
         )
         layout.addWidget(
             QLabel(
                 f"付随情報などの除外：{info['ignored']}行 ／ 重複：{info['duplicates']}行（同一値は一度だけ、異なる値の重複は照合せず除外）"
             )
         )
+        from .reconciliation_report import (
+            KIND_LABELS,
+            problem_category,
+            reconciliation_rows,
+        )
+
         issues = [
-            (i["number"], i["severity"], i["kind"], i["message"], i["remedy"])
+            (
+                i["number"],
+                i["severity"],
+                (
+                    problem_category(i["message"])
+                    if i["kind"] == "matching"
+                    else KIND_LABELS.get(i["kind"], i["kind"])
+                ),
+                i["message"],
+                i["remedy"],
+            )
             for i in info["issues"]
         ]
+        issue_table = table(["機器番号", "重要度", "種類", "内容", "対応方法"], issues)
+        from PySide6.QtGui import QColor
+        from .theme import tokens, manager
+
+        # The Japanese severity text remains readable without relying on colour.
+        for row in range(issue_table.rowCount()):
+            item = issue_table.item(row, 1)
+            item.setForeground(
+                QColor(
+                    tokens()["danger"]
+                    if item.text() == "エラー"
+                    else (
+                        ("#FCD34D" if manager().dark else "#946200")
+                        if item.text() == "警告"
+                        else tokens()["muted"]
+                    )
+                )
+            )
         tabs.addTab(
-            table(["機器番号", "重要度", "種類", "内容", "対応方法"], issues),
+            issue_table,
             f"異常・情報（{len(issues)}件）",
         )
+        tabs.addTab(
+            table(
+                [
+                    "元の機器番号",
+                    "正規化後の番号",
+                    "照合先（管理番号）",
+                    "照合状態",
+                    "理由",
+                    "対応方法",
+                ],
+                reconciliation_rows(self.machines, self.analysis_state, self.number_references),
+            ),
+            "照合明細",
+        )
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("閉じる")
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         dialog.exec()

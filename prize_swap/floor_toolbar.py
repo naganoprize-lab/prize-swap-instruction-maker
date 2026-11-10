@@ -19,11 +19,14 @@ from PySide6.QtWidgets import (
 
 def build_toolbar(owner, layout):
     owner.toolbar_rows = []
+    owner.compact_toolbar_controls = []
 
     def row():
         widget = QWidget()
         widget.setObjectName("floorTools")
-        line = QHBoxLayout(widget)
+        from .control_flow import ControlFlow
+
+        line = ControlFlow(widget)
         line.setContentsMargins(0, 0, 0, 0)
         line.setSpacing(4)
         layout.addWidget(widget)
@@ -66,11 +69,13 @@ def build_toolbar(owner, layout):
             ("保存", owner.save_dialog),
         ],
     )
-    button(top, "売上分析Excel読込", owner.import_analysis_dialog)
+    owner.analysis_import_button = button(top, "売上分析Excel読込", owner.import_analysis_dialog)
+    owner.analysis_import_button.setToolTip("売上分析Excel読込")
     menu(
         top,
         "分析",
         [
+            ("選択マシンの詳細", owner.open_selected_details),
             ("実績読込結果・異常一覧", owner.show_analysis_report),
             ("管理ナンバー照合・手動確認", owner.show_matching),
             ("入替候補", owner.show_candidates),
@@ -102,9 +107,13 @@ def build_toolbar(owner, layout):
     owner.edit_mode.setToolTip("オン：ドラッグで移動・四隅でサイズ変更。オフ：クリックで詳細。")
     top.addWidget(owner.edit_mode)
     owner.edit_mode.toggled.connect(owner.presentation_changed)
-    button(top, "詳細", owner.open_selected_details)
+    detail_button = button(top, "詳細", owner.open_selected_details)
     owner.layout_mode = QComboBox()
-    for label, key in (("実配置", "actual"), ("見やすさ優先", "readable"), ("一覧", "list")):
+    for label, key in (
+        ("実配置", "actual"),
+        ("見やすさ優先", "readable"),
+        ("一覧", "list"),
+    ):
         owner.layout_mode.addItem(label, key)
     top.addWidget(owner.layout_mode)
     owner.render_mode = QComboBox()
@@ -146,15 +155,31 @@ def build_toolbar(owner, layout):
     owner.reference_date.setDateRange(QDate(1900, 1, 1), QDate(9999, 12, 31))
     top.addWidget(owner.reference_date)
     owner.reference_date.dateChanged.connect(owner.reference_changed)
-    button(top, "今日", owner.today)
-    top.addStretch()
+    today_button = button(top, "今日", owner.today)
     owner.fullscreen_button = button(top, "全画面", owner.toggle_fullscreen)
+    owner.compact_toolbar_controls.extend(
+        [
+            owner.edit_mode,
+            detail_button,
+            owner.layout_mode,
+            owner.render_mode,
+            today_button,
+            owner.fullscreen_button,
+        ]
+    )
     from .selection import selection_controls
 
     selection_bar = selection_controls(owner)
     owner.selection_bar = selection_bar
     owner.selection_popup = QToolButton()
-    owner.selection_popup.setText("選択")
+
+    def selection_summary():
+        owner.selection_popup.setText(
+            f"選択（{len(owner.selection_state.selected_machine_keys)}台）"
+        )
+
+    owner.selection_state.changed.connect(selection_summary)
+    selection_summary()
     selection_menu = QMenu(owner.selection_popup)
     selection_action = QWidgetAction(selection_menu)
     selection_action.setDefaultWidget(selection_controls(owner))
@@ -169,16 +194,20 @@ def build_toolbar(owner, layout):
     owner.floor_search = QLineEdit()
     owner.floor_search.setPlaceholderText("番号・商品・機種・方法を検索")
     owner.floor_search.setClearButtonEnabled(True)
-    second.addWidget(owner.floor_search, 1)
+    owner.floor_search.setMinimumWidth(160)
+    owner.floor_search.setMaximumWidth(360)
+    second.addWidget(owner.floor_search)
     owner.floor_search.textChanged.connect(owner.presentation_changed)
     owner.search_count = QLabel("検索結果：0 / 0ブース")
     owner.search_count.setMinimumWidth(0)
     second.addWidget(owner.search_count)
-    button(second, "前へ", lambda: owner.next_match(-1))
-    button(second, "次へ", lambda: owner.next_match(1))
+    owner.compact_toolbar_controls.append(button(second, "前へ", lambda: owner.next_match(-1)))
+    owner.compact_toolbar_controls.append(button(second, "次へ", lambda: owner.next_match(1)))
     conditions = QToolButton()
     conditions.setText("強調条件")
     conditions_menu = QMenu(conditions)
+    conditions_menu.addAction("検索結果の前へ", lambda: owner.next_match(-1))
+    conditions_menu.addAction("検索結果の次へ", lambda: owner.next_match(1))
     conditions_page = QWidget()
     conditions_layout = QVBoxLayout(conditions_page)
     action = QWidgetAction(conditions_menu)
@@ -223,14 +252,33 @@ def build_toolbar(owner, layout):
     second.addWidget(owner.zoom_combo)
     owner.zoom_combo.activated.connect(owner.zoom_entered)
     owner.zoom_combo.lineEdit().editingFinished.connect(owner.zoom_entered)
-    button(second, "−", lambda: owner.set_zoom(owner.view.transform().m11() * 100 / 1.15))
-    button(second, "＋", lambda: owner.set_zoom(owner.view.transform().m11() * 100 * 1.15))
+    owner.compact_toolbar_controls.append(
+        button(second, "−", lambda: owner.set_zoom(owner.view.transform().m11() * 100 / 1.15))
+    )
+    owner.compact_toolbar_controls.append(
+        button(second, "＋", lambda: owner.set_zoom(owner.view.transform().m11() * 100 * 1.15))
+    )
     button(second, "全体", owner.fit)
     button(second, "選択へ", owner.zoom_selected)
-    menu(
+    view_menu = menu(
         second,
         "表示設定",
         [
+            ("全画面の切替", owner.toggle_fullscreen),
+            ("配置編集の切替", owner.edit_mode.toggle),
+            (
+                "描画モードの切替",
+                lambda: owner.render_mode.setCurrentIndex(1 - owner.render_mode.currentIndex()),
+            ),
+            ("今日を基準日にする", owner.today),
+            *[
+                (
+                    "配置：" + owner.layout_mode.itemText(i),
+                    lambda checked=False, i=i: owner.layout_mode.setCurrentIndex(i),
+                )
+                for i in range(owner.layout_mode.count())
+            ],
+            ("凡例の表示切替", lambda: owner.legend_toggle.toggle()),
             ("分析・判定・色・照合の設定", owner.analysis_settings_dialog),
             ("カード・文字サイズ", owner.card_settings),
             ("表示カードのプリセット", owner.presentation_settings),
@@ -243,7 +291,16 @@ def build_toolbar(owner, layout):
     owner.legend_toggle = QCheckBox("凡例")
     owner.legend_toggle.setChecked(True)
     second.addWidget(owner.legend_toggle)
+    owner.compact_toolbar_controls.append(owner.legend_toggle)
     owner.legend_toggle.toggled.connect(owner.presentation_changed)
+    for label, control in (
+        ("配置編集の切替", owner.edit_mode),
+        ("凡例の表示切替", owner.legend_toggle),
+    ):
+        action = next(action for action in view_menu.actions() if action.text() == label)
+        action.setCheckable(True)
+        action.setChecked(control.isChecked())
+        control.toggled.connect(action.setChecked)
     menu(
         second,
         "印刷",

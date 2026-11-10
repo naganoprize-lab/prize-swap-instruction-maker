@@ -170,12 +170,19 @@ def record_issues(number, values, row, tolerance):
 
 
 def reconcile(machines, snapshot, previous=None):
-    dynamic = {"unmatched", "absent", "machine_name", "product_name", "matching"}
+    dynamic = {
+        "unmatched",
+        "absent",
+        "machine_name",
+        "product_name",
+        "matching",
+        "layout_reference_missing",
+    }
     issues = [i for i in snapshot.get("issues", []) if i["kind"] not in dynamic]
     records = snapshot["records"]
-    from .machine_matching import resolve_matches
+    from .machine_matching import resolve_snapshot
 
-    matches = resolve_matches(machines, records)
+    matches = resolve_snapshot(machines, snapshot)
     known = {r.number: m for m in machines if (r := matches[m.uid]).number}
     for m in machines:
         r = matches[m.uid]
@@ -187,6 +194,15 @@ def reconcile(machines, snapshot, previous=None):
                     r.message,
                     "警告",
                     remedy="管理ナンバー照合画面で対応を確認・修正してください。",
+                )
+            )
+        elif not r.number:
+            issues.append(
+                issue(
+                    m.source_key or m.number or m.uid,
+                    "layout_reference_missing",
+                    "レイアウト側の管理番号に対応する機器番号が未登録です。",
+                    remedy="管理番号参考表で対応を確認してください。番号や左右は推測しません。",
                 )
             )
     for number, record in records.items():

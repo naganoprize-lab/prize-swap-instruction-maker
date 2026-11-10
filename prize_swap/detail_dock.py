@@ -44,6 +44,13 @@ def validate_preferences(value=None):
 
 
 class DetailHost(QMainWindow):
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "controller"):
+            dock = self.controller.dock
+            if not dock.isFloating():
+                dock.setMaximumWidth(max(dock.minimumWidth(), self.width() - 280))
+
     def showEvent(self, event):
         super().showEvent(event)
         if hasattr(self, "controller"):
@@ -63,9 +70,13 @@ class DetailDock(QDockWidget):
 
     def closeEvent(self, event):
         if self.controller.protect_edits():
+            self.controller.owner.capture_view(False)
             self.controller.owner.detail_settings["open"] = False
             super().closeEvent(event)
             self.controller.capture()
+            owner = self.controller.owner
+            QTimer.singleShot(0, owner, owner.restore_view_center)
+            QTimer.singleShot(50, owner, owner.restore_view_center)
         else:
             event.ignore()
 
@@ -116,9 +127,17 @@ class DetailDockController:
             lambda *_: self.set_position(self.position.currentData())
         )
         self.dock.dockLocationChanged.connect(self.location_changed)
-        self.dock.topLevelChanged.connect(lambda *_: self.capture())
+        self.dock.topLevelChanged.connect(self.floating_changed)
         self.dock.visibilityChanged.connect(lambda *_: self.capture())
         owner.changed.connect(self.refresh_current)
+
+    def floating_changed(self, floating):
+        # Native title-bar dragging must follow the same bounds as the
+        # position selector, including when the host itself did not resize.
+        self.dock.setMaximumWidth(
+            16777215 if floating else max(self.dock.minimumWidth(), self.host.width() - 280)
+        )
+        self.capture()
 
     def location_changed(self, area):
         if not self._restoring:
@@ -179,6 +198,7 @@ class DetailDockController:
         self._restoring = True
         self.owner.detail_settings["position"] = position
         if position == "floating":
+            self.dock.setMaximumWidth(16777215)
             self.dock.setFloating(True)
             g = self.owner.detail_settings["geometry"]
             if g:
@@ -208,6 +228,7 @@ class DetailDockController:
                 self.dock.move(area.topLeft())
         else:
             self.dock.setFloating(False)
+            self.dock.setMaximumWidth(max(self.dock.minimumWidth(), self.host.width() - 280))
             self.host.addDockWidget(
                 (
                     Qt.DockWidgetArea.LeftDockWidgetArea
