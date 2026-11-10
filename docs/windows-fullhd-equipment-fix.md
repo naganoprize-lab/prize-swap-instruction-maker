@@ -94,7 +94,7 @@ ZIPスキーマ・パッケージバージョン・Androidソース・QRのUID�
 
 ## Windows実機で残る確認とEXEビルド
 
-今回のGitHub pushとCIは未承認のため未実行です。このLinux環境でWindows EXEのビルド成功や実プリンター印刷を確認したとは報告しません。既存の `Windows portable EXE` ワークフローには全pytestとWindowsネイティブDPI検証があります。承認後に専用ブランチをpushし、ビルドと成果物を確認する必要があります。mainへの直接push・マージは行いません。
+ユーザーの明示承認後に専用ブランチをpushし、Windows CI #58で全体pytest・Windowsネイティブ画面検証・EXE生成・生成したEXEの起動／画面検証が成功しました。実行URL・対象コミット・成果物リンクは [Windows CI／EXE取得結果](windows-fullhd-ci-report.md) を参照してください。mainへのpush・マージは行っていません。実プリンターや利用者の店舗PCでの操作は、引き続き下記手順で確認してください。
 
 実機では次を確認してください。
 
